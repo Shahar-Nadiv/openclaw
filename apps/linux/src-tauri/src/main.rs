@@ -1436,6 +1436,7 @@ fn main() {
         colai::colai_frontmost,
         colai::colai_reserved,
         colai::colai_agents,
+        colai::colai_sessions,
         colai::colai_summon,
         colai::colai_release,
         colai::colai_open_settings

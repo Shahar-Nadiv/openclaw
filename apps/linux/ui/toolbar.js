@@ -124,6 +124,11 @@ function receiptFor(tool, surface, agent) {
   };
 }
 
+/** A count with its noun, so the rail reads as a sentence rather than a gauge. */
+function counted(many, noun) {
+  return `${many} ${noun}${many === 1 ? "" : "s"}`;
+}
+
 /* ── browser bindings ─────────────────────────────────────────────────────── */
 
 const tauri = window["__TAURI__"];
@@ -177,10 +182,18 @@ const state = {
   surface: null,
   reserved: NOTHING_RESERVED,
   agents: [],
-  // Null while the list is good, a message while the Gateway could not be asked. The
+  sessions: [],
+  // Null while the lists are good, a message while the Gateway could not be asked. The
   // two are different facts and the rail says which.
-  agentsTrouble: null,
-  receivingId: null,
+  whoTrouble: null,
+  // Who gets what you point at. An agent is somebody who could answer; a session is a
+  // conversation already underway. Which of the two it is has to be carried, because
+  // the same name can belong to both and the receipt has to be able to say.
+  //
+  // The name is kept beside the id on purpose. The menu shows recent conversations, so
+  // a session picked an hour ago can fall off it; forgetting who was receiving because
+  // they scrolled out of a menu would be the toolbar losing your choice for you.
+  receiving: { kind: "agent", id: null, name: null, emoji: null },
   marks: [],
   undone: [],
 };
@@ -264,43 +277,89 @@ function row(into, tool, label, glyph, press) {
 function use(tool) {
   state.tool = tool;
   state.open = null;
-  const who = state.agents.find((agent) => agent.id === state.receivingId);
+  const who = receiver();
   state.receipt = receiptFor(tool, state.surface, who ? who.name : null);
   render();
+}
+
+/**
+ * The agent or session currently marked as receiving, whichever it is.
+ *
+ * Returned as one shape so everything downstream — the rail's label, the receipt, the
+ * mark beside a row — can name the receiver without first asking which kind it is.
+ */
+function receiver() {
+  if (state.receiving.id === null) return null;
+  if (state.receiving.kind === "session") {
+    const session = state.sessions.find((row) => row.key === state.receiving.id);
+    if (session) return { name: session.title, emoji: emojiFor(session) };
+  } else {
+    const agent = state.agents.find((row) => row.id === state.receiving.id);
+    if (agent) return { name: agent.name, emoji: agent.emoji };
+  }
+  // Off the list rather than gone. The remembered name is what was true when it was
+  // picked, which is a better answer than pretending nobody is receiving.
+  return state.receiving.name ? { name: state.receiving.name, emoji: state.receiving.emoji } : null;
+}
+
+/** A session wears its agent's face, so the two lists read as one set of people. */
+function emojiFor(session) {
+  const agent = state.agents.find((row) => row.id === session.agentId);
+  return agent ? agent.emoji : null;
 }
 
 function flyout(which) {
   state.open = state.open === which ? null : which;
   render();
   // Asked when the menu opens rather than polled: the answer only matters when somebody
-  // is looking at it, and the Gateway caches the list anyway.
-  if (state.open === "agents") void loadAgents();
+  // is looking at it, and a conversation's title and status move while it runs, so a
+  // list kept warm in the background would be a list that is quietly wrong.
+  if (state.open === "agents") void loadWho();
 }
 
 /**
- * Who this machine can hand a region to.
+ * Who this machine can hand a region to: its agents, and the conversations underway.
  *
- * The application's own agent list, not a second idea of one — the toolbar should never
- * disagree with the window behind it about what is running. A failure leaves the list
- * alone and says so on the rail rather than emptying it, because "no agents" and "could
+ * The application's own lists, not a second idea of them — the toolbar should never
+ * disagree with the window behind it about what is running. A failure leaves them alone
+ * and says so on the rail rather than emptying them, because "nobody there" and "could
  * not ask" are different facts and only one of them is the user's problem.
  */
-async function loadAgents() {
+async function loadWho() {
+  const pick = (kind) => (state.receiving.kind === kind ? state.receiving.id : null);
   try {
-    state.agents = (await invoke("colai_agents", { receiving: state.receivingId })) || [];
-    const receiving = state.agents.find((agent) => agent.receiving);
-    if (receiving) state.receivingId = receiving.id;
-    state.agentsTrouble = null;
+    // Asked together, because the menu shows them together: two answers a second apart
+    // would let the rail claim a receiver that the list below it does not offer.
+    const [agents, sessions] = await Promise.all([
+      invoke("colai_agents", { receiving: pick("agent") }),
+      invoke("colai_sessions", { receiving: pick("session") }),
+    ]);
+    state.agents = agents || [];
+    state.sessions = sessions || [];
+    // Nobody picked yet, so the Gateway's own default stands in — the first thing
+    // somebody marks still has somewhere to go.
+    if (state.receiving.id === null) {
+      const fallback = state.agents.find((agent) => agent.receiving);
+      if (fallback) {
+        state.receiving = {
+          kind: "agent",
+          id: fallback.id,
+          name: fallback.name,
+          emoji: fallback.emoji,
+        };
+      }
+    }
+    state.whoTrouble = null;
   } catch (error) {
-    state.agentsTrouble = error && error.message ? error.message : String(error);
+    state.whoTrouble = error && error.message ? error.message : String(error);
   }
   render();
 }
 
-function receive(id) {
-  state.receivingId = id;
+function receive(kind, id, name, emoji) {
+  state.receiving = { kind, id, name, emoji: emoji || null };
   state.open = null;
-  void loadAgents();
+  void loadWho();
 }
 
 function undo() {
@@ -570,17 +629,18 @@ function render() {
   buttons.undo.disabled = state.marks.length === 0;
   buttons.redo.disabled = state.undone.length === 0;
 
-  const who = state.agents.find((agent) => agent.id === state.receivingId);
+  const who = receiver();
   const mark = buttons.agents.querySelector(".running-dots");
   mark.textContent = who && who.emoji ? who.emoji : "";
   buttons.agents.querySelector(".agents-who").textContent = who
     ? who.name
-    : state.agents.length
-      ? "Choose an agent"
+    : state.agents.length || state.sessions.length
+      ? "Choose who receives"
       : "Agents";
-  buttons.agents.querySelector(".agents-running").textContent = state.agentsTrouble
+  buttons.agents.querySelector(".agents-running").textContent = state.whoTrouble
     ? "unavailable"
-    : `${state.agents.length} available`;
+    : counted(state.agents.length, "agent") +
+      (state.sessions.length ? ` · ${counted(state.sessions.length, "session")}` : "");
 
   for (const button of document.querySelectorAll(".row[data-tool]")) {
     button.setAttribute("aria-pressed", String(button.dataset.tool === state.tool));
@@ -596,7 +656,7 @@ function render() {
   ]) {
     placeFlyout(node, vertical, from);
   }
-  if (state.open === "agents") drawAgents();
+  if (state.open === "agents") drawWho();
 
   drawMarks();
   drawReceipt();
@@ -616,54 +676,100 @@ function placeFlyout(node, vertical, from) {
 }
 
 /**
- * The agent list, as rows somebody picks from.
+ * Agents and conversations, as rows somebody picks from.
  *
  * Three states and they are genuinely different: could not ask, nothing there, and a
- * list. Collapsing the first two into "no agents" would blame the person for a Gateway
+ * list. Collapsing the first two into "nobody yet" would blame the person for a Gateway
  * that is not answering.
+ *
+ * Two headed groups rather than one flat list, because picking an agent and picking a
+ * conversation are different choices — one starts something, the other joins it.
  */
-function drawAgents() {
-  if (state.agentsTrouble) {
+function drawWho() {
+  if (state.whoTrouble) {
     const said = document.createElement("p");
     said.className = "agent-empty";
-    said.textContent = `Could not reach the Gateway — ${state.agentsTrouble}`;
+    said.textContent = `Could not reach the Gateway — ${state.whoTrouble}`;
     el.agentRows.replaceChildren(said);
     return;
   }
-  if (state.agents.length === 0) {
+  if (state.agents.length === 0 && state.sessions.length === 0) {
     const empty = document.createElement("p");
     empty.className = "agent-empty";
-    empty.textContent = "No agents yet. Add one in the OpenClaw window and it appears here.";
+    empty.textContent = "Nobody yet. Start a conversation in the OpenClaw window and it appears here.";
     el.agentRows.replaceChildren(empty);
     return;
   }
 
-  el.agentRows.replaceChildren(
-    ...state.agents.map((agent) => {
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "row";
-      row.setAttribute("aria-pressed", String(agent.id === state.receivingId));
+  const rows = [];
+  if (state.agents.length) {
+    rows.push(group("Agents"));
+    for (const agent of state.agents) {
+      rows.push(
+        whoRow({
+          face: agent.emoji || agent.name.slice(0, 1).toUpperCase(),
+          name: agent.name,
+          receiving: state.receiving.kind === "agent" && state.receiving.id === agent.id,
+          onPick: () => receive("agent", agent.id, agent.name, agent.emoji),
+        }),
+      );
+    }
+  }
+  // Only when there are some: a heading over nothing reads as a list that failed to
+  // load, and the machine having no conversations yet is not a failure.
+  if (state.sessions.length) {
+    rows.push(group("Conversations"));
+    for (const session of state.sessions) {
+      rows.push(
+        whoRow({
+          face: emojiFor(session) || session.title.slice(0, 1).toUpperCase(),
+          name: session.title,
+          note: session.busy ? "Running" : session.unread ? "Unread" : null,
+          busy: session.busy,
+          receiving: state.receiving.kind === "session" && state.receiving.id === session.key,
+          onPick: () => receive("session", session.key, session.title, emojiFor(session)),
+        }),
+      );
+    }
+  }
+  el.agentRows.replaceChildren(...rows);
+}
 
-      const avatar = document.createElement("span");
-      avatar.className = "agent-avatar-dot";
-      avatar.textContent = agent.emoji || agent.name.slice(0, 1).toUpperCase();
+function group(label) {
+  const heading = document.createElement("p");
+  heading.className = "row-group";
+  heading.textContent = label;
+  return heading;
+}
 
-      const name = document.createElement("span");
-      name.className = "agent-name";
-      name.textContent = agent.name;
+function whoRow({ face, name, note, busy, receiving, onPick }) {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "row";
+  row.setAttribute("aria-pressed", String(receiving));
 
-      row.append(avatar, name);
-      if (agent.id === state.receivingId) {
-        const receiving = document.createElement("span");
-        receiving.className = "row-key";
-        receiving.textContent = "Receiving";
-        row.append(receiving);
-      }
-      row.addEventListener("click", () => receive(agent.id));
-      return row;
-    }),
-  );
+  const avatar = document.createElement("span");
+  avatar.className = "agent-avatar-dot";
+  avatar.textContent = face;
+  if (busy) avatar.dataset.busy = "true";
+
+  const label = document.createElement("span");
+  label.className = "agent-name";
+  label.textContent = name;
+  label.title = name;
+
+  row.append(avatar, label);
+  // "Receiving" wins over "Running": one is what this menu is for, the other is
+  // background news, and two marks on one row would make neither readable.
+  const said = receiving ? "Receiving" : note;
+  if (said) {
+    const tail = document.createElement("span");
+    tail.className = "row-key";
+    tail.textContent = said;
+    row.append(tail);
+  }
+  row.addEventListener("click", onPick);
+  return row;
 }
 
 function drawMarks() {
@@ -713,7 +819,10 @@ function drawReceipt() {
   el.receipt.innerHTML =
     '<span class="receipt-dot">●</span>' +
     `<span class="receipt-did"></span><span>→</span><span class="receipt-through"></span>` +
-    (said.agent ? '<span class="receipt-agent"></span>' : "");
+    // Named, not just appended: a receiver used to be one word and read as part of the
+    // surface beside it. A conversation's title is a sentence, and "Openclaw Desktop
+    // Kitchen rebuild quotes" is not a sentence about anything.
+    (said.agent ? '<span class="receipt-to">· to</span><span class="receipt-agent"></span>' : "");
   el.receipt.querySelector(".receipt-did").textContent = said.did;
   el.receipt.querySelector(".receipt-through").textContent = said.through;
   if (said.agent) el.receipt.querySelector(".receipt-agent").textContent = said.agent;
@@ -747,8 +856,19 @@ function shape() {
 function boxAround(node) {
   const own = node.getBoundingClientRect();
   let [left, top, right, bottom] = [own.left, own.top, own.right, own.bottom];
-  for (const child of node.querySelectorAll("*")) {
+  // Depth-first, so a scrolling list can be taken as a leaf. Its rows below the fold
+  // still report boxes past its bottom edge, and counting them would claim a strip of
+  // desktop that shows nothing — the same mistake as missing a flyout, upside down.
+  const pending = [...node.children];
+  while (pending.length) {
+    const child = pending.pop();
     const box = child.getBoundingClientRect();
+    // Both axes, read separately: the `overflow` shorthand reports nothing useful when
+    // the two differ, which is exactly the case here — a list that scrolls vertically.
+    const style = getComputedStyle(child);
+    if (style.overflowX === "visible" && style.overflowY === "visible") {
+      pending.push(...child.children);
+    }
     if (!box.width || !box.height) continue;
     left = Math.min(left, box.left);
     top = Math.min(top, box.top);
@@ -845,7 +965,7 @@ async function start() {
     state.surface = null;
   }
 
-  void loadAgents();
+  void loadWho();
   render();
   clamp();
   // The rail redraws itself when a flyout opens, and the shape has to grow to hold it.

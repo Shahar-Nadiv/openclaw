@@ -195,6 +195,23 @@ body {
   white-space: nowrap;
 }
 
+/* A session with a run still going. The ring pulses; the row does not move, because a
+   list that shifts under the pointer is a list you cannot click. */
+.agent-avatar-dot[data-busy="true"] {
+  box-shadow: 0 0 0 2px var(--accent, #ff6b6b);
+  animation: breathe 1.8s ease-in-out infinite;
+}
+@keyframes breathe {
+  50% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-avatar-dot[data-busy="true"] {
+    animation: none;
+  }
+}
+
 /* ── flyouts ──────────────────────────────────────────────────────────────── */
 
 .flyout,
@@ -257,6 +274,31 @@ body {
   flex-direction: column;
   gap: 1px;
   padding: 0 6px 6px;
+  /* Two lists in one menu outgrow the screen; the menu scrolls rather than running off
+     the bottom of it. `boxAround` treats this as a leaf for exactly this reason. */
+  max-height: 46vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.agent-rows::-webkit-scrollbar {
+  width: 8px;
+}
+.agent-rows::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgb(255 255 255 / 16%);
+}
+
+/* A heading inside the list, telling the two kinds of receiver apart. */
+.row-group {
+  margin: 6px 0 2px;
+  padding: 0 10px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #8e8e93;
+}
+.row-group:first-child {
+  margin-top: 2px;
 }
 .agent-empty {
   padding: 0 16px 14px;
@@ -304,6 +346,17 @@ body {
 .receipt-through {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.receipt-to {
+  flex-shrink: 0;
+  opacity: 0.55;
+}
+/* The receiver takes the squeeze before the surface does: which agent or conversation
+   has it is the part somebody is checking. */
+.receipt-agent {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #f7f7f8;
 }
 
 /* ── what the tools draw ──────────────────────────────────────────────────── */

@@ -18,6 +18,7 @@ commands.allow = [
   "colai_frontmost",
   "colai_reserved",
   "colai_agents",
+  "colai_sessions",
   "colai_release",
   "colai_open_settings",
 ]

@@ -37,6 +37,12 @@ const GATEWAY_STATE_EVENT: &str = "quickchat:gateway-state";
 const CHAT_EVENT: &str = "quickchat:chat-event";
 const GATEWAY_DEVICE_IDENTITY_FILE: &str = "quickchat-gateway-device.json";
 const AGENTS_CACHE_TTL: Duration = Duration::from_secs(60);
+/// How many conversations the toolbar's picker asks for.
+///
+/// A menu, not a session browser: the dashboard behind it is where somebody goes to
+/// find an old conversation, and an unbounded ask would make opening the menu cost more
+/// the longer the machine has been used.
+const SESSIONS_SHOWN: u32 = 12;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -208,6 +214,30 @@ pub(crate) struct AgentsListResult {
     pub agents: Vec<GatewayAgentSummary>,
 }
 
+/// One conversation the Gateway is holding, as much of it as the toolbar needs.
+///
+/// A deliberately narrow read of a very wide row: the toolbar names a session, says
+/// whose it is and whether it is busy. Everything else on the row belongs to the
+/// dashboard, and reading it here would be a second, competing idea of a session.
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GatewaySessionSummary {
+    pub key: String,
+    pub agent_id: Option<String>,
+    pub label: Option<String>,
+    pub display_name: Option<String>,
+    pub derived_title: Option<String>,
+    pub last_message_preview: Option<String>,
+    pub status: Option<String>,
+    pub unread: Option<bool>,
+}
+
+#[derive(Clone, Deserialize)]
+pub(crate) struct SessionsListResult {
+    #[serde(default)]
+    pub sessions: Vec<GatewaySessionSummary>,
+}
+
 #[derive(Clone)]
 struct CachedAgents {
     fetched_at: Instant,
@@ -284,6 +314,7 @@ struct SuspendResumeResponse {
 
 enum GatewayRequest {
     AgentsList,
+    SessionsList,
     ChatSend(ChatSendParams),
     RefreshCanvasSurface {
         observed_url: Option<String>,
@@ -300,6 +331,7 @@ enum GatewayRequest {
 
 enum GatewayResponse {
     AgentsList(AgentsListResult),
+    SessionsList(SessionsListResult),
     ChatSend(ChatSendAck),
     CanvasSurface(Option<String>),
     #[cfg(target_os = "linux")]
@@ -573,6 +605,22 @@ impl GatewayClient {
             return Err("Gateway returned the wrong response for agents.list.".to_string());
         };
         self.cache_agents(result.clone());
+        Ok(result)
+    }
+
+    /// The conversations somebody could hand a region to.
+    ///
+    /// Uncached, unlike the agent list: agents are configuration and change when
+    /// somebody edits them, while a session's title and status change as it runs, and a
+    /// picker showing a minute-old answer would be worse than one that waits.
+    pub async fn sessions_list(&self) -> Result<SessionsListResult, String> {
+        if !self.is_connected() {
+            return Err("Gateway unreachable — retrying".to_string());
+        }
+        let response = self.request(GatewayRequest::SessionsList).await?;
+        let GatewayResponse::SessionsList(result) = response else {
+            return Err("Gateway returned the wrong response for sessions.list.".to_string());
+        };
         Ok(result)
     }
 
@@ -1228,7 +1276,9 @@ fn reject_disconnected_command(command: DriverCommand) {
 /// dashboard behind it was connected.
 fn gateway_surface_open(app: &AppHandle) -> bool {
     app.get_webview_window(QUICKCHAT_LABEL).is_some()
-        || app.get_webview_window(crate::colai::OVERLAY_LABEL).is_some()
+        || app
+            .get_webview_window(crate::colai::OVERLAY_LABEL)
+            .is_some()
 }
 
 fn driver_should_run(surface_open: bool, sleep_active: bool) -> bool {
@@ -1479,6 +1529,9 @@ where
         GatewayRequest::AgentsList => request_agents_list(socket, budget, dispatch)
             .await
             .map(GatewayResponse::AgentsList),
+        GatewayRequest::SessionsList => request_sessions_list(socket, budget, dispatch)
+            .await
+            .map(GatewayResponse::SessionsList),
         GatewayRequest::ChatSend(params) => {
             let params = serde_json::to_value(params).map_err(|error| {
                 RequestFailure::transport(format!("Could not encode chat.send: {error}"))
@@ -1578,6 +1631,42 @@ where
     let payload = request_on_socket(socket, "agents.list", json!({}), budget, dispatch).await?;
     serde_json::from_value(payload).map_err(|error| {
         RequestFailure::transport(format!("Invalid agents.list response: {error}"))
+    })
+}
+
+/// The same rows the dashboard's own session list shows.
+///
+/// The filters are the Control UI roster's, not a second selection: a toolbar that
+/// disagreed with the window behind it about which conversations exist would be worse
+/// than one that showed none. Bounded, because this runs every time the menu opens, and
+/// titles are projected so a session that was never named still reads as itself.
+async fn request_sessions_list<F>(
+    socket: &mut GatewaySocket,
+    budget: Duration,
+    dispatch: &F,
+) -> Result<SessionsListResult, RequestFailure>
+where
+    F: Fn(&Value),
+{
+    let payload = request_on_socket(
+        socket,
+        "sessions.list",
+        json!({
+            "limit": SESSIONS_SHOWN,
+            "sortBy": "lastInteractionAt",
+            "includeGlobal": true,
+            "includeUnknown": true,
+            "configuredAgentsOnly": true,
+            "includeDerivedTitles": true,
+            "includeLastMessage": true,
+            "archived": false,
+        }),
+        budget,
+        dispatch,
+    )
+    .await?;
+    serde_json::from_value(payload).map_err(|error| {
+        RequestFailure::transport(format!("Invalid sessions.list response: {error}"))
     })
 }
 

@@ -31,14 +31,15 @@ type ToolbarHelpers = {
     surface: Surface,
     agent: string | null,
   ) => { did: string; through: string; agent: string | null; blocked: boolean };
+  counted: (many: number, noun: string) => string;
 };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource.slice(0, browserBindingsStart)}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, receiptFor };`,
+  `${toolbarSource.slice(0, browserBindingsStart)}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, receiptFor, counted };`,
   context,
 );
-const { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, receiptFor } =
+const { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, receiptFor, counted } =
   context.helpers as ToolbarHelpers;
 
 describe("what a tool is allowed to do", () => {
@@ -156,5 +157,16 @@ describe("turning a gesture into a region", () => {
   test("an empty gesture draws nothing rather than a broken path", () => {
     expect(pathFor(null)).toBe("");
     expect(pathFor({ kind: "stroke", points: [] })).toBe("");
+  });
+});
+
+describe("who the rail says can receive", () => {
+  // The rail carries both counts in a few characters, so the wording is the whole
+  // affordance: "1 agents" reads as a bug in the toolbar rather than a fact about
+  // the machine.
+  test("counts read as English, singular included", () => {
+    expect(counted(1, "agent")).toBe("1 agent");
+    expect(counted(11, "session")).toBe("11 sessions");
+    expect(counted(0, "session")).toBe("0 sessions");
   });
 });

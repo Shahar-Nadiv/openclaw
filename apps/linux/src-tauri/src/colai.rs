@@ -466,9 +466,12 @@ fn widen_for_dock(mut reserved: Reserved) -> Reserved {
     else {
         return reserved;
     };
-    let icons = gsetting("org.gnome.shell.extensions.dash-to-dock", "dash-max-icon-size")
-        .and_then(|value| value.trim().parse::<i32>().ok())
-        .unwrap_or(48);
+    let icons = gsetting(
+        "org.gnome.shell.extensions.dash-to-dock",
+        "dash-max-icon-size",
+    )
+    .and_then(|value| value.trim().parse::<i32>().ok())
+    .unwrap_or(48);
     // Padding either side of an icon, measured rather than derived: 48px icons produced
     // a 66px band on this desktop.
     let band = icons + 18;
@@ -557,4 +560,117 @@ pub(crate) async fn colai_agents(
             }
         })
         .collect())
+}
+
+/// One conversation on the toolbar's menu.
+///
+/// `title` is settled here rather than in the page, because deciding what a nameless
+/// session is called is a judgement about the data and not about layout, and the rail
+/// and the menu must never disagree about what a row is called.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ToolbarSession {
+    pub key: String,
+    pub title: String,
+    pub agent_id: Option<String>,
+    pub busy: bool,
+    pub unread: bool,
+    pub receiving: bool,
+}
+
+/// The conversations this machine is holding.
+///
+/// The other half of "who receives what you point at": an agent is who could answer,
+/// a session is a conversation already underway, and handing a region to one of those
+/// puts it where the work already is.
+///
+/// Nothing is invented when the Gateway has nothing. An empty list is a real answer —
+/// no conversations yet — and the page says so rather than filling the menu.
+#[tauri::command]
+pub(crate) async fn colai_sessions(
+    gateway: tauri::State<'_, crate::gateway_ws::GatewayClient>,
+    receiving: Option<String>,
+) -> Result<Vec<ToolbarSession>, String> {
+    let listed = gateway.sessions_list().await?;
+    let chosen = receiving.as_deref();
+    Ok(listed
+        .sessions
+        .iter()
+        .map(|row| ToolbarSession {
+            key: row.key.clone(),
+            title: session_title(row),
+            agent_id: row.agent_id.clone(),
+            // Only a run that has not finished is worth showing: a session that failed
+            // an hour ago is simply a session, and a red mark on it would be a warning
+            // about nothing.
+            busy: matches!(row.status.as_deref(), Some("running") | Some("queued")),
+            unread: row.unread.unwrap_or(false),
+            receiving: chosen == Some(row.key.as_str()),
+        })
+        .collect())
+}
+
+/// What to call a conversation, in the order a person would.
+///
+/// The name somebody gave it, then the name the Gateway shows in its own list, then the
+/// title projected from the first message, and only then the routing key — which is an
+/// address rather than a name, and appears when a session genuinely has nothing else.
+fn session_title(row: &crate::gateway_ws::GatewaySessionSummary) -> String {
+    [
+        row.label.as_deref(),
+        row.display_name.as_deref(),
+        row.derived_title.as_deref(),
+        row.last_message_preview.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::trim)
+    .find(|name| !name.is_empty())
+    .map(|name| name.to_string())
+    .unwrap_or_else(|| row.key.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gateway_ws::GatewaySessionSummary;
+
+    fn row(key: &str) -> GatewaySessionSummary {
+        GatewaySessionSummary {
+            key: key.to_string(),
+            agent_id: None,
+            label: None,
+            display_name: None,
+            derived_title: None,
+            last_message_preview: None,
+            status: None,
+            unread: None,
+        }
+    }
+
+    #[test]
+    fn a_session_is_called_what_a_person_called_it() {
+        let mut named = row("agent:main:whatsapp:123");
+        named.label = Some("Kitchen rebuild".to_string());
+        named.display_name = Some("+1 555".to_string());
+        named.derived_title = Some("help me with".to_string());
+        assert_eq!(session_title(&named), "Kitchen rebuild");
+    }
+
+    #[test]
+    fn an_unnamed_session_falls_back_through_what_it_has() {
+        let mut projected = row("agent:main:cli:42");
+        // A blank label is not a name; skipping it is the difference between a menu of
+        // conversations and a menu of empty rows.
+        projected.label = Some("   ".to_string());
+        projected.derived_title = Some("Rewrite the invoice parser".to_string());
+        assert_eq!(session_title(&projected), "Rewrite the invoice parser");
+
+        // Nothing at all leaves the routing key, which is an address rather than a name
+        // — shown because a row nobody can identify is worse than an ugly one.
+        assert_eq!(
+            session_title(&row("agent:main:cli:42")),
+            "agent:main:cli:42"
+        );
+    }
 }
