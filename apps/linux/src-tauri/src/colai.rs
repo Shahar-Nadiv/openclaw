@@ -487,3 +487,20 @@ fn gsetting(schema: &str, key: &str) -> Option<String> {
         Some(said)
     }
 }
+
+/// Colai's design, injected into the Gateway's own interface.
+///
+/// The control interface behind Settings is the runtime's, and it themes through CSS
+/// custom properties — so Colai does not rebuild it, it restyles it. The stylesheet is
+/// generated from `apps/shell/src/theme.ts` in the Colai repository and written here at
+/// build time by its build script, beside the pages it builds.
+///
+/// Injected at document start rather than after load: a stylesheet added afterwards
+/// means the interface paints in its own colours first and then flips, which reads as a
+/// bug even though it settles correctly.
+///
+/// The generated file is committed here rather than ignored, because `include_str!`
+/// resolves at compile time: a fork checked out on its own has to build, and an ignored
+/// file would mean it does not. Its diffs are meaningful — the theme changed — so it is
+/// not the usual noise a generated artifact makes in a tree.
+pub(crate) const COLAI_THEME_SCRIPT: &str = include_str!("../colai-theme.js");
