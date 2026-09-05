@@ -13,6 +13,7 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 const OPEN_ID: &str = "open-dashboard";
 const QUICKCHAT_ID: &str = "quickchat";
+const COLAI_ID: &str = "colai-toolbar";
 const CHECK_UPDATES_ID: &str = "check-for-updates";
 const START_AT_LOGIN_ID: &str = "start-at-login";
 const QUICKCHAT_SHORTCUT_ID: &str = "quickchat-shortcut";
@@ -141,6 +142,10 @@ pub fn build(
         None::<&str>,
     )?;
     let quickchat = MenuItem::with_id(app, QUICKCHAT_ID, "Quick Chat", true, None::<&str>)?;
+    // The toolbar is the product, so it is the first thing in this menu and it is
+    // always reachable — the window behind it navigates away to the Gateway's own
+    // interface, and anything that lived only on a Colai page went with it.
+    let toolbar = MenuItem::with_id(app, COLAI_ID, "Point at something", true, None::<&str>)?;
     let open = MenuItem::with_id(app, OPEN_ID, "Open Dashboard", true, None::<&str>)?;
     let check_updates = MenuItem::with_id(
         app,
@@ -210,6 +215,7 @@ pub fn build(
     let menu_builder = MenuBuilder::new(app).items(&[
         &status,
         &separator_one,
+        &toolbar,
         &quickchat,
         &open,
         &check_updates,
@@ -359,6 +365,11 @@ fn handle_menu(
         QUIT_ID => {
             state.quit();
             app.exit(0);
+        }
+        COLAI_ID => {
+            if let Err(trouble) = crate::colai::colai_summon(app.clone()) {
+                eprintln!("[colai] could not open the toolbar: {trouble}");
+            }
         }
         QUICKCHAT_ID => quickchat::toggle_quickchat(app),
         OPEN_ID => open_dashboard(app),

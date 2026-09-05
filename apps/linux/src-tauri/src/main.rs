@@ -1351,20 +1351,20 @@ fn main() {
         app.manage(state.clone());
 
         /*
-         * Straight to the toolbar, for working on it.
+         * The toolbar, up front, because it is the product.
          *
-         * Summoning is otherwise a click in Settings or a global key, and neither can
-         * be driven by a script — so without this every change to the overlay costs a
-         * manual round trip, and it cannot be exercised at all on a machine where
-         * something else owns the screen.
+         * It used to wait for a key or a button on Colai's own settings page. That page
+         * is not always there: once a Gateway connects, this window navigates to the
+         * Gateway's interface and everything Colai drew on it — including the way to
+         * the toolbar — goes with it. Somebody opening Colai then found a chat
+         * application and no toolbar anywhere, which is the opposite of the product.
          *
-         * Development only: `debug_assertions` keeps it out of any release build, so a
-         * stray variable in a production shell does nothing.
+         * So it opens with the app and stays available from the tray. `COLAI_NO_OPEN`
+         * is for working on the window behind it without the overlay in the way.
          */
-        #[cfg(debug_assertions)]
-        if std::env::var_os("COLAI_OPEN").is_some() {
+        if std::env::var_os("COLAI_NO_OPEN").is_none() {
             if let Err(trouble) = colai::colai_summon(app.handle().clone()) {
-                eprintln!("[colai] could not open the overlay: {trouble}");
+                eprintln!("[colai] could not open the toolbar: {trouble}");
             }
         }
         app.manage(gateway_ws::GatewayClient::new());
