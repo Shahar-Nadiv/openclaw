@@ -177,6 +177,9 @@ const state = {
   surface: null,
   reserved: NOTHING_RESERVED,
   agents: [],
+  // Null while the list is good, a message while the Gateway could not be asked. The
+  // two are different facts and the rail says which.
+  agentsTrouble: null,
   receivingId: null,
   marks: [],
   undone: [],
@@ -269,6 +272,35 @@ function use(tool) {
 function flyout(which) {
   state.open = state.open === which ? null : which;
   render();
+  // Asked when the menu opens rather than polled: the answer only matters when somebody
+  // is looking at it, and the Gateway caches the list anyway.
+  if (state.open === "agents") void loadAgents();
+}
+
+/**
+ * Who this machine can hand a region to.
+ *
+ * The application's own agent list, not a second idea of one — the toolbar should never
+ * disagree with the window behind it about what is running. A failure leaves the list
+ * alone and says so on the rail rather than emptying it, because "no agents" and "could
+ * not ask" are different facts and only one of them is the user's problem.
+ */
+async function loadAgents() {
+  try {
+    state.agents = (await invoke("colai_agents", { receiving: state.receivingId })) || [];
+    const receiving = state.agents.find((agent) => agent.receiving);
+    if (receiving) state.receivingId = receiving.id;
+    state.agentsTrouble = null;
+  } catch (error) {
+    state.agentsTrouble = error && error.message ? error.message : String(error);
+  }
+  render();
+}
+
+function receive(id) {
+  state.receivingId = id;
+  state.open = null;
+  void loadAgents();
 }
 
 function undo() {
@@ -501,6 +533,12 @@ function clamp() {
     y: Math.min(Math.max(state.at.y, room.top + EDGE), room.bottom - size.height - EDGE),
   };
   place();
+  // And tell the shell where the rail went.
+  //
+  // Moving without re-shaping leaves the clickable region where the rail *was*: the
+  // toolbar draws in one place and answers the pointer in another, and every click on it
+  // falls through to the desktop. Silent, and indistinguishable from a dead button.
+  shape();
 }
 
 /* ── drawing the whole thing ─────────────────────────────────────────────── */
@@ -532,24 +570,17 @@ function render() {
   buttons.undo.disabled = state.marks.length === 0;
   buttons.redo.disabled = state.undone.length === 0;
 
-  const running = state.agents.filter((agent) => agent.running);
   const who = state.agents.find((agent) => agent.id === state.receivingId);
-  const dots = buttons.agents.querySelector(".running-dots");
-  dots.replaceChildren(
-    ...running.map((agent, index) => {
-      const dot = document.createElement("span");
-      dot.className = "running-dot";
-      // Built rather than interpolated: an agent's colour comes from the runtime, and a
-      // string dropped into a style attribute is a CSS injection. Assigning the property
-      // makes the browser parse it as one declaration and discard anything that is not
-      // a colour.
-      dot.style.background = agent.colour;
-      dot.style.marginLeft = index ? "-5px" : "0";
-      return dot;
-    }),
-  );
-  buttons.agents.querySelector(".agents-who").textContent = who ? who.name : "No agent";
-  buttons.agents.querySelector(".agents-running").textContent = `${running.length} running`;
+  const mark = buttons.agents.querySelector(".running-dots");
+  mark.textContent = who && who.emoji ? who.emoji : "";
+  buttons.agents.querySelector(".agents-who").textContent = who
+    ? who.name
+    : state.agents.length
+      ? "Choose an agent"
+      : "Agents";
+  buttons.agents.querySelector(".agents-running").textContent = state.agentsTrouble
+    ? "unavailable"
+    : `${state.agents.length} available`;
 
   for (const button of document.querySelectorAll(".row[data-tool]")) {
     button.setAttribute("aria-pressed", String(button.dataset.tool === state.tool));
@@ -565,13 +596,7 @@ function render() {
   ]) {
     placeFlyout(node, vertical, from);
   }
-  if (state.open === "agents" && state.agents.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "agent-empty";
-    empty.textContent =
-      "No agents are running yet. Start one from the OpenClaw window and it will appear here.";
-    el.agentRows.replaceChildren(empty);
-  }
+  if (state.open === "agents") drawAgents();
 
   drawMarks();
   drawReceipt();
@@ -588,6 +613,57 @@ function placeFlyout(node, vertical, from) {
     node.style.left = `${from}px`;
     node.style[state.dock === "top" ? "top" : "bottom"] = "calc(100% + 8px)";
   }
+}
+
+/**
+ * The agent list, as rows somebody picks from.
+ *
+ * Three states and they are genuinely different: could not ask, nothing there, and a
+ * list. Collapsing the first two into "no agents" would blame the person for a Gateway
+ * that is not answering.
+ */
+function drawAgents() {
+  if (state.agentsTrouble) {
+    const said = document.createElement("p");
+    said.className = "agent-empty";
+    said.textContent = `Could not reach the Gateway — ${state.agentsTrouble}`;
+    el.agentRows.replaceChildren(said);
+    return;
+  }
+  if (state.agents.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "agent-empty";
+    empty.textContent = "No agents yet. Add one in the OpenClaw window and it appears here.";
+    el.agentRows.replaceChildren(empty);
+    return;
+  }
+
+  el.agentRows.replaceChildren(
+    ...state.agents.map((agent) => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "row";
+      row.setAttribute("aria-pressed", String(agent.id === state.receivingId));
+
+      const avatar = document.createElement("span");
+      avatar.className = "agent-avatar-dot";
+      avatar.textContent = agent.emoji || agent.name.slice(0, 1).toUpperCase();
+
+      const name = document.createElement("span");
+      name.className = "agent-name";
+      name.textContent = agent.name;
+
+      row.append(avatar, name);
+      if (agent.id === state.receivingId) {
+        const receiving = document.createElement("span");
+        receiving.className = "row-key";
+        receiving.textContent = "Receiving";
+        row.append(receiving);
+      }
+      row.addEventListener("click", () => receive(agent.id));
+      return row;
+    }),
+  );
 }
 
 function drawMarks() {
@@ -710,6 +786,45 @@ window.addEventListener("keydown", (event) => {
 
 /* ── start ───────────────────────────────────────────────────────────────── */
 
+/**
+ * A failure the person can see.
+ *
+ * An overlay that throws on startup looks exactly like one that is working and has
+ * nothing to say: the rail is drawn, and nothing responds. The receipt line is already
+ * the place this surface tells the truth about itself, so it says this too.
+ */
+function sayFailed(message) {
+  // Also the window title, which survives a page that cannot draw and is readable from
+  // outside the app while this is being worked on.
+  document.title = `toolbar error: ${message}`;
+  state.receipt = {
+    did: "The toolbar hit an error",
+    through: message,
+    agent: null,
+    blocked: true,
+  };
+  try {
+    drawReceipt();
+  } catch {
+    // Nothing left to do: if drawing the message also throws, saying so louder will not
+    // help, and throwing from an error handler loses the original.
+  }
+}
+
+window.addEventListener("error", (event) => sayFailed(event.message || String(event.error)));
+
+/*
+ * Rejections as well as errors.
+ *
+ * Startup is an async function, so anything it throws is a rejected promise rather than
+ * an `error` event — and listening only for the latter is how a toolbar comes up drawn
+ * but dead, with nothing anywhere saying why.
+ */
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason;
+  sayFailed(reason && reason.message ? reason.message : String(reason));
+});
+
 async function start() {
   buildRail();
   try {
@@ -730,6 +845,7 @@ async function start() {
     state.surface = null;
   }
 
+  void loadAgents();
   render();
   clamp();
   // The rail redraws itself when a flyout opens, and the shape has to grow to hold it.

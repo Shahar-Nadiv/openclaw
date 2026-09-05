@@ -17,6 +17,7 @@ commands.allow = [
   "colai_shape",
   "colai_frontmost",
   "colai_reserved",
+  "colai_agents",
   "colai_release",
   "colai_open_settings",
 ]

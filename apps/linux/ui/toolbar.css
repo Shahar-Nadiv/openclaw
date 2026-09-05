@@ -171,11 +171,28 @@ body {
   opacity: 0.6;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-.running-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  border: 2px solid rgb(28 28 30);
+/* The receiving agent's own mark, when it has one. */
+.running-dots {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.agent-avatar-dot {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 8%);
+  font-size: 13px;
+}
+.agent-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── flyouts ──────────────────────────────────────────────────────────────── */

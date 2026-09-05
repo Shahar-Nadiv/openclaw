@@ -107,6 +107,20 @@ pub(crate) fn ensure_overlay(app: &AppHandle) -> Result<WebviewWindow, String> {
             .map_err(|error| format!("Could not create the colai overlay: {error}"))?;
 
     cover_primary(&window)?;
+    /*
+     * Wake the Gateway connection, the way Quick Chat does when its window opens.
+     *
+     * The client is shared and connects lazily, so a surface that never activates it
+     * finds it unreachable no matter how long the app has been running — the toolbar
+     * asked for agents and was told "Gateway unreachable — retrying" while the dashboard
+     * beside it was connected and fine.
+     */
+    // `try_state`, because the toolbar can be opened before the client is registered —
+    // from the tray during startup, or from the setup hook itself. A missing client means
+    // the connection is not ready to wake, not that anything is wrong.
+    if let Some(gateway) = app.try_state::<crate::gateway_ws::GatewayClient>() {
+        gateway.activate(app.clone());
+    }
     Ok(window)
 }
 
@@ -486,4 +500,61 @@ fn gsetting(schema: &str, key: &str) -> Option<String> {
     } else {
         Some(said)
     }
+}
+
+/// One agent the toolbar can hand a region to.
+///
+/// The same list the rest of the application uses, not a second idea of what an agent
+/// is. `receiving` is the toolbar's own state on top of it: several agents may be
+/// available, and exactly one gets what you point at.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ToolbarAgent {
+    pub id: String,
+    pub name: String,
+    pub emoji: Option<String>,
+    pub receiving: bool,
+}
+
+/// The agents this machine actually has.
+///
+/// Read from the Gateway rather than kept here, so the toolbar never disagrees with the
+/// window behind it about what is running. The Gateway caches the list itself, so asking
+/// on every summon is cheap.
+///
+/// System agents are left out, the way Quick Chat leaves them out: they are machinery
+/// rather than somebody you would hand a region to.
+#[tauri::command]
+pub(crate) async fn colai_agents(
+    gateway: tauri::State<'_, crate::gateway_ws::GatewayClient>,
+    receiving: Option<String>,
+) -> Result<Vec<ToolbarAgent>, String> {
+    let catalog = gateway.agents_list().await?;
+    let chosen = receiving.as_deref();
+    Ok(catalog
+        .agents
+        .iter()
+        .filter(|summary| summary.kind.as_deref() != Some("system"))
+        .map(|summary| {
+            let identity = summary.identity.as_ref();
+            let name = identity
+                .and_then(|identity| identity.name.clone())
+                .or_else(|| summary.name.clone())
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| summary.id.clone());
+            ToolbarAgent {
+                // Falls back to the Gateway's own default when the toolbar has no pick
+                // yet, so the first thing somebody marks still has somewhere to go.
+                receiving: match chosen {
+                    Some(id) => summary.id == id,
+                    None => summary.id == catalog.default_id,
+                },
+                id: summary.id.clone(),
+                name,
+                emoji: identity
+                    .and_then(|identity| identity.emoji.clone())
+                    .filter(|emoji| !emoji.trim().is_empty()),
+            }
+        })
+        .collect())
 }

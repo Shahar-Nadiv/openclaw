@@ -785,7 +785,7 @@ impl GatewayClient {
         let mut reconnect_attempt = 0_u32;
         loop {
             if !driver_should_run(
-                app.get_webview_window(QUICKCHAT_LABEL).is_some(),
+                gateway_surface_open(&app),
                 self.inner.sleep_cycle_depth.load(Ordering::SeqCst) > 0,
             ) {
                 self.inner.reconnect_paused.store(false, Ordering::SeqCst);
@@ -862,7 +862,7 @@ impl GatewayClient {
                 reconnect_attempt = 1;
             }
             if !driver_should_run(
-                app.get_webview_window(QUICKCHAT_LABEL).is_some(),
+                gateway_surface_open(&app),
                 self.inner.sleep_cycle_depth.load(Ordering::SeqCst) > 0,
             ) {
                 continue;
@@ -950,7 +950,7 @@ impl GatewayClient {
         loop {
             if self.inner.config_generation.load(Ordering::SeqCst) != generation
                 || !driver_should_run(
-                    app.get_webview_window(QUICKCHAT_LABEL).is_some(),
+                    gateway_surface_open(app),
                     self.inner.sleep_cycle_depth.load(Ordering::SeqCst) > 0,
                 )
             {
@@ -1220,10 +1220,21 @@ fn reject_disconnected_command(command: DriverCommand) {
     }
 }
 
-fn driver_should_run(window_exists: bool, sleep_active: bool) -> bool {
-    // Sleep cycles temporarily activate the driver; the companion-wide connection lifetime
-    // remains owned by Quick Chat outside that narrow window.
-    window_exists || sleep_active
+/// Whether an always-on-top surface that talks to the Gateway is open.
+///
+/// The connection is owned by the overlays, not by one of them: Quick Chat sends
+/// messages through it and the toolbar asks it who can receive a region. Gating on Quick
+/// Chat alone left the toolbar permanently reporting an unreachable Gateway while the
+/// dashboard behind it was connected.
+fn gateway_surface_open(app: &AppHandle) -> bool {
+    app.get_webview_window(QUICKCHAT_LABEL).is_some()
+        || app.get_webview_window(crate::colai::OVERLAY_LABEL).is_some()
+}
+
+fn driver_should_run(surface_open: bool, sleep_active: bool) -> bool {
+    // Sleep cycles temporarily activate the driver; outside that narrow window the
+    // connection lives exactly as long as a surface that needs it.
+    surface_open || sleep_active
 }
 
 fn routing_target(scope: &str, selected_agent_id: &str, main_key: &str) -> ChatRoutingTarget {

@@ -1342,6 +1342,7 @@ fn main() {
             .build()?;
         let state = DesktopState::new(window.url()?);
         app.manage(state.clone());
+        app.manage(gateway_ws::GatewayClient::new());
 
         /*
          * The toolbar, up front, because it is the product.
@@ -1360,7 +1361,7 @@ fn main() {
                 eprintln!("[colai] could not open the toolbar: {trouble}");
             }
         }
-        app.manage(gateway_ws::GatewayClient::new());
+
         #[cfg(target_os = "linux")]
         app.manage(gateway_sleep_logind::SleepBridge::start(
             app.handle().clone(),
@@ -1434,6 +1435,7 @@ fn main() {
         colai::colai_shape,
         colai::colai_frontmost,
         colai::colai_reserved,
+        colai::colai_agents,
         colai::colai_summon,
         colai::colai_release,
         colai::colai_open_settings
