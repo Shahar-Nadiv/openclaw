@@ -700,8 +700,6 @@ impl DesktopState {
         let builder = WebviewBuilder::new("main", WebviewUrl::External(dashboard))
             .initialization_script(script)
             .initialization_script(EXTERNAL_LINK_INIT_SCRIPT)
-            // Colai's design over the interface. See colai::COLAI_THEME_SCRIPT.
-            .initialization_script(colai::COLAI_THEME_SCRIPT.to_string())
             .on_navigation(move |target| permit_main_navigation(&navigation_app, target))
             .on_new_window(move |url, _features| {
                 open_external_browser(&browser_app, &url);
@@ -717,7 +715,6 @@ impl DesktopState {
             let navigation_app = app.clone();
             let restore = WebviewBuilder::new("main", WebviewUrl::App("index.html".into()))
                 .initialization_script(EXTERNAL_LINK_INIT_SCRIPT)
-                .initialization_script(colai::COLAI_THEME_SCRIPT.to_string())
                 .on_navigation(move |target| permit_main_navigation(&navigation_app, target))
                 .on_new_window(move |url, _features| {
                     open_external_browser(&browser_app, &url);
@@ -1337,10 +1334,6 @@ fn main() {
         let navigation_app = app.handle().clone();
         let window = WebviewWindowBuilder::from_config(app.handle(), &window_config)?
             .initialization_script(EXTERNAL_LINK_INIT_SCRIPT)
-            // Colai's design over the interface. On the main window rather than only on
-            // the remote-dashboard builder: a local Gateway is reached by navigating
-            // this same webview, so a script attached anywhere else never runs for it.
-            .initialization_script(colai::COLAI_THEME_SCRIPT.to_string())
             .on_navigation(move |target| permit_main_navigation(&navigation_app, target))
             .on_new_window(move |url, _features| {
                 open_external_browser(&browser_app, &url);

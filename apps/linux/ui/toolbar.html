@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Toolbar</title>
+    <link rel="stylesheet" href="toolbar.css" />
+  </head>
+  <body>
+    <!--
+      The toolbar: point at anything on screen and hand it to an agent.
+
+      A sibling of Quick Chat rather than part of the Control UI — both are small
+      always-on-top surfaces over the desktop, both are plain HTML and JavaScript here,
+      and neither belongs in the dashboard's window.
+
+      The rail is built by toolbar.js rather than written out, because every button is
+      the same shape and the tool list is the thing worth reading. What is markup here is
+      what is genuinely structural: the rail, the two flyouts, the agent menu, and the
+      receipt.
+    -->
+    <div id="rail-wrap" class="rail-wrap">
+      <div id="rail" class="rail" role="toolbar" aria-label="OpenClaw toolbar">
+        <span
+          id="grip"
+          class="grip"
+          title="Drag toolbar"
+          aria-label="Drag toolbar"
+          >⠿</span
+        >
+        <span class="divider" data-divider></span>
+        <!-- Tool buttons are inserted here. -->
+        <span class="divider" data-divider></span>
+        <span class="divider" data-divider></span>
+
+        <div id="fly-shape" class="flyout" role="menu" hidden></div>
+        <div id="fly-design" class="flyout flyout-wide" role="menu" hidden></div>
+        <div id="fly-agents" class="agents" role="menu" hidden>
+          <p class="agents-title">Select who receives your edits</p>
+          <div id="agent-rows" class="agent-rows"></div>
+        </div>
+      </div>
+
+      <p id="receipt" class="receipt" role="status" hidden></p>
+    </div>
+
+    <!--
+      What the tools draw. Under the rail in paint order, so a mark made near the
+      toolbar never covers the buttons that made it.
+    -->
+    <svg
+      id="marks"
+      class="marks"
+      viewBox="0 0 1 1"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    ></svg>
+    <div id="pins" class="pins" aria-hidden="true"></div>
+    <div id="capture" class="capture" hidden></div>
+
+    <script src="toolbar.js"></script>
+  </body>
+</html>
