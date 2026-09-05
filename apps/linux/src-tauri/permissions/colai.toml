@@ -16,6 +16,7 @@ description = "Lets the overlay shape itself, read which application is in front
 commands.allow = [
   "colai_shape",
   "colai_frontmost",
+  "colai_reserved",
   "colai_release",
   "colai_open_settings",
 ]

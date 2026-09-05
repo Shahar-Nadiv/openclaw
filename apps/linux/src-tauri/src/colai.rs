@@ -51,6 +51,27 @@ pub(crate) struct Front {
     pub id: String,
 }
 
+/// The edges of the overlay the desktop's own chrome is using, in physical pixels.
+///
+/// Colai keeps out of these. It is the only arrangement where both the toolbar and the
+/// desktop's panels stay visible, because on GNOME the shell *is* the compositor and
+/// draws its panel and dock above every client window — `always_on_top`, a `DOCK` type
+/// hint and `_NET_WM_STATE_ABOVE` all lose to it. Measured on this machine: the rail
+/// docked to the left edge and Ubuntu's dock drew straight over it.
+///
+/// The other way to win is a fullscreen window, which makes the shell yield its chrome.
+/// That is rejected on two counts. It hides the dock, and somebody using Colai should
+/// not lose their desktop to it. And it kills transparency: a fullscreen window is
+/// unredirected, scanned out with no compositor to blend its alpha, so the overlay
+/// turned into an opaque sheet — sampled at 11,16,29 across a whole monitor.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+pub(crate) struct Reserved {
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+    pub left: i32,
+}
+
 /// The last shape asked for, so an identical request costs nothing.
 ///
 /// The page recomputes its shape on every render and on every mutation of the rail,
@@ -116,10 +137,11 @@ fn cover_primary(window: &WebviewWindow) -> Result<(), String> {
 /// *unredirection*, and an unredirected window is scanned out without a compositor to
 /// blend its alpha against the desktop.
 ///
-/// Whether that unredirection would actually bite here has not been demonstrated: the
-/// black screen that first suggested it turned out to be a fullscreen game on the same
-/// monitor. The hint stays because it is the correct description of the window, not
-/// because it is a proven fix.
+/// That unredirection is real and was measured, after a false start: the black screen
+/// that first suggested it turned out to be a fullscreen game on the same monitor. Made
+/// properly fullscreen on purpose afterwards, this window went opaque — 11,16,29
+/// sampled right across the display, the page's own ground with nothing behind it. So
+/// the overlay is monitor-sized and hinted, never fullscreen.
 #[cfg(target_os = "linux")]
 fn keep_composited(window: &WebviewWindow) {
     use gtk::prelude::GtkWindowExt;
@@ -365,4 +387,108 @@ pub(crate) fn colai_open_settings(app: AppHandle) -> Result<(), String> {
     .map_err(|error| format!("Could not open settings: {error}"))?;
 
     Ok(())
+}
+
+/// Which edges of this monitor the desktop's own chrome is using.
+///
+/// Two sources, because one is not enough.
+///
+/// **The work area** is the honest, portable one. Every panel that plays by the rules
+/// publishes a strut, the window manager folds those into `_NET_WORKAREA`, and GDK hands
+/// the result back per monitor. That catches GNOME's top bar, and it catches KDE, XFCE
+/// and anything else without Colai knowing they exist.
+///
+/// **The dock is the exception**, and it is the one that prompted this. Ubuntu's dock
+/// runs with `intellihide`, which means it reserves nothing at all — the work area is
+/// the full width of the monitor while the dock sits visibly on top of it. Nothing in
+/// EWMH describes it. So when the extension is configured, its own settings are asked
+/// instead.
+///
+/// That second source is an approximation and is written down as one: the width comes
+/// out as the icon size plus padding, and the padding is Dash to Dock's business, not a
+/// published contract. Measured here, 48px icons gave a 66px band. It is close enough
+/// that the rail clears the dock, and wrong in the safe direction if the theme changes —
+/// a slightly wider reservation costs a few pixels of screen, a narrower one puts the
+/// toolbar back underneath.
+///
+/// The real answer is to measure the obstruction from Colai's own capture of the screen
+/// once the screen service exists, and stop asking the desktop about itself.
+#[tauri::command]
+pub(crate) fn colai_reserved(app: AppHandle) -> Reserved {
+    #[cfg(target_os = "linux")]
+    {
+        let from_work_area = app
+            .get_webview_window(OVERLAY_LABEL)
+            .and_then(|window| work_area_insets(&window))
+            .unwrap_or_default();
+        widen_for_dock(from_work_area)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = app;
+        Reserved::default()
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn work_area_insets(window: &WebviewWindow) -> Option<Reserved> {
+    use gtk::prelude::*;
+
+    let gtk_window = window.gtk_window().ok()?;
+    let gdk_window = gtk_window.window()?;
+    let display = gtk_window.display();
+    let monitor = display.monitor_at_window(&gdk_window)?;
+
+    let whole = monitor.geometry();
+    let usable = monitor.workarea();
+
+    Some(Reserved {
+        top: (usable.y() - whole.y()).max(0),
+        left: (usable.x() - whole.x()).max(0),
+        right: ((whole.x() + whole.width()) - (usable.x() + usable.width())).max(0),
+        bottom: ((whole.y() + whole.height()) - (usable.y() + usable.height())).max(0),
+    })
+}
+
+/// Add the dock's band on the edge it lives on, when it reserves nothing itself.
+#[cfg(target_os = "linux")]
+fn widen_for_dock(mut reserved: Reserved) -> Reserved {
+    let Some(position) = gsetting("org.gnome.shell.extensions.dash-to-dock", "dock-position")
+    else {
+        return reserved;
+    };
+    let icons = gsetting("org.gnome.shell.extensions.dash-to-dock", "dash-max-icon-size")
+        .and_then(|value| value.trim().parse::<i32>().ok())
+        .unwrap_or(48);
+    // Padding either side of an icon, measured rather than derived: 48px icons produced
+    // a 66px band on this desktop.
+    let band = icons + 18;
+
+    let edge = |current: &mut i32| *current = (*current).max(band);
+    match position.trim().trim_matches('\'') {
+        "LEFT" => edge(&mut reserved.left),
+        "RIGHT" => edge(&mut reserved.right),
+        "TOP" => edge(&mut reserved.top),
+        "BOTTOM" => edge(&mut reserved.bottom),
+        _ => {}
+    }
+    reserved
+}
+
+#[cfg(target_os = "linux")]
+fn gsetting(schema: &str, key: &str) -> Option<String> {
+    let out = std::process::Command::new("gsettings")
+        .args(["get", schema, key])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let said = String::from_utf8(out.stdout).ok()?;
+    let said = said.trim().to_string();
+    if said.is_empty() {
+        None
+    } else {
+        Some(said)
+    }
 }
