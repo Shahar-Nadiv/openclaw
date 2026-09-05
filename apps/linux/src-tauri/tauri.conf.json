@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "OpenClaw",
+  "productName": "colai",
   "version": "0.1.0",
   "identifier": "ai.openclaw.linux",
   "build": {
@@ -28,7 +28,7 @@
       {
         "label": "main",
         "create": false,
-        "title": "OpenClaw",
+        "title": "colai",
         "url": "index.html",
         "width": 1080,
         "height": 720,
