@@ -236,3 +236,6 @@ extensions/discord/assets/embedded-app-sdk.mjs
 
 # Pinned Swift lint/format tools installed by scripts/install-swift-tools.sh
 .build/
+
+# Built by the Colai parent repository from apps/shell. Generated, never committed here.
+apps/linux/colai-ui/

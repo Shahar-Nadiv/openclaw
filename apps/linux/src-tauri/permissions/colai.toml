@@ -1,0 +1,29 @@
+# Colai's overlay and settings commands.
+#
+# Split in two on purpose, and the split is the point.
+#
+# The overlay is a window that covers the whole screen and reads what is in front of
+# it. Everything it can do is here, and nothing else is: it cannot summon another
+# window, and it cannot reach any of the gateway or installer commands the setup
+# screens use. If the page in it were ever compromised, that is the whole blast radius.
+#
+# `allow-colai-shell` is the smaller grant a normal window gets — open the toolbar,
+# close it again — with no screen reading at all.
+
+[[permission]]
+identifier = "allow-colai-overlay"
+description = "Lets the overlay shape itself, read which application is in front, and give the screen back."
+commands.allow = [
+  "colai_shape",
+  "colai_frontmost",
+  "colai_release",
+  "colai_open_settings",
+]
+
+[[permission]]
+identifier = "allow-colai-shell"
+description = "Lets an ordinary Colai window summon the toolbar and put it away."
+commands.allow = [
+  "colai_summon",
+  "colai_release",
+]

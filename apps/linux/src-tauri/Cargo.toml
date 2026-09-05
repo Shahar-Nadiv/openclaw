@@ -14,6 +14,12 @@ tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 base64 = "0.23.1"
+# Colai's overlay shapes itself through GTK rather than raw X. A shape set behind
+# GTK's back is undone the next time GTK re-applies its own input region, so the
+# call has to be GTK's own. Versions match what Tauri already resolves.
+cairo-rs = "0.18.5"
+gdk = "0.18.2"
+gtk = "0.18.2"
 ed25519-dalek = "3.0.0"
 futures-util = "0.3.34"
 getrandom = "0.4.3"

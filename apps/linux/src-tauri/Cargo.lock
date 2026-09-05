@@ -2828,9 +2828,12 @@ name = "openclaw-desktop-linux"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "cairo-rs",
  "ed25519-dalek",
  "futures-util",
+ "gdk",
  "getrandom 0.4.3",
+ "gtk",
  "libc",
  "mdns-sd",
  "rustls",

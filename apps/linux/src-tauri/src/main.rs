@@ -1,4 +1,5 @@
 mod cli;
+mod colai;
 mod discovery;
 mod gateway;
 mod gateway_device_identity;
@@ -1341,6 +1342,24 @@ fn main() {
             .build()?;
         let state = DesktopState::new(window.url()?);
         app.manage(state.clone());
+
+        /*
+         * Straight to the toolbar, for working on it.
+         *
+         * Summoning is otherwise a click in Settings or a global key, and neither can
+         * be driven by a script — so without this every change to the overlay costs a
+         * manual round trip, and it cannot be exercised at all on a machine where
+         * something else owns the screen.
+         *
+         * Development only: `debug_assertions` keeps it out of any release build, so a
+         * stray variable in a production shell does nothing.
+         */
+        #[cfg(debug_assertions)]
+        if std::env::var_os("COLAI_OPEN").is_some() {
+            if let Err(trouble) = colai::colai_summon(app.handle().clone()) {
+                eprintln!("[colai] could not open the overlay: {trouble}");
+            }
+        }
         app.manage(gateway_ws::GatewayClient::new());
         #[cfg(target_os = "linux")]
         app.manage(gateway_sleep_logind::SleepBridge::start(
@@ -1411,8 +1430,15 @@ fn main() {
         quickchat_widgets::quickchat_sync_widgets,
         updater::open_release_page,
         updater::relaunch,
-        updater::updater_ready
+        updater::updater_ready,
+        colai::colai_shape,
+        colai::colai_frontmost,
+        colai::colai_summon,
+        colai::colai_release,
+        colai::colai_open_settings
     ]);
+
+    let builder = builder.manage(colai::ShapeState::default());
 
     let app = builder
         .on_window_event(|window, event| {

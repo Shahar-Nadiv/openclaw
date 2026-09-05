@@ -4,12 +4,14 @@
   "version": "0.1.0",
   "identifier": "ai.openclaw.linux",
   "build": {
-    "frontendDist": "../ui"
+    "frontendDist": "../colai-ui"
   },
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["openclaw"]
+        "schemes": [
+          "openclaw"
+        ]
       }
     },
     "updater": {
@@ -43,7 +45,9 @@
           "identifier": "local-companion",
           "description": "Local setup screens can invoke app commands and receive installer progress.",
           "local": true,
-          "windows": ["main"],
+          "windows": [
+            "main"
+          ],
           "permissions": [
             "allow-bootstrap",
             "allow-build-info",
@@ -59,16 +63,32 @@
             "core:event:allow-listen",
             "core:event:allow-unlisten",
             "process:allow-restart",
-            "updater:default"
+            "updater:default",
+            "allow-colai-shell"
           ]
         },
         {
           "identifier": "quickchat",
           "description": "Quick Chat can select agents, configure its shortcut, send messages, render hosted widgets, and receive window events.",
           "local": true,
-          "webviews": ["quickchat"],
+          "webviews": [
+            "quickchat"
+          ],
           "permissions": [
             "allow-quickchat",
+            "core:event:allow-listen",
+            "core:event:allow-unlisten"
+          ]
+        },
+        {
+          "identifier": "colai-overlay",
+          "description": "The Colai toolbar over the desktop: shape itself, read the frontmost application, give the screen back.",
+          "local": true,
+          "windows": [
+            "colai-overlay"
+          ],
+          "permissions": [
+            "allow-colai-overlay",
             "core:event:allow-listen",
             "core:event:allow-unlisten"
           ]
