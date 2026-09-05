@@ -32,7 +32,6 @@ use tauri::{
 };
 
 pub(crate) const OVERLAY_LABEL: &str = "colai-overlay";
-pub(crate) const SETTINGS_LABEL: &str = "colai-settings";
 
 /// A region of the overlay that belongs to Colai, in physical pixels.
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -364,29 +363,25 @@ pub(crate) fn colai_release(app: AppHandle) -> Result<(), String> {
 }
 
 /// Settings — the second and last window Colai has.
+///
+/// The application's main window, shown, rather than a window of its own. Colai's
+/// Settings page *is* `index.html`, which is what the main window loads, so building a
+/// second window here produced two identical Settings — one behind the other, each with
+/// its own state, and closing the front one revealing a stale copy of the same screen.
+///
+/// It also keeps the promise the rest of this file makes. "Two windows and no more" is
+/// the whole shape of Colai's GUI; a third that happens to look like the second is not
+/// a smaller violation of that for being invisible most of the time.
 #[tauri::command]
 pub(crate) fn colai_open_settings(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(SETTINGS_LABEL) {
-        let _ = window.show();
-        return window
-            .set_focus()
-            .map_err(|error| format!("Could not focus settings: {error}"));
-    }
-
-    WebviewWindowBuilder::new(
-        &app,
-        SETTINGS_LABEL,
-        WebviewUrl::App("settings.html".into()),
-    )
-    .title("colai Settings")
-    .inner_size(980.0, 640.0)
-    .min_inner_size(760.0, 520.0)
-    .decorations(false)
-    .center()
-    .build()
-    .map_err(|error| format!("Could not open settings: {error}"))?;
-
-    Ok(())
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "There is no main window to show.".to_string())?;
+    let _ = window.show();
+    let _ = window.unminimize();
+    window
+        .set_focus()
+        .map_err(|error| format!("Could not show settings: {error}"))
 }
 
 /// Which edges of this monitor the desktop's own chrome is using.
