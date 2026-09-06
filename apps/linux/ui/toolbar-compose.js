@@ -49,6 +49,41 @@ function middleOf(marks) {
   };
 }
 
+/**
+ * Open a new conversation where the work is, seeded with what was marked.
+ *
+ * The first thing a fresh session sees is the reason it exists, rather than an empty
+ * prompt somebody then has to explain themselves into.
+ */
+async function startHere() {
+  const project = state.inFront;
+  const example = project && project.threads[0];
+  if (!project || !project.path || !example) return;
+  const going = chosenMarks();
+  state.sending = true;
+  render();
+  try {
+    await invoke("colai_start_here", {
+      asked: {
+        catalogId: example.locator.catalogId,
+        hostId: example.locator.hostId,
+        agentId: example.locator.agentId || "main",
+        cwd: project.path,
+        initialMessage: summaryFor(going, state.mode, state.text, state.surface),
+      },
+    });
+    // The marks stay. A new conversation has been opened with them, and until it is
+    // listed among the receivers there is nothing here to send them to twice.
+    state.open = null;
+    state.trouble = `Opened a new conversation in ${project.label}.`;
+  } catch (error) {
+    state.trouble = `Could not start there — ${error && error.message ? error.message : String(error)}`;
+  } finally {
+    state.sending = false;
+    render();
+  }
+}
+
 /** The marks that go in the next send, in the order they were made. */
 function chosenMarks() {
   return state.marks.filter((mark) => mark.chosen);
@@ -369,7 +404,28 @@ function drawComposer() {
   to.type = "button";
   to.className = "popup-to";
   to.textContent = state.receiving.name || "Choose who receives";
+  // Never silently. A receiver the toolbar worked out for itself has to say so, or
+  // somebody finds out where their work went by reading it somewhere else.
+  if (!state.picked && state.inFront && state.receiving.kind === "thread") {
+    const why = document.createElement("span");
+    why.className = "popup-why";
+    why.textContent = ` · ${state.inFront.label} is in front`;
+    to.append(why);
+  }
   to.addEventListener("click", () => flyout("agents"));
+  // When the thing in front has a project, offer a conversation that starts there
+  // rather than one that has to be told where "there" is.
+  if (state.inFront && state.inFront.path) {
+    const fresh = document.createElement("button");
+    fresh.type = "button";
+    fresh.className = "popup-do";
+    fresh.textContent = "New here";
+    fresh.title = `Start a new conversation in ${state.inFront.path}`;
+    fresh.disabled = state.sending;
+    fresh.addEventListener("click", () => void startHere());
+    foot.append(fresh);
+  }
+
   const go = document.createElement("button");
   go.type = "button";
   go.className = "popup-do popup-go";

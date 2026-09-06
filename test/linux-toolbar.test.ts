@@ -35,6 +35,10 @@ type ToolbarHelpers = {
   counted: (many: number, noun: string) => string;
   MODES: Record<string, { label: string; says: string }>;
   spanOf: (points: Point[], screen: { width: number; height: number }) => number;
+  projectInFront: (
+    projects: { label: string | null; path?: string }[],
+    front: { app?: string; title?: string } | null,
+  ) => { label: string | null } | null;
   detailOf: (mark: { tool: string; px?: number; hex?: string; frames?: number }) => string | null;
   summaryFor: (
     marks: {
@@ -53,7 +57,7 @@ type ToolbarHelpers = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront };`,
   context,
 );
 const {
@@ -70,6 +74,7 @@ const {
   screenAt,
   spanOf,
   detailOf,
+  projectInFront,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -421,5 +426,52 @@ describe("marks that are more than one picture", () => {
     expect(said).toContain("1. Recording (mark-1-1.png … mark-1-6.png) — 6 frames over 1.8s");
     // A mark that photographed once keeps the plain name it always had.
     expect(said).toContain("2. Box (mark-2.png)");
+  });
+});
+
+describe("the project in front of you", () => {
+  const projects = [
+    { label: "Desktop/colai", path: "/home/someone/Desktop/colai" },
+    { label: "renti", path: "/home/someone/renti" },
+    { label: "ui", path: "/home/someone/ui" },
+  ];
+
+  test("an editor's title names the repository it has open", () => {
+    const found = projectInFront(projects, {
+      title: "toolbar.js — colai — Visual Studio Code",
+      app: "Code",
+    });
+    expect(found?.label).toBe("Desktop/colai");
+  });
+
+  test("a project's own name is matched, not the parent carried for uniqueness", () => {
+    // The label reads "Desktop/colai" only because another checkout shares its name.
+    // "Desktop" is not what an editor puts in its title.
+    expect(projectInFront(projects, { title: "Desktop", app: "Files" })).toBeNull();
+  });
+
+  test("a short name does not claim half the desktop", () => {
+    // `ui` appears inside "building", "quicksilver", and most other words.
+    expect(projectInFront(projects, { title: "building the guide", app: "Code" })).toBeNull();
+  });
+
+  test("a name has to be a word, not a fragment of one", () => {
+    expect(projectInFront(projects, { title: "rentier accounts", app: "Code" })).toBeNull();
+    expect(projectInFront(projects, { title: "renti — README", app: "Code" })?.label).toBe("renti");
+  });
+
+  test("two equally good answers is no answer", () => {
+    // Sending somebody's work to the wrong conversation is worse than asking them.
+    const twins = [
+      { label: "one/build", path: "/a/one/build" },
+      { label: "two/build", path: "/b/two/build" },
+    ];
+    expect(projectInFront(twins, { title: "build — Code", app: "Code" })).toBeNull();
+  });
+
+  test("nothing in front is not a guess", () => {
+    expect(projectInFront(projects, null)).toBeNull();
+    expect(projectInFront(projects, { title: "", app: "" })).toBeNull();
+    expect(projectInFront([], { title: "colai", app: "Code" })).toBeNull();
   });
 });

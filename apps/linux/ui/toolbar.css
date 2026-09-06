@@ -595,6 +595,11 @@ body {
 .popup-to:hover {
   color: #f7f7f8;
 }
+/* Why this receiver, when nobody chose it. */
+.popup-why {
+  opacity: 0.7;
+}
+
 .popup-do {
   all: unset;
   flex-shrink: 0;

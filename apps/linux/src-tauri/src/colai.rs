@@ -336,16 +336,54 @@ fn frontmost_x11() -> Option<Front> {
     }
 
     let about = Command::new("xprop")
-        .args(["-id", id, "WM_CLASS", "_NET_WM_NAME"])
+        .args(["-id", id, "WM_CLASS", "_NET_WM_NAME", "_NET_WM_PID"])
         .output()
         .ok()?;
     let about = String::from_utf8_lossy(&about.stdout);
 
-    Some(Front {
+    // Our own window is not "what is in front".
+    //
+    // The overlay takes the keyboard when a popup opens, which makes it the active
+    // window — so asking X what is in front, at the exact moment somebody is marking
+    // something, answers "colai". What they mean is the application they were in when
+    // they reached for the toolbar, and that is the last one this saw that was not us.
+    if ours(&about) {
+        return remembered_front();
+    }
+
+    let front = Front {
         app: app_name(&about),
         title: window_title(&about),
         id: id.to_string(),
-    })
+    };
+    remember_front(&front);
+    Some(front)
+}
+
+/// Whether a window belongs to this process.
+#[cfg(target_os = "linux")]
+fn ours(said: &str) -> bool {
+    said.lines()
+        .find(|line| line.starts_with("_NET_WM_PID"))
+        .and_then(|line| line.rsplit(' ').next())
+        .and_then(|pid| pid.trim().parse::<u32>().ok())
+        .is_some_and(|pid| pid == std::process::id())
+}
+
+/// The last window seen in front that was not one of ours.
+#[cfg(target_os = "linux")]
+static LAST_FRONT: Mutex<Option<Front>> = Mutex::new(None);
+
+#[cfg(target_os = "linux")]
+fn remember_front(front: &Front) {
+    if let Ok(mut held) = LAST_FRONT.lock() {
+        *held = Some(front.clone());
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn remembered_front() -> Option<Front> {
+    LAST_FRONT.lock().ok()?.clone()
 }
 
 /// The application's name, from the second half of WM_CLASS.
@@ -628,6 +666,22 @@ mod tests {
             width,
             height,
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn our_own_window_is_never_what_is_in_front() {
+        // The overlay takes the keyboard when a popup opens, which makes it the active
+        // window at the exact moment somebody is marking something. Answering "colai"
+        // there would route their work to a conversation about the toolbar.
+        let mine = format!("_NET_WM_PID(CARDINAL) = {}\n", std::process::id());
+        assert!(ours(&mine));
+
+        // Somebody else's window, and a window that says nothing about its process,
+        // are both fair answers to what is in front.
+        assert!(!ours("_NET_WM_PID(CARDINAL) = 1\n"));
+        assert!(!ours("WM_CLASS(STRING) = \"code\", \"Code\"\n"));
+        assert!(!ours(""));
     }
 
     #[test]

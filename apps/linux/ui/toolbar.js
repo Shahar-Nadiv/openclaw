@@ -132,6 +132,11 @@ const state = {
   popup: null,
   // A before-and-after that has its before and is waiting for the world to change.
   comparing: null,
+  // Whether the receiver was chosen rather than worked out. A guess may fill an empty
+  // seat; it may never take one somebody has sat in.
+  picked: false,
+  // The project the window in front belongs to, when that is obvious.
+  inFront: null,
   // What the next send is for, and anything else somebody wants to say with it.
   mode: "plan",
   text: "",
@@ -334,7 +339,9 @@ function flyout(which) {
   // Asked when the menu opens rather than polled: the answer only matters when somebody
   // is looking at it, and a conversation's title and status move while it runs, so a
   // list kept warm in the background would be a list that is quietly wrong.
-  if (state.open === "agents") void loadWho();
+  // Both menus show who could receive, and both are worth a fresh look at what is in
+  // front: the answer is different by the time somebody opens one.
+  if (state.open === "agents" || state.open === "send") void learnFront().then(loadWho);
 }
 
 /**
@@ -358,6 +365,19 @@ async function loadWho() {
     state.agents = agents || [];
     state.sessions = sessions || [];
     state.projects = projects || [];
+    // The conversation about whatever is on the screen in front, when it is obvious
+    // which that is. Telling the toolbar what it can already see was the most repeated
+    // act in using it.
+    if (!state.picked && state.inFront && state.inFront.threads.length) {
+      const latest = state.inFront.threads[0];
+      state.receiving = {
+        kind: "thread",
+        id: latest.id,
+        name: latest.title,
+        emoji: null,
+        locator: latest.locator,
+      };
+    }
     // Nobody picked yet, so the Gateway's own default stands in — the first thing
     // somebody marks still has somewhere to go.
     if (state.receiving.id === null) {
@@ -380,6 +400,7 @@ async function loadWho() {
 }
 
 function receive(kind, id, name, emoji, locator) {
+  state.picked = true;
   // The locator travels with the choice. A conversation held elsewhere is addressed by
   // its catalog, host and thread together, and by the time somebody sends, the list it
   // came from may have been reloaded out from under the id.
@@ -565,6 +586,10 @@ function addMark(mark) {
  * drawn, not that anybody has seen it.
  */
 async function shoot(mark, again) {
+  // What is in front *now*. A mark is about the window somebody is looking at, and
+  // reading that once when the app started answered a question about a different
+  // afternoon.
+  await learnFront();
   document.body.style.visibility = "hidden";
   try {
     await new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn)));
@@ -611,6 +636,26 @@ function compareStep() {
   }
   state.comparing = null;
   void shoot(waiting, true);
+}
+
+/**
+ * Which application is in front, and which project that makes this about.
+ *
+ * Asked again rather than remembered from startup: the window in front is the one
+ * thing on this desktop guaranteed to have changed since.
+ */
+async function learnFront() {
+  try {
+    const front = await invoke("colai_frontmost");
+    // No connector until the surface registry exists. Stated rather than implied: this
+    // is what a write is refused on, and defaulting it otherwise would make the refusal
+    // meaningless. The title comes with it, because that is where an editor puts the
+    // name of the repository it has open.
+    state.surface = front ? { app: front.app, title: front.title, connector: null } : null;
+  } catch {
+    state.surface = null;
+  }
+  state.inFront = projectInFront(state.projects, state.surface);
 }
 
 /** The colour the app is themed in, if it has told us one. */
@@ -1112,15 +1157,7 @@ async function start() {
   recall();
   place();
 
-  try {
-    const front = await invoke("colai_frontmost");
-    // No connector until the surface registry exists. Stated rather than implied: this
-    // is what a write is refused on, and defaulting it otherwise would make the refusal
-    // meaningless.
-    state.surface = front ? { app: front.app, connector: null } : null;
-  } catch {
-    state.surface = null;
-  }
+  await learnFront();
 
   // Answers, as they arrive. A session says a great deal — the question going in, the
   // work coming out — and only what an agent finally said back is an answer to what was

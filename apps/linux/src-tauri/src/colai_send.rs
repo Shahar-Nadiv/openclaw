@@ -16,7 +16,9 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::colai_capture::MarkShots;
-use crate::gateway_ws::{ChatAttachment, ChatRoutingTarget, GatewayClient, ThreadLocator};
+use crate::gateway_ws::{
+    ChatAttachment, ChatRoutingTarget, GatewayClient, StartHere, ThreadLocator,
+};
 
 /// Who is getting this, as the page knows them.
 #[derive(Debug, Clone, Deserialize)]
@@ -164,4 +166,16 @@ pub(crate) async fn colai_unwatch(
     session_key: String,
 ) -> Result<(), String> {
     gateway.watch_session(&session_key, false).await
+}
+
+/// Open a new conversation where the work is.
+///
+/// Seeded with what was marked, so the first thing the new session sees is the reason
+/// it exists rather than an empty prompt somebody then has to explain themselves into.
+#[tauri::command]
+pub(crate) async fn colai_start_here(
+    gateway: State<'_, GatewayClient>,
+    asked: StartHere,
+) -> Result<(), String> {
+    gateway.start_here(asked).await
 }

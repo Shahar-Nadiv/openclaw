@@ -290,6 +290,19 @@ pub(crate) struct ThreadLocator {
     pub agent_id: Option<String>,
 }
 
+/// Asking an external agent to open a fresh conversation in a directory.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StartHere {
+    pub catalog_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_id: Option<String>,
+    pub agent_id: String,
+    pub cwd: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_message: Option<String>,
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CatalogContinueResult {
@@ -411,6 +424,7 @@ enum GatewayRequest {
         key: String,
         watching: bool,
     },
+    StartHere(StartHere),
     ChatSend(ChatSendParams),
     RefreshCanvasSurface {
         observed_url: Option<String>,
@@ -734,6 +748,17 @@ impl GatewayClient {
             );
         };
         Ok(result)
+    }
+
+    /// Ask an external agent to open a new conversation in a directory.
+    ///
+    /// The other half of routing: when what is in front has no conversation worth
+    /// joining, the answer is a new one where the work is, rather than an agent that
+    /// has to be told where the work is.
+    pub async fn start_here(&self, asked: StartHere) -> Result<(), String> {
+        self.request(GatewayRequest::StartHere(asked))
+            .await
+            .map(|_| ())
     }
 
     /// Hear what a session says from now on, or stop hearing it.
@@ -1739,6 +1764,22 @@ where
             request_on_socket(socket, method, json!({ "key": key }), budget, dispatch)
                 .await
                 .map(|_| GatewayResponse::CanvasSurface(None))
+        }
+        GatewayRequest::StartHere(asked) => {
+            let params = serde_json::to_value(asked).map_err(|error| {
+                RequestFailure::transport(format!(
+                    "Could not encode sessions.catalog.startTerminal: {error}"
+                ))
+            })?;
+            request_on_socket(
+                socket,
+                "sessions.catalog.startTerminal",
+                params,
+                budget,
+                dispatch,
+            )
+            .await
+            .map(|_| GatewayResponse::CanvasSurface(None))
         }
         GatewayRequest::SessionsCatalogContinue(locator) => {
             let params = serde_json::to_value(locator).map_err(|error| {

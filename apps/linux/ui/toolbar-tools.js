@@ -317,6 +317,60 @@ function gateFor(tool, surface) {
 }
 
 /**
+ * The project the window in front belongs to, if it is obvious which.
+ *
+ * The toolbar already knows what is in front and already knows every conversation's
+ * checkout; nothing connected the two, so the most repeated act in using this was
+ * telling it something it could see. An editor's title says which repository is open —
+ * "toolbar.js — colai — Visual Studio Code" — and that is the name to match.
+ *
+ * It guesses at nothing. A name has to appear as a word, so a project called `ui` does
+ * not claim every window with "build" in the title; two projects matching equally well
+ * means no answer at all, because picking one of them is worse than asking. Being wrong
+ * here sends somebody's work to the wrong conversation.
+ */
+function projectInFront(projects, front) {
+  const said = `${(front && front.title) || ""} ${(front && front.app) || ""}`.toLowerCase();
+  if (!said.trim()) return null;
+  let best = null;
+  let bestAt = 0;
+  let tied = false;
+  for (const project of projects || []) {
+    const name = ownName(project);
+    // Two characters match half the desktop. A repository is not usually called `go`,
+    // and if it is, choosing the receiver by hand is the safer cost.
+    if (!name || name.length < 3) continue;
+    if (!wordIn(said, name)) continue;
+    if (name.length > bestAt) {
+      best = project;
+      bestAt = name.length;
+      tied = false;
+    } else if (name.length === bestAt) {
+      tied = true;
+    }
+  }
+  return tied ? null : best;
+}
+
+/** A project's own name: the last part of its label, which may carry a parent. */
+function ownName(project) {
+  const label = (project && project.label) || "";
+  return label.split("/").filter(Boolean).pop() || "";
+}
+
+/** Whether a name appears in a title as a word rather than inside another one. */
+function wordIn(said, name) {
+  let at = said.indexOf(name);
+  while (at !== -1) {
+    const before = at === 0 ? " " : said[at - 1];
+    const after = at + name.length >= said.length ? " " : said[at + name.length];
+    if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) return true;
+    at = said.indexOf(name, at + 1);
+  }
+  return false;
+}
+
+/**
  * How far apart two points are, in the pixels somebody would count.
  *
  * The overlay thinks in fractions of itself so a mark survives the rail moving between
