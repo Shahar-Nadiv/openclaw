@@ -162,7 +162,13 @@ function addMark(mark) {
   // In the next send unless somebody says otherwise. Marking something and then having
   // to go and tick it is a step nobody asked for.
   mark.chosen = true;
-  if (mark.tool === "wireframe") mark.dest = WIREFRAME_HOME;
+  // A design mark starts as a wireframe with the kind's own home in it. Somebody can
+  // change both in the popup; starting empty would mean typing a path they had no
+  // reason to know before they could ask for the commonest thing on the menu.
+  if (mark.tool === "design") {
+    mark.design = DESIGN_FIRST;
+    mark.dest = DESIGNS[DESIGN_FIRST].home;
+  }
   state.marks.push(mark);
   // A new mark ends the redo trail: what was undone is no longer what comes next.
   state.undone = [];

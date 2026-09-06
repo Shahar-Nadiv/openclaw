@@ -34,7 +34,7 @@ const TOOLS = {
   compare: { label: "Before and after", press: "A", glyph: "compare", writes: false },
   inspect: { label: "Inspect", press: "I", glyph: "inspect", writes: false },
   watch: { label: "Watch", press: "W", glyph: "watch", writes: false },
-  wireframe: { label: "Create wireframe", glyph: "wireframe", writes: false },
+  design: { label: "Design", glyph: "wireframe", writes: false },
   screenshot: { label: "Screenshot", glyph: "screenshot", writes: false },
 };
 
@@ -59,8 +59,76 @@ const MODES = {
   build: { label: "Build", says: "Make this change." },
 };
 
-/** Where a wireframe goes when nobody says otherwise. */
-const WIREFRAME_HOME = "docs/Design/";
+/**
+ * What a design mark is asking for.
+ *
+ * One tool with four things it can mean, rather than four keys: they take the same
+ * picture of the same region and differ only in the sentence that goes with it, and a
+ * rail with four near-identical eyes on it is a rail nobody can read. The kind is
+ * picked in the popup, where somebody is already looking at what they marked.
+ *
+ * Data rather than branches, so the chips in the popup and the instruction in the
+ * message are read from one place and cannot drift apart — the same reason `MODES` is
+ * a table.
+ *
+ * `home` is where the document goes when nobody says otherwise, and a component has
+ * none on purpose. Only the repository knows where its own components live, and a
+ * toolbar that guessed would be sending an agent to the wrong directory with an air of
+ * confidence.
+ */
+const DESIGNS = {
+  wireframe: {
+    label: "Wireframe",
+    home: "docs/Design/",
+    says: (file, home) =>
+      `Turn ${file} into a wireframe and write it to ${home}, matching the .dc.html ` +
+      `documents already there — the same <x-dc> wrapper and the shared _ds/ ` +
+      `stylesheets they use.`,
+  },
+  redline: {
+    label: "Redline",
+    home: "docs/Design/",
+    says: (file, home) =>
+      `Measure ${file} and write the spec to ${home}: spacing between elements, type ` +
+      `sizes and weights, colours as hex, border radii, and the states you can see. ` +
+      `Where this project already has tokens for any of it, name the token rather ` +
+      `than the value.`,
+  },
+  component: {
+    label: "Component",
+    home: null,
+    says: (file) =>
+      `Build ${file} as a component in the framework this project already uses. Read ` +
+      `its neighbours first and match how they are written, where they live, and how ` +
+      `they are tested — a component that is correct and unlike everything around it ` +
+      `is a component somebody has to rewrite.`,
+  },
+  tokens: {
+    label: "Tokens",
+    home: "docs/Design/",
+    says: (file, home) =>
+      `Pull the design tokens out of ${file} — colours, spacing steps, type scale, ` +
+      `radii — and reconcile them with the ones this project already defines. Write ` +
+      `what is new and what conflicts to ${home}; do not restate what already exists.`,
+  },
+};
+
+/** Which kind a design mark is when nobody has said. */
+const DESIGN_FIRST = "wireframe";
+
+/** Where a design mark's document goes: what somebody typed, or the kind's own home. */
+function homeOf(mark) {
+  const kind = DESIGNS[mark.design] || DESIGNS[DESIGN_FIRST];
+  // A component has no default, so an empty field is a real answer there — "wherever
+  // this project keeps them" — and the sentence for that kind never asks about it.
+  return (mark.dest || "").trim() || kind.home || "";
+}
+
+/** What a mark is called in the message: for a design mark, which kind it is. */
+function labelOf(mark) {
+  if (mark.tool === "design") return (DESIGNS[mark.design] || DESIGNS[DESIGN_FIRST]).label;
+  return TOOLS[mark.tool] ? TOOLS[mark.tool].label : mark.tool;
+}
 
 /**
  * How long a recording may cover.
@@ -203,7 +271,7 @@ const DRAWS = {
   circle: "ellipse",
   draw: "stroke",
   screenshot: "box",
-  wireframe: "box",
+  design: "box",
   measure: "span",
   record: "box",
   compare: "box",
@@ -211,7 +279,7 @@ const DRAWS = {
 };
 
 /** The tools for which a click that selected nothing means the whole display. */
-const WHOLE_DISPLAY = ["screenshot", "wireframe"];
+const WHOLE_DISPLAY = ["screenshot", "design"];
 
 /** Single letters that pick a tool, from the tooltips the rail shows. */
 const KEYS = {
@@ -243,14 +311,13 @@ const KEYS = {
 function summaryFor(marks, mode, text, surface, files) {
   const said = [];
   const said_of = (mark, at) => {
-    const tool = TOOLS[mark.tool];
     const note = (mark.note || "").trim();
     const detail = detailOf(mark);
     const files =
       mark.frames > 1
         ? `mark-${at + 1}-1.png … mark-${at + 1}-${mark.frames}.png`
         : `mark-${at + 1}.png`;
-    const named = `${at + 1}. ${tool ? tool.label : mark.tool} (${files})`;
+    const named = `${at + 1}. ${labelOf(mark)} (${files})`;
     return [named, detail, note].filter(Boolean).join(" — ");
   };
   if (marks.length) {
@@ -262,18 +329,14 @@ function summaryFor(marks, mode, text, surface, files) {
     );
     said.push("");
     marks.forEach((mark, at) => said.push(said_of(mark, at)));
-    // A wireframe is the one mark that asks for a file rather than an opinion, so it
-    // says where the file goes. Stated per mark: two of them in one batch are two
-    // documents, not one with two names.
+    // A design mark asks for a file rather than an opinion, so it says what to make and
+    // where it goes. Stated per mark: two of them in one batch are two documents, not
+    // one with two names — and they can be two different kinds.
     marks.forEach((mark, at) => {
-      if (mark.tool !== "wireframe") return;
-      const home = (mark.dest || "").trim() || WIREFRAME_HOME;
+      if (mark.tool !== "design") return;
+      const kind = DESIGNS[mark.design] || DESIGNS[DESIGN_FIRST];
       said.push("");
-      said.push(
-        `Turn mark-${at + 1}.png into a wireframe and write it to ${home}, matching the ` +
-          `.dc.html documents already there — the same <x-dc> wrapper and the shared _ds/ ` +
-          `stylesheets they use.`,
-      );
+      said.push(kind.says(`mark-${at + 1}.png`, homeOf(mark)));
     });
     said.push("");
   }

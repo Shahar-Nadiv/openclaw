@@ -155,7 +155,7 @@ pub(crate) fn drawn_as(mark: &Mark) -> Option<&'static str> {
     // the statement.
     if matches!(
         mark.tool.as_str(),
-        "screenshot" | "wireframe" | "record" | "compare" | "watch"
+        "screenshot" | "design" | "record" | "compare" | "watch"
     ) {
         return None;
     }
@@ -287,10 +287,12 @@ mod tests {
             )),
             Some("stroke"),
         );
-        // A screenshot is the whole statement; an outline round its edge is noise.
+        // A screenshot is the whole statement; an outline round its edge is noise. A
+        // design mark is a picture somebody is going to build from, and a red box drawn
+        // across it is a red box in the wireframe.
         assert_eq!(drawn_as(&mark("screenshot", None, vec![])), None);
         assert_eq!(
-            drawn_as(&mark("wireframe", boxed(0.1, 0.1, 0.2, 0.2), vec![])),
+            drawn_as(&mark("design", boxed(0.1, 0.1, 0.2, 0.2), vec![])),
             None
         );
     }

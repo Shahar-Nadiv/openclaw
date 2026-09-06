@@ -29,7 +29,7 @@ function drawPopup() {
   const named = document.createElement("div");
   named.className = "popup-named";
   const what = document.createElement("strong");
-  what.textContent = TOOLS[mark.tool] ? TOOLS[mark.tool].label : mark.tool;
+  what.textContent = labelOf(mark);
   const size = document.createElement("span");
   size.className = "popup-size";
   // What the mark knows, when it knows something exact. A colour you cannot see is a
@@ -67,14 +67,43 @@ function drawPopup() {
   });
   rows.push(note);
 
-  if (mark.tool === "wireframe") {
+  if (mark.tool === "design") {
+    // Which of the four this is. Chips rather than a menu: they are four ways of
+    // reading the same picture, and seeing them side by side is what tells somebody
+    // that "redline" and "tokens" are different questions.
+    const kinds = document.createElement("div");
+    kinds.className = "mode-row design-row";
+    for (const [id, kind] of Object.entries(DESIGNS)) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip";
+      chip.setAttribute("aria-pressed", String((mark.design || DESIGN_FIRST) === id));
+      chip.textContent = kind.label;
+      chip.addEventListener("click", () => {
+        mark.design = id;
+        // The home moves with the kind, unless somebody has typed over it. A redline
+        // left pointing at the path a wireframe suggested is the sort of wrong that
+        // only shows up in a pull request.
+        if (!mark.destTyped) mark.dest = kind.home || "";
+        render();
+      });
+      kinds.append(chip);
+    }
+    rows.push(kinds);
+
+    const kind = DESIGNS[mark.design] || DESIGNS[DESIGN_FIRST];
     const where = document.createElement("input");
     where.className = "popup-note popup-dest";
     where.type = "text";
-    where.value = mark.dest || WIREFRAME_HOME;
-    where.setAttribute("aria-label", "Where the wireframe document goes");
+    where.value = mark.dest || "";
+    // A component has no home to suggest, because only the repository knows where its
+    // own components go. Empty is the honest answer, and the placeholder says so
+    // rather than leaving a blank box that looks unfinished.
+    where.placeholder = kind.home || "wherever this project keeps them";
+    where.setAttribute("aria-label", `Where the ${kind.label.toLowerCase()} goes`);
     where.addEventListener("input", () => {
       mark.dest = where.value;
+      mark.destTyped = true;
     });
     rows.push(where);
   }
@@ -287,7 +316,9 @@ function drawComposer() {
     }
     const said = document.createElement("span");
     said.className = "agent-name";
-    const tool = TOOLS[mark.tool] ? TOOLS[mark.tool].label : mark.tool;
+    // Named the way the message will name it, so what somebody ticks in the tray and
+    // what the agent reads are the same word.
+    const tool = labelOf(mark);
     said.textContent = mark.note ? `${tool} — ${mark.note}` : tool;
     said.title = said.textContent;
     row.append(tick, shot, said);

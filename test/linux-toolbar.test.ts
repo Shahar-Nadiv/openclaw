@@ -70,6 +70,7 @@ type ToolbarHelpers = {
       hex?: string;
       frames?: number;
       seconds?: number;
+      design?: string;
     }[],
     mode: string,
     text: string,
@@ -93,6 +94,14 @@ type ToolbarHelpers = {
     room: { left: number; top: number; right: number; bottom: number },
   ) => { left: number; top: number };
   ANSWER_AWAY: number;
+  DESIGNS: Record<
+    string,
+    { label: string; home: string | null; says: (file: string, home: string) => string }
+  >;
+  DESIGN_FIRST: string;
+  labelOf: (mark: { tool: string; design?: string }) => string;
+  homeOf: (mark: { design?: string; dest?: string }) => string;
+  WHOLE_DISPLAY: string[];
 };
 
 /** A file or folder somebody dropped on the toolbar, as the page holds it. */
@@ -100,7 +109,7 @@ type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY };`,
   context,
 );
 const {
@@ -126,6 +135,11 @@ const {
   RECORD_CLEAR,
   answerAt,
   ANSWER_AWAY,
+  DESIGNS,
+  DESIGN_FIRST,
+  labelOf,
+  homeOf,
+  WHOLE_DISPLAY,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -158,7 +172,7 @@ describe("what a tool is allowed to do", () => {
     expect(DRAWS.pointer).toBeUndefined();
     // Both photographing tools drag out a region like any other area tool.
     expect(DRAWS.screenshot).toBe("box");
-    expect(DRAWS.wireframe).toBe("box");
+    expect(DRAWS.design).toBe("box");
   });
 });
 
@@ -190,10 +204,10 @@ describe("the gate", () => {
     expect(said.says).toBeNull();
   });
 
-  test("creating a wireframe is not refused, because it changes no surface", () => {
+  test("asking for a design is not refused, because it changes no surface", () => {
     // It asks an agent for a document. Refusing it on an unconnected window would be
     // the gate answering a question nobody asked.
-    expect(gateFor("wireframe", bare).blocked).toBe(false);
+    expect(gateFor("design", bare).blocked).toBe(false);
   });
 });
 
@@ -361,9 +375,9 @@ describe("what the agent is actually sent", () => {
     expect(lines.at(-1)).toBe("only when the panel is collapsed");
   });
 
-  test("a wireframe says where its document goes, and every wireframe says it once", () => {
+  test("a design mark says what to make and where, once each", () => {
     const said = summaryFor(
-      [{ tool: "wireframe", dest: "docs/Design/rail.dc.html" }, { tool: "wireframe" }],
+      [{ tool: "design", dest: "docs/Design/rail.dc.html" }, { tool: "design" }],
       "build",
       "",
       surface,
@@ -768,6 +782,10 @@ describe("watching a region", () => {
     assert.ok(list, "the tools drawn_as leaves bare");
     expect(list[1]).toContain('"watch"');
     expect(list[1]).toContain('"compare"');
+    // And a design mark, which is a picture somebody is going to build from. A red box
+    // drawn across it is a red box in the wireframe.
+    expect(list[1]).toContain('"design"');
+    expect(list[1]).not.toContain('"wireframe"');
   });
 
   test("the marker clears the pixels the pair is taken from", () => {
@@ -846,5 +864,93 @@ describe("where an answer opens", () => {
     };
     const put = answerAt({ x: 600, y: 1050 }, panel, room(docked));
     expect(put.top + panel.height).toBeLessThanOrEqual(left.height - 60);
+  });
+});
+
+describe("the design family", () => {
+  test("four kinds, one tool", () => {
+    // One key with four meanings rather than four keys: they take the same picture of
+    // the same region and differ only in the sentence that goes with it, and a rail
+    // with four near-identical eyes on it is a rail nobody can read.
+    expect(Object.keys(DESIGNS)).toEqual(["wireframe", "redline", "component", "tokens"]);
+    expect(TOOLS.design!.writes).toBe(false);
+    expect(TOOLS.wireframe).toBeUndefined();
+    expect(DESIGNS[DESIGN_FIRST]).toBeDefined();
+  });
+
+  test("every kind says something an agent could act on without being asked twice", () => {
+    // The instruction is the whole difference between the kinds, so an empty or
+    // interchangeable one would make its chip a lie.
+    const said = Object.values(DESIGNS).map((kind) => kind.says("mark-1.png", "docs/Design/"));
+    for (const line of said) {
+      expect(line).toContain("mark-1.png");
+      expect(line.length).toBeGreaterThan(80);
+    }
+    expect(new Set(said).size).toBe(said.length);
+  });
+
+  test("a component has no home, because only the repository knows where they live", () => {
+    // A guessed path is worse than none: it sends an agent to the wrong directory with
+    // an air of confidence, and its sentence never mentions a destination at all.
+    expect(DESIGNS.component!.home).toBeNull();
+    expect(homeOf({ design: "component" })).toBe("");
+    expect(DESIGNS.component!.says("mark-1.png", "")).not.toContain("write it to ");
+  });
+
+  test("a kind that writes a document has somewhere to put it", () => {
+    expect(homeOf({ design: "wireframe" })).toBe("docs/Design/");
+    expect(homeOf({ design: "tokens" })).toBe("docs/Design/");
+    // And what somebody typed beats it, for any kind.
+    expect(homeOf({ design: "redline", dest: " ui/spec.md " })).toBe("ui/spec.md");
+    expect(homeOf({ design: "component", dest: "src/ui/" })).toBe("src/ui/");
+  });
+
+  test("a design mark with no kind is a wireframe rather than a mistake", () => {
+    // Marks are made by dragging, not by filling in a form, so every field has to have
+    // an answer before anybody has been asked for one.
+    expect(labelOf({ tool: "design" })).toBe("Wireframe");
+    expect(homeOf({})).toBe("docs/Design/");
+    expect(summaryFor([{ tool: "design" }], "ask", "", null)).toContain("into a wireframe");
+  });
+
+  test("the message calls a mark by its kind, not by the tool that made it", () => {
+    // "1. Design" says nothing; the kind is the request. And the tray uses the same
+    // word, so what somebody ticks and what the agent reads match.
+    expect(labelOf({ tool: "design", design: "redline" })).toBe("Redline");
+    const said = summaryFor(
+      [
+        { tool: "design", design: "redline" },
+        { tool: "design", design: "tokens" },
+      ],
+      "ask",
+      "",
+      null,
+    );
+    expect(said).toContain("1. Redline (mark-1.png)");
+    expect(said).toContain("2. Tokens (mark-2.png)");
+  });
+
+  test("two design marks in one send are two documents, each said once", () => {
+    const said = summaryFor(
+      [
+        { tool: "design", design: "wireframe", dest: "docs/Design/rail.dc.html" },
+        { tool: "design", design: "component" },
+      ],
+      "plan",
+      "",
+      null,
+    );
+    expect(said).toContain(
+      "Turn mark-1.png into a wireframe and write it to docs/Design/rail.dc.html",
+    );
+    expect(said).toContain("Build mark-2.png as a component");
+    expect(said.match(/into a wireframe/g)).toHaveLength(1);
+  });
+
+  test("not dragging one out still asks for the whole screen", () => {
+    // The simplest thing this tool does — "make me a wireframe of this screen" — has to
+    // survive being asked for with a click.
+    expect(WHOLE_DISPLAY).toContain("design");
+    expect(WHOLE_DISPLAY).toContain("screenshot");
   });
 });

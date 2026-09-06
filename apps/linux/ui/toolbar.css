@@ -531,6 +531,13 @@ body {
 .chip:hover {
   color: #f7f7f8;
 }
+/* Four words where the mode chips have one each. Smaller and given room to breathe,
+   rather than four labels touching their own edges. */
+.design-row .chip {
+  padding: 5px 3px;
+  font-size: 10.5px;
+  letter-spacing: 0.1px;
+}
 .chip[aria-pressed="true"] {
   background: var(--accent, #ff6b6b);
   color: #1c1c1e;

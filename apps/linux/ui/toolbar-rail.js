@@ -173,7 +173,7 @@ function buildRail() {
 
   row(el.flyShape, "box", "Box", "box", "B");
   row(el.flyShape, "circle", "Circle", "circle", "O");
-  row(el.flyDesign, "wireframe", "Create wireframe", "wireframe");
+  row(el.flyDesign, "design", "Design", "wireframe");
   row(el.flyDesign, "screenshot", "Screenshot", "screenshot");
   for (const seconds of RECORD_LENGTHS) length(el.flyRecord, seconds);
 }

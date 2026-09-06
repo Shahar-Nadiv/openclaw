@@ -124,7 +124,7 @@ function render() {
       button.setAttribute(
         "aria-pressed",
         String(
-          state.tool === "wireframe" || state.tool === "screenshot" || state.open === "design",
+          state.tool === "design" || state.tool === "screenshot" || state.open === "design",
         ),
       );
     } else if (id === "agents") {
