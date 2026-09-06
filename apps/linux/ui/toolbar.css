@@ -41,17 +41,6 @@ body {
   z-index: 60;
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-}
-/* Docked left or right, the rail turns and the receipt drops underneath it. */
-.rail-wrap[data-vertical="true"] {
-  flex-direction: row;
-}
-.rail-wrap[data-dock="right"] {
-  flex-direction: row-reverse;
-}
-.rail-wrap[data-vertical="false"] {
-  flex-direction: column;
 }
 
 .rail {
@@ -178,10 +167,31 @@ body {
   opacity: 0.6;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-/* The receiving agent's own mark, when it has one. */
+/*
+ * Who is receiving, as a face.
+ *
+ * On an upright rail the name beside it is hidden for width, and this used to be the
+ * agent's emoji or nothing at all — so the control was a naked caret that said nothing
+ * and was barely worth aiming at. A disc with an emoji or an initial in it is legible
+ * at that size and is the same face the menu shows.
+ */
 .running-dots {
-  font-size: 14px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: rgb(255 255 255 / 10%);
+  font-size: 12px;
   line-height: 1;
+}
+.key[aria-pressed="true"] .running-dots {
+  background: rgb(0 0 0 / 14%);
+}
+.rail-wrap[data-vertical="true"] .agents-key {
+  gap: 3px;
+  padding: 0 6px;
 }
 
 .agent-avatar-dot {
@@ -349,7 +359,16 @@ body {
 
 /* ── the receipt ──────────────────────────────────────────────────────────── */
 
+/*
+ * Anchored to the rail, not laid out beside it.
+ *
+ * The wrap is pinned by its top-left and sizes to its contents, so a receipt that was a
+ * flex sibling grew the wrap — and on the right dock, where the rail sat at the wrap's
+ * far edge, every receipt shoved the toolbar further off the screen. Hanging it off the
+ * rail the way the flyouts do means nothing it ever says can move the toolbar.
+ */
 .receipt {
+  position: absolute;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -367,9 +386,25 @@ body {
 .receipt[data-blocked="true"] {
   border-color: rgb(255 123 123 / 55%);
 }
+/* Below the rail when it is flat, beside it when upright, and always on the side that
+   has the room: against an edge, the receipt turns inward. */
+.rail-wrap[data-vertical="false"] .receipt {
+  top: calc(100% + 8px);
+  left: 0;
+}
+.rail-wrap[data-dock="bottom"] .receipt {
+  top: auto;
+  bottom: calc(100% + 8px);
+}
 .rail-wrap[data-vertical="true"] .receipt {
+  top: 0;
+  left: calc(100% + 10px);
   max-width: 220px;
   white-space: normal;
+}
+.rail-wrap[data-dock="right"] .receipt {
+  left: auto;
+  right: calc(100% + 10px);
 }
 .receipt-dot {
   font-size: 8px;

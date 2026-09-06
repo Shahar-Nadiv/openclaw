@@ -805,7 +805,10 @@ function render() {
 
   const who = receiver();
   const mark = buttons.agents.querySelector(".running-dots");
-  mark.textContent = who && who.emoji ? who.emoji : "";
+  // An initial when there is no emoji, because upright the name beside this is hidden
+  // and an empty mark leaves the control saying nothing at all.
+  mark.textContent = who ? who.emoji || who.name.slice(0, 1).toUpperCase() : "";
+  mark.hidden = !who;
   buttons.agents.querySelector(".agents-who").textContent = who
     ? who.name
     : state.agents.length || talking()
@@ -840,13 +843,39 @@ function render() {
 
 function placeFlyout(node, vertical, from) {
   node.style.cssText = "";
+  const along = vertical ? "top" : "left";
+  node.style[along] = `${from}px`;
   if (vertical) {
-    node.style.top = `${from}px`;
     node.style[state.dock === "right" ? "right" : "left"] = "calc(100% + 10px)";
   } else {
-    node.style.left = `${from}px`;
     node.style[state.dock === "top" ? "top" : "bottom"] = "calc(100% + 8px)";
   }
+  if (node.hidden) return;
+  // Measured only once it is placed and filled: a menu's length depends on how many
+  // conversations are in it, which is not known until it is drawn.
+  const fitted = within(node, vertical ? "y" : "x", from);
+  if (fitted !== from) node.style[along] = `${fitted}px`;
+}
+
+/**
+ * Where a flyout has to sit to stay on the screen.
+ *
+ * Menus open at a fixed offset from the top of the rail, which is fine in the middle of
+ * a screen and wrong at the end of one: a rail docked low with a full list of
+ * conversations opened it straight off the bottom, and the rows nearest the bottom were
+ * simply unreachable. Nudged back by however much it overhangs, and the near edge wins
+ * when a menu is too long to fit either way — the top of a list is where reading starts.
+ */
+function within(node, axis, at) {
+  const room = usable({ width: window.innerWidth, height: window.innerHeight }, state.reserved);
+  const box = node.getBoundingClientRect();
+  const near = axis === "y" ? room.top + EDGE : room.left + EDGE;
+  const far = axis === "y" ? room.bottom - EDGE : room.right - EDGE;
+  const head = axis === "y" ? box.top : box.left;
+  const tail = axis === "y" ? box.bottom : box.right;
+  let shift = Math.min(0, far - tail);
+  if (head + shift < near) shift = near - head;
+  return Math.round(at + shift);
 }
 
 /**
