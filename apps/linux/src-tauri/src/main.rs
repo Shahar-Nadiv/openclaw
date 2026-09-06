@@ -1451,6 +1451,7 @@ fn main() {
         colai_capture::colai_forget_marks,
         colai_send::colai_send,
         colai_send::colai_unwatch,
+        colai_send::colai_stop,
         colai_send::colai_start_here,
         colai_send::colai_automate,
         colai_files::colai_describe_files,

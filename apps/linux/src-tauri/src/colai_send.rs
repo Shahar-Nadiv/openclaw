@@ -235,6 +235,20 @@ pub(crate) async fn colai_automate(
         .await
 }
 
+/// Stop a run that is underway.
+///
+/// The only thing on this rail that destroys work rather than describing it. It says
+/// what it stopped rather than going quiet, because a stop that produced no answer is
+/// indistinguishable from a stop that did not happen — and somebody who pressed it needs
+/// to know which.
+#[tauri::command]
+pub(crate) async fn colai_stop(
+    gateway: State<'_, GatewayClient>,
+    session_key: String,
+) -> Result<(), String> {
+    gateway.chat_abort(&session_key).await
+}
+
 /// Stop listening to a conversation.
 ///
 /// Called when the overlay is put away and when what was being waited on is dismissed.

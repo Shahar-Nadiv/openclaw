@@ -37,6 +37,7 @@ const GLYPHS = {
   screenshot:
     '<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/>',
   send: '<path d="M21 3L10.5 13.5"/><path d="M21 3l-6.8 18-3.7-7.5L3 9.8z"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/>',
   measure: '<path d="M4 6v12M20 6v12M4 12h16"/><path d="M8.5 9l-3 3 3 3M15.5 9l3 3-3 3"/>',
   record:
     '<rect x="2.5" y="5" width="14" height="14" rx="2.5"/><path d="M16.5 10.2l5-2.7v9l-5-2.7z"/>',
@@ -203,7 +204,14 @@ function buildRail() {
   home.addEventListener("click", () => invoke("colai_open_settings"));
   buttons.settings = home;
 
-  dividers[2].after(send, agents, home);
+  // Only ever on the rail while something is running, and beside the key that says so.
+  // Stopping is the one thing here that destroys work rather than describing it, so it
+  // is never a key somebody can press by reflex looking for something else.
+  const stop = key("stop", "Stop the agent", "stop", () => void stopEverything());
+  stop.classList.add("stop-key");
+  stop.hidden = true;
+
+  dividers[2].after(send, agents, stop, home);
 
   row(el.flyShape, "box", "Box", "box", "B");
   row(el.flyShape, "circle", "Circle", "circle", "O");
@@ -270,6 +278,33 @@ function followTheFold() {
     if (Date.now() < until) following = requestAnimationFrame(again);
   };
   again();
+}
+
+/**
+ * Stop what is running.
+ *
+ * Everything, because the key beside the count is about the count. Stopping one
+ * particular run is a thing to do from the list where that run has a name, not from a
+ * button that does not know which one somebody meant.
+ */
+async function stopEverything() {
+  const runs = state.runs;
+  if (runs.length === 0) return;
+  state.runs = [];
+  render();
+  const stopped = [];
+  for (const run of runs) {
+    try {
+      await invoke("colai_stop", { sessionKey: run.sessionKey });
+      stopped.push(run.who || run.sessionKey);
+    } catch (error) {
+      state.trouble = `Could not stop ${run.who || "that run"} — ${error && error.message ? error.message : String(error)}`;
+    }
+  }
+  // Said, not assumed. A stop that produced no answer looks exactly like a stop that did
+  // not happen, and somebody who pressed it needs to know which.
+  if (stopped.length) state.trouble = `Stopped ${stopped.join(", ")}.`;
+  render();
 }
 
 /** One pen on the menu the drawing key opens. */

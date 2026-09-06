@@ -86,6 +86,10 @@ const state = {
   // defaults each time rather than kept: a schedule is about one piece of work, and
   // yesterday's interval sitting in the box is a job somebody creates by accident.
   cron: { ...AUTOMATION_FIRST },
+  // The runs the toolbar believes are underway: one per session it has sent to and not
+  // yet heard the end of. Kept as a list rather than a flag, because "one agent is
+  // working" and "four are" are different things to be told.
+  runs: [],
   // Windows that were asked what they are showing and had nothing to say. Asking again
   // is a quarter of a second spent learning what the last answer already said.
   mute: new Set(),
@@ -198,6 +202,15 @@ function render() {
   buttons.undo.disabled = state.marks.length === 0;
   buttons.redo.disabled = state.undone.length === 0;
 
+  // What is actually still running, rather than what was last started. A run that has
+  // gone quiet for minutes is one the toolbar has lost track of, and claiming it is
+  // still working is a worse lie than never having said so.
+  state.runs = stillRunning(state.runs, Date.now());
+  const working = runningSaid(state.runs);
+  buttons.agents.dataset.working = String(state.runs.length > 0);
+  buttons.stop.hidden = state.runs.length === 0;
+  buttons.stop.title = state.runs.length === 1 ? "Stop the agent" : `Stop ${state.runs.length} runs`;
+
   const who = receiver();
   const mark = buttons.agents.querySelector(".running-dots");
   // An initial when there is no emoji, because upright the name beside this is hidden
@@ -211,8 +224,9 @@ function render() {
       : "Agents";
   buttons.agents.querySelector(".agents-running").textContent = state.whoTrouble
     ? "unavailable"
-    : counted(state.agents.length, "agent") +
-      (talking() ? ` · ${counted(talking(), "conversation")}` : "");
+    : working ||
+      counted(state.agents.length, "agent") +
+        (talking() ? ` · ${counted(talking(), "conversation")}` : "");
 
   for (const button of document.querySelectorAll(".row[data-tool]")) {
     // Five of these rows are the same tool and differ only in what they ask it for, so
@@ -531,9 +545,21 @@ async function start() {
   // Answers, as they arrive. A session says a great deal — the question going in, the
   // work coming out — and only what an agent finally said back is an answer to what was
   // pointed at.
+  // A run saying it is over, or has fallen over.
+  void listen("colai:ended", (event) => {
+    const key = event && event.payload && event.payload.sessionKey;
+    if (!key) return;
+    state.runs = state.runs.filter((run) => run.sessionKey !== key);
+    render();
+  }).catch(() => {});
+
   void listen("colai:reply", (event) => {
     const payload = event && event.payload;
     if (!payload) return;
+    // Anything said is a sign of life, which is what keeps the glow from timing out on
+    // an agent that is working but slow.
+    const run = state.runs.find((one) => one.sessionKey === payload.sessionKey);
+    if (run) run.heard = Date.now();
     const waiting = state.answers.find(
       (answer) => answer.sessionKey === payload.sessionKey && !answer.said,
     );

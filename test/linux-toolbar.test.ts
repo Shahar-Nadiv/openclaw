@@ -144,7 +144,14 @@ type ToolbarHelpers = {
   ) => Spot | null;
   spotSaid: (spot: Spot | null) => string | null;
   samePlace: (one: Front | null, two: Front | null) => boolean;
+  stillRunning: (runs: Run[] | undefined, now: number) => Run[];
+  runningSaid: (runs: Run[] | undefined) => string | null;
+  RUN_QUIET: number;
+  sheeted: (mark: { tool: string; frames?: number }) => boolean;
 };
+
+/** A run the toolbar believes is underway. */
+type Run = { sessionKey: string; who?: string; heard: number };
 
 /** Where a mark was made, as the toolbar gathers it. */
 type Front = {
@@ -178,7 +185,7 @@ type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted };`,
   context,
 );
 const {
@@ -231,6 +238,10 @@ const {
   spotIn,
   spotSaid,
   samePlace,
+  stillRunning,
+  runningSaid,
+  RUN_QUIET,
+  sheeted,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -1732,5 +1743,51 @@ describe("the page and the commands it calls", () => {
         expect(call.keys, `${call.name} needs ${key}`).toContain(key);
       }
     }
+  });
+});
+
+describe("knowing an agent is working", () => {
+  const run = (key: string, heard: number): Run => ({ sessionKey: key, who: key, heard });
+
+  test("a run that has just spoken is still working", () => {
+    const now = 1_000_000;
+    expect(stillRunning([run("a", now - 1000)], now)).toHaveLength(1);
+  });
+
+  test("a run that has gone quiet is one the toolbar has lost, not one still working", () => {
+    // A glow that never goes out is worse than no glow: it is a claim about work that is
+    // not happening. `session.ended` is the usual way it stops; this is the net beneath.
+    const now = 1_000_000;
+    expect(stillRunning([run("a", now - RUN_QUIET - 1)], now)).toHaveLength(0);
+  });
+
+  test("the net is slack enough not to give up on a thinking agent", () => {
+    // An agent genuinely says nothing for minutes. Timing out on one is the same lie in
+    // the other direction — the rail would go dark on work that is happening.
+    expect(RUN_QUIET).toBeGreaterThanOrEqual(2 * 60 * 1000);
+  });
+
+  test("one working and four working are different things to be told", () => {
+    expect(runningSaid([])).toBeNull();
+    expect(runningSaid(undefined)).toBeNull();
+    expect(runningSaid([run("a", 0)])).toBe("working");
+    expect(runningSaid([run("a", 0), run("b", 0), run("c", 0)])).toBe("3 working");
+  });
+});
+
+describe("which marks arrive as one picture", () => {
+  test("a recording does, because eight pictures of a screen is a bill", () => {
+    expect(sheeted({ tool: "record", frames: 8 })).toBe(true);
+  });
+
+  test("a before-and-after does not, because comparing detail is its whole point", () => {
+    // Halving each of two frames to fit a grid would spend exactly the thing somebody
+    // made the mark for. Two pictures is also not a bill.
+    expect(sheeted({ tool: "compare", frames: 2 })).toBe(false);
+  });
+
+  test("a single picture is already one picture", () => {
+    expect(sheeted({ tool: "record", frames: 1 })).toBe(false);
+    expect(sheeted({ tool: "box", frames: 1 })).toBe(false);
   });
 });

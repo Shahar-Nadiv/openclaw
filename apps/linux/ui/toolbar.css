@@ -203,6 +203,48 @@ body {
   }
 }
 
+/*
+ * Something is working.
+ *
+ * Green, and deliberately not the accent: on this rail the accent means "this is the
+ * thing in your hand", and a run is not a selection — it is somebody else's work
+ * happening while you do something else. A ring rather than a fill, because the key
+ * still has its own job and still has to read as itself.
+ *
+ * Slow, because it is a state and not an event. A fast pulse says "look at me now",
+ * which is exactly wrong for a thing that will take a minute.
+ */
+.agents-key[data-working="true"] {
+  box-shadow:
+    0 0 0 1.5px rgb(52 199 89 / 55%),
+    0 0 14px rgb(52 199 89 / 35%);
+  animation: working 2.6s ease-in-out infinite;
+}
+.agents-key[data-working="true"] .agents-running {
+  color: rgb(52 199 89);
+}
+@keyframes working {
+  50% {
+    box-shadow:
+      0 0 0 1.5px rgb(52 199 89 / 90%),
+      0 0 22px rgb(52 199 89 / 55%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agents-key[data-working="true"] {
+    animation: none;
+  }
+}
+
+/* The way to stop it, on the rail only while there is something to stop. */
+.stop-key {
+  color: rgb(255 132 132);
+}
+.stop-key:hover:not([disabled]) {
+  color: #1c1c1e;
+  background: rgb(255 99 99);
+}
+
 .key:hover:not([disabled]):not([aria-pressed="true"]) {
   background: rgb(255 255 255 / 8%);
   color: #f7f7f8;

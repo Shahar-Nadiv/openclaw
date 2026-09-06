@@ -184,6 +184,14 @@ async function sendMarks(ids, alone) {
             .map((file) => file.path),
     });
     if (who.kind === "thread") state.adopted = [...state.adopted, who.id];
+    // Something is now working. Kept from here rather than waiting for the first frame
+    // back: an agent that thinks for a minute before saying anything is working the
+    // whole time, and a rail that only lights up once it starts talking is a rail that
+    // was dark for the part somebody was wondering about.
+    state.runs = [
+      ...state.runs.filter((run) => run.sessionKey !== sent.sessionKey),
+      { sessionKey: sent.sessionKey, who: state.receiving.name || who.id, heard: Date.now() },
+    ];
     // What went is gone; what was left unticked is still there, which is the whole
     // point of being able to untick it.
     state.marks = state.marks.filter((mark) => !ids.includes(mark.id));

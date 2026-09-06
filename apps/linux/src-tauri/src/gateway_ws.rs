@@ -37,6 +37,7 @@ const GATEWAY_STATE_EVENT: &str = "quickchat:gateway-state";
 const CHAT_EVENT: &str = "quickchat:chat-event";
 /// What the toolbar hears when a session it is watching says something.
 const REPLY_EVENT: &str = "colai:reply";
+const ENDED_EVENT: &str = "colai:ended";
 const GATEWAY_DEVICE_IDENTITY_FILE: &str = "quickchat-gateway-device.json";
 const AGENTS_CACHE_TTL: Duration = Duration::from_secs(60);
 /// How many conversations the toolbar's picker asks for.
@@ -457,6 +458,9 @@ enum GatewayRequest {
     },
     StartHere(StartHere),
     CronAdd(CronAdd),
+    ChatAbort {
+        key: String,
+    },
     ChatSend(ChatSendParams),
     RefreshCanvasSurface {
         observed_url: Option<String>,
@@ -788,6 +792,18 @@ impl GatewayClient {
     /// The other half of routing: when what is in front has no conversation worth
     /// joining, the answer is a new one where the work is, rather than an agent that
     /// has to be told where the work is.
+    /// Stop a run that is underway.
+    ///
+    /// The one thing this toolbar does that destroys work rather than describing it, so
+    /// what it stopped is said out loud rather than assumed — the caller reports it.
+    pub async fn chat_abort(&self, key: &str) -> Result<(), String> {
+        self.request(GatewayRequest::ChatAbort {
+            key: key.to_string(),
+        })
+        .await
+        .map(|_| ())
+    }
+
     /// Make an automation: the same request, on a schedule the Gateway keeps.
     pub async fn cron_add(&self, asked: CronAdd) -> Result<CronAdded, String> {
         match self.request(GatewayRequest::CronAdd(asked)).await? {
@@ -1203,6 +1219,7 @@ impl GatewayClient {
         let dispatch = |frame: &Value| {
             dispatch_chat_event(app, frame);
             dispatch_session_message(app, frame);
+            dispatch_session_ended(app, frame);
             if frame.get("type").and_then(Value::as_str) == Some("event")
                 && frame.get("event").and_then(Value::as_str) == Some("config.changed")
             {
@@ -1844,6 +1861,17 @@ where
                     ))
                 })
         }
+        GatewayRequest::ChatAbort { key } => {
+            request_on_socket(
+                socket,
+                "chat.abort",
+                serde_json::json!({ "sessionKey": key }),
+                budget,
+                dispatch,
+            )
+            .await
+            .map(|_| GatewayResponse::CanvasSurface(None))
+        }
         GatewayRequest::CronAdd(asked) => {
             let params = serde_json::to_value(asked).map_err(|error| {
                 RequestFailure::transport(format!("Could not encode cron.add: {error}"))
@@ -2251,6 +2279,28 @@ fn dispatch_session_message<R: tauri::Runtime>(app: &AppHandle<R>, frame: &Value
     }
     if let Some(payload) = frame.get("payload") {
         let _ = app.emit_to(crate::colai::OVERLAY_LABEL, REPLY_EVENT, payload.clone());
+    }
+}
+
+/// A session saying it has finished, or fallen over.
+///
+/// The toolbar glows while a run is underway, and a glow that never goes out is worse
+/// than no glow at all — it is a claim about work that is not happening. These two
+/// frames are what turns it off; a quiet timeout in the page is the net beneath them.
+fn dispatch_session_ended<R: tauri::Runtime>(app: &AppHandle<R>, frame: &Value) {
+    if frame.get("type").and_then(Value::as_str) != Some("event") {
+        return;
+    }
+    let event = frame.get("event").and_then(Value::as_str);
+    if !matches!(event, Some("session.ended") | Some("session.error")) {
+        return;
+    }
+    if let Some(payload) = frame.get("payload") {
+        let mut said = payload.clone();
+        if let Some(map) = said.as_object_mut() {
+            map.insert("event".to_string(), Value::from(event.unwrap_or("")));
+        }
+        let _ = app.emit_to(crate::colai::OVERLAY_LABEL, ENDED_EVENT, said);
     }
 }
 

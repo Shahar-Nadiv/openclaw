@@ -514,6 +514,34 @@ function automationFor(marks, mode, text, surface) {
  */
 const FOLD_TIME = 220;
 
+/**
+ * How long a run may go quiet before the toolbar stops claiming it is working.
+ *
+ * The net beneath `session.ended`. A terminal frame that never arrives — a gateway that
+ * dropped, a session that went away — would otherwise leave the rail glowing about work
+ * that is not happening, which is a worse lie than never having shown it.
+ *
+ * Generous, because a thinking agent is genuinely silent for minutes and a glow that
+ * gives up on one is the same lie in the other direction.
+ */
+const RUN_QUIET = 4 * 60 * 1000;
+
+/**
+ * Which runs are still worth claiming are underway, given what has been heard and when.
+ *
+ * A pure decision over a list, so the rule about going quiet is a thing with a test on
+ * it rather than a `setTimeout` somewhere that nobody can check.
+ */
+function stillRunning(runs, now) {
+  return (runs || []).filter((run) => now - run.heard < RUN_QUIET);
+}
+
+/** What the rail says about work underway, in the fewest words that are still true. */
+function runningSaid(runs) {
+  if (!runs || runs.length === 0) return null;
+  return runs.length === 1 ? "working" : `${runs.length} working`;
+}
+
 /** How far an opened answer sits from the pin it belongs to, on whichever side it fits. */
 const ANSWER_AWAY = 18;
 
