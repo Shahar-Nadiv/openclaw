@@ -18,8 +18,6 @@ const GLYPHS = {
     '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/><circle cx="15" cy="15" r="1.4" fill="currentColor" stroke="none"/>',
   undo: '<path d="M3.5 7v6h6"/><path d="M20.5 17a8.5 8.5 0 0 0-14.3-6.2L3.5 13"/>',
   redo: '<path d="M20.5 7v6h-6"/><path d="M3.5 17a8.5 8.5 0 0 1 14.3-6.2L20.5 13"/>',
-  settings:
-    '<path d="M4 8h16M4 16h16"/><circle cx="9.5" cy="8" r="2.4" fill="currentColor" stroke="none"/><circle cx="14.5" cy="16" r="2.4" fill="currentColor" stroke="none"/>',
   box: '<rect x="3" y="3" width="18" height="18" rx="2"/>',
   circle: '<circle cx="12" cy="12" r="9"/>',
   wireframe:
@@ -34,6 +32,45 @@ const GLYPHS = {
 
 function icon(name, size) {
   return `<svg width="${size || 17}" height="${size || 17}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${GLYPHS[name]}</svg>`;
+}
+
+/**
+ * OpenClaw's own mark, for the key that opens OpenClaw.
+ *
+ * Not one of the glyphs above and deliberately not drawn like one: those are line
+ * drawings of what a tool does, and this is a logo. It is the tray icon's geometry
+ * exactly — `src-tauri/icons/tray-template.svg` — so the critter in the rail and the
+ * critter in the system tray are the same face rather than two drawings of one.
+ *
+ * A silhouette with the eyes punched out, filled with `currentColor`, so it dims and
+ * lights with every other key on the rail.
+ */
+function openclawMark(size) {
+  const edge = size || 17;
+  return `<svg width="${edge}" height="${edge}" viewBox="0 0 18 18" aria-hidden="true">
+    <mask id="colai-critter" maskUnits="userSpaceOnUse" x="0" y="0" width="18" height="18">
+      <g fill="#fff">
+        <g fill="none" stroke="#fff" stroke-width="2.07" stroke-linecap="round">
+          <path d="M6.926 4.563 Q6.149 1.35 3.816 1.62" />
+          <path d="M11.074 4.563 Q11.851 1.35 14.184 1.62" />
+        </g>
+        <rect x="5.4" y="12.96" width="2.52" height="3.24" rx="1.26" />
+        <rect x="10.08" y="12.96" width="2.52" height="3.24" rx="1.26" />
+        <circle cx="2.7" cy="9.59" r="1.8" />
+        <circle cx="15.3" cy="9.59" r="1.8" />
+        <ellipse cx="9" cy="8.64" rx="6.48" ry="5.94" />
+      </g>
+      <g fill="#000">
+        <ellipse cx="6.149" cy="7.69" rx="1.426" ry="1.544" />
+        <ellipse cx="11.851" cy="7.69" rx="1.426" ry="1.544" />
+      </g>
+      <g fill="#fff">
+        <circle cx="5.522" cy="7.134" r="0.741" />
+        <circle cx="11.224" cy="7.134" r="0.741" />
+      </g>
+    </mask>
+    <rect width="18" height="18" fill="currentColor" mask="url(#colai-critter)" />
+  </svg>`;
 }
 
 const WHERE = "openclaw.toolbar.where";
@@ -161,10 +198,18 @@ function buildRail() {
   send.addEventListener("click", () => flyout("send"));
   buttons.send = send;
 
-  const gear = key("settings", "Settings · ⌘,", "settings", () =>
-    invoke("colai_open_settings"),
-  );
-  dividers[2].after(send, agents, gear);
+  // The way back to OpenClaw itself, wearing OpenClaw's own face. A gear said
+  // "preferences"; what this opens is the application.
+  const home = document.createElement("button");
+  home.type = "button";
+  home.className = "key home-key";
+  home.title = "OpenClaw · ⌘,";
+  home.setAttribute("aria-label", "Open OpenClaw");
+  home.innerHTML = openclawMark();
+  home.addEventListener("click", () => invoke("colai_open_settings"));
+  buttons.settings = home;
+
+  dividers[2].after(send, agents, home);
 
   row(el.flyShape, "box", "Box", "box", "B");
   row(el.flyShape, "circle", "Circle", "circle", "O");

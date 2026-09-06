@@ -142,6 +142,14 @@ body {
   outline: 2px solid var(--accent, #ff6b6b);
   outline-offset: 2px;
 }
+/* The logo carries its own weight; it does not need the dimming the tools use. */
+.home-key {
+  color: #b9b9be;
+}
+.home-key:hover:not([disabled]) {
+  color: #f7f7f8;
+}
+
 .caret {
   font-size: 9px;
   opacity: 0.6;
