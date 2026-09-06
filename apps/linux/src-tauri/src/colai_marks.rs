@@ -50,6 +50,9 @@ pub(crate) struct Mark {
     pub region: Option<Region>,
     #[serde(default)]
     pub points: Vec<Spot>,
+    /// Which pen drew it, for the one tool that has a choice of them.
+    #[serde(default)]
+    pub pen: Option<String>,
 }
 
 /// A rectangle of the display, in physical pixels.
@@ -161,6 +164,17 @@ pub(crate) fn drawn_as(mark: &Mark) -> Option<&'static str> {
     }
     if mark.tool == "measure" {
         return Some("span");
+    }
+    // The drawing tool's four pens all arrive as a run of points; which of them it was
+    // is the only thing that says whether to draw a line, put a head on it, or lay a
+    // wide translucent stripe over what is underneath.
+    if mark.tool == "draw" && mark.points.len() > 1 {
+        return Some(match mark.pen.as_deref() {
+            Some("arrow") => "arrow",
+            Some("line") => "line",
+            Some("highlight") => "highlight",
+            _ => "stroke",
+        });
     }
     match mark.region.as_ref().map(|region| region.shape.as_str()) {
         Some("ellipse") => Some("ellipse"),
@@ -298,6 +312,39 @@ mod tests {
     }
 
     #[test]
+    fn a_pen_decides_what_a_drawing_is() {
+        // Four pens arrive as the same thing — a run of points under the drawing tool —
+        // so the pen is the only thing that says whether to put a head on the line or
+        // lay a wide translucent stripe over what is underneath.
+        let drawn = |pen: Option<&str>| {
+            let mut made = mark(
+                "draw",
+                None,
+                vec![Spot { x: 0.1, y: 0.1 }, Spot { x: 0.4, y: 0.4 }],
+            );
+            made.pen = pen.map(str::to_string);
+            drawn_as(&made)
+        };
+        assert_eq!(drawn(Some("arrow")), Some("arrow"));
+        assert_eq!(drawn(Some("line")), Some("line"));
+        assert_eq!(drawn(Some("highlight")), Some("highlight"));
+        // Freehand, and anything this build has never heard of. A mark from a newer
+        // page that names a pen this one cannot draw is still a line somebody drew.
+        assert_eq!(drawn(Some("freehand")), Some("stroke"));
+        assert_eq!(drawn(Some("glitter")), Some("stroke"));
+        assert_eq!(drawn(None), Some("stroke"));
+    }
+
+    #[test]
+    fn a_pen_cannot_turn_a_click_into_a_line() {
+        // One point is a pin wherever it came from. An arrow with nothing to point
+        // along would be drawn as a head sitting on its own tip.
+        let mut made = mark("draw", None, vec![Spot { x: 0.2, y: 0.2 }]);
+        made.pen = Some("arrow".to_string());
+        assert_eq!(drawn_as(&made), Some("pin"));
+    }
+
+    #[test]
     fn a_recording_draws_nothing_over_itself() {
         // What changed between the frames is the subject. An outline on every one of
         // them is the only thing in the picture that does not move.
@@ -313,6 +360,7 @@ mod tests {
             tool: tool.to_string(),
             region,
             points,
+            pen: None,
         }
     }
 

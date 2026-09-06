@@ -44,7 +44,9 @@ type ToolbarHelpers = {
   usable: (screen: Screen) => { left: number; top: number; right: number; bottom: number };
   screenAt: (screens: Screen[], at: Point) => Screen | null;
   boxOf: (points: Point[]) => { x: number; y: number; w: number; h: number };
-  pathFor: (shape: { kind: string; points: Point[] } | null) => string;
+  pathFor: (
+    shape: { kind: string; points: Point[]; screen?: { width: number; height: number } } | null,
+  ) => string;
   gateFor: (tool: string, surface: Surface) => { blocked: boolean; says: string | null };
   counted: (many: number, noun: string) => string;
   MODES: Record<string, { label: string; says: string }>;
@@ -71,6 +73,7 @@ type ToolbarHelpers = {
       frames?: number;
       seconds?: number;
       design?: string;
+      pen?: string;
     }[],
     mode: string,
     text: string,
@@ -105,7 +108,7 @@ type ToolbarHelpers = {
     }
   >;
   DESIGN_FIRST: string;
-  labelOf: (mark: { tool: string; design?: string }) => string;
+  labelOf: (mark: { tool: string; design?: string; pen?: string }) => string;
   homeOf: (mark: { design?: string; dest?: string }) => string;
   WHOLE_DISPLAY: string[];
   scheduleOf: (cron: Cron) => Record<string, unknown> | null;
@@ -121,6 +124,15 @@ type ToolbarHelpers = {
   UNITS: Record<string, { label: string; ms: number }>;
   REPEATS: Record<string, { label: string }>;
   FOLD_TIME: number;
+  PENS: Record<string, { label: string; glyph: string; kind: string }>;
+  PEN_FIRST: string;
+  PATHS: string[];
+  kindFor: (tool: string, pen?: string) => string | undefined;
+  ARROW_HEAD: number;
+  ARROW_WIDE: number;
+  ARROW_LEAST: number;
+  ARROW_MOST: number;
+  HIGHLIGHT_WIDE: number;
 };
 
 /** The automation being written, as the panel holds it. */
@@ -140,7 +152,7 @@ type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE };`,
   context,
 );
 const {
@@ -179,6 +191,15 @@ const {
   UNITS,
   REPEATS,
   FOLD_TIME,
+  PENS,
+  PEN_FIRST,
+  PATHS,
+  kindFor,
+  ARROW_HEAD,
+  ARROW_WIDE,
+  ARROW_LEAST,
+  ARROW_MOST,
+  HIGHLIGHT_WIDE,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -1174,5 +1195,146 @@ describe("folding the exact tools on the rail", () => {
     // looking for a tool, which is worse than the long rail it was meant to fix.
     const page = readFileSync(new URL("../apps/linux/ui/toolbar.html", import.meta.url), "utf8");
     expect(page).not.toContain("fly-exact");
+  });
+});
+
+describe("what the drawing tool draws with", () => {
+  const across = { width: 1000, height: 1000 };
+  const path = (kind: string, points: Point[]) => pathFor({ kind, points, screen: across });
+
+  test("four pens, one key", () => {
+    // They are all the same gesture and differ only in what is left behind, which is
+    // not four keys' worth of difference on a rail this size.
+    expect(Object.keys(PENS)).toEqual(["freehand", "arrow", "line", "highlight"]);
+    expect(PENS[PEN_FIRST]).toBeDefined();
+    expect(TOOLS.draw!.writes).toBe(false);
+  });
+
+  test("the tool's shape comes from the pen, not from the key", () => {
+    expect(kindFor("draw", "arrow")).toBe("arrow");
+    expect(kindFor("draw", "highlight")).toBe("highlight");
+    // Every other tool answers for itself, and a pen it has never heard of is freehand
+    // rather than nothing at all.
+    expect(kindFor("box")).toBe("box");
+    expect(kindFor("draw", "glitter")).toBe(PENS[PEN_FIRST]!.kind);
+    expect(kindFor("draw", undefined)).toBe(PENS[PEN_FIRST]!.kind);
+  });
+
+  test("every pen draws a path, not an area", () => {
+    // The difference decides whether the mark carries a region — and a region is what
+    // the popup, the crop and the answer pin are all placed from.
+    for (const pen of Object.values(PENS)) {
+      expect(PATHS.includes(pen.kind), pen.label).toBe(true);
+    }
+  });
+
+  test("an arrow is a shaft with a head on the end somebody stopped at", () => {
+    const drawn = path("arrow", [
+      { x: 0.2, y: 0.5 },
+      { x: 0.8, y: 0.5 },
+    ]);
+    // One path, so the outline drawn behind it in the picture follows the head as well
+    // as the shaft — a head with its own floating outline is worse than none.
+    expect(drawn.startsWith("M0.2 0.5L0.8 0.5")).toBe(true);
+    // Both barbs come back to the tip, and neither sits past it.
+    const barbs = [...drawn.matchAll(/L0\.8 0\.5/g)];
+    expect(barbs.length).toBeGreaterThanOrEqual(1);
+    for (const found of drawn.matchAll(/M?(0\.\d+) (0\.\d+)/g)) {
+      expect(Number(found[1])).toBeLessThanOrEqual(0.8001);
+    }
+  });
+
+  test("an arrow of no length is still a line rather than a head on its own tip", () => {
+    // A press that went nowhere is thrown away before this, but a gesture caught
+    // mid-frame has both points in the same place, and the head's maths divides by
+    // the distance between them.
+    const drawn = path("arrow", [
+      { x: 0.4, y: 0.4 },
+      { x: 0.4, y: 0.4 },
+    ]);
+    expect(drawn).toBe("M0.4 0.4L0.4 0.4");
+    expect(drawn).not.toContain("NaN");
+  });
+
+  test("a line and a highlighter keep the two ends, not the wobble between them", () => {
+    // Freehand keeps every point the hand passed through; a line somebody drew wobbling
+    // is not a line they meant.
+    const wobbled = [
+      { x: 0.1, y: 0.1 },
+      { x: 0.5, y: 0.6 },
+    ];
+    expect(path("line", wobbled)).toBe("M0.1 0.1 L0.5 0.6");
+    expect(path("highlight", wobbled)).toBe("M0.1 0.1 L0.5 0.6");
+  });
+
+  test("the message names the pen, not the key", () => {
+    // "Draw" says nothing about what was drawn. An arrow points at something and a
+    // highlighter runs over it, and the agent reading this should be told which.
+    expect(labelOf({ tool: "draw", pen: "arrow" })).toBe("Arrow");
+    expect(labelOf({ tool: "draw", pen: "highlight" })).toBe("Highlighter");
+    expect(labelOf({ tool: "draw" })).toBe("Freehand");
+    const said = summaryFor([{ tool: "draw", pen: "arrow", note: "this one" }], "ask", "", null);
+    expect(said).toContain("1. Arrow (mark-1.png) — this one");
+  });
+
+  test("every pen is on the menu under its own mark", () => {
+    const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+    const drawn = new Set(
+      [...rail.matchAll(/^ {2}(\w+):$|^ {2}(\w+):\s*'/gm)].map((found) => found[1] ?? found[2]),
+    );
+    for (const [id, pen] of Object.entries(PENS)) {
+      expect(drawn.has(pen.glyph), `${id} wears ${pen.glyph}`).toBe(true);
+    }
+    const marks = Object.values(PENS).map((pen) => pen.glyph);
+    expect(new Set(marks).size).toBe(marks.length);
+  });
+});
+
+describe("the glass and the picture draw the same mark", () => {
+  /*
+   * The page draws a mark on screen and Rust draws it onto the photograph that is sent.
+   * Two languages, one set of numbers — and what somebody sees on the glass is a
+   * promise about what the agent will be looking at, so a preview drawn to different
+   * numbers is a promise this toolbar quietly breaks. Read back out of the source that
+   * does the second drawing rather than restated here.
+   */
+  const capture = readFileSync(
+    new URL("../apps/linux/src-tauri/src/colai_capture.rs", import.meta.url),
+    "utf8",
+  );
+  const number = (name: string) => {
+    const found = new RegExp(`const ${name}: f64 = ([\\d.]+);`).exec(capture)?.[1];
+    assert.ok(found, `${name} in colai_capture.rs`);
+    return Number(found);
+  };
+
+  test("an arrowhead is the same head in both", () => {
+    expect(number("ARROW_HEAD")).toBe(ARROW_HEAD);
+    expect(number("ARROW_WIDE")).toBe(ARROW_WIDE);
+    expect(number("ARROW_LEAST")).toBe(ARROW_LEAST);
+    expect(number("ARROW_MOST")).toBe(ARROW_MOST);
+  });
+
+  test("a highlighter lays down the same width in both", () => {
+    // The one where drifting is invisible until it matters: a stripe drawn thin on the
+    // glass and thick in the picture covers words somebody thought they had left showing.
+    expect(number("HIGHLIGHT_WIDE")).toBe(HIGHLIGHT_WIDE);
+  });
+
+  test("a head is bounded, so a long arrow does not grow one the size of a window", () => {
+    const across = { width: 2000, height: 2000 };
+    const far = pathFor({
+      kind: "arrow",
+      points: [
+        { x: 0.05, y: 0.5 },
+        { x: 0.95, y: 0.5 },
+      ],
+      screen: across,
+    });
+    // The barbs sit at most ARROW_MOST back along the line from the tip.
+    const back = [...far.matchAll(/[ML](0\.\d+) /g)].map((found) => Number(found[1]));
+    expect(Math.min(...back.filter((x) => x > 0.5))).toBeGreaterThanOrEqual(
+      0.95 - ARROW_MOST / across.width - 0.001,
+    );
   });
 });

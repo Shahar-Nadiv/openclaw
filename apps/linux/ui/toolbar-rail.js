@@ -13,6 +13,10 @@ const GLYPHS = {
   pointAt:
     '<path d="M12 21s-6-5.6-6-10.4a6 6 0 0 1 12 0C18 15.4 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.2" fill="currentColor" stroke="none"/>',
   draw: '<path d="M3 20.5c3-6 6-8 8.5-8 2 0 2 2.5 0 3.5-2.5 1.2-1.5 4 1 3 4-1.5 5-6 8.5-10.5"/><circle cx="21" cy="8.5" r="1.8" fill="currentColor" stroke="none"/>',
+  arrow: '<path d="M4.5 19.5L19 5"/><path d="M11.5 5H19v7.5"/>',
+  line: '<path d="M4.5 19.5L19.5 4.5"/>',
+  highlight:
+    '<path d="M4 20.5h16" stroke-width="3.4" opacity="0.45"/><path d="M8.5 15.5l6.6-9.6 3.6 2.6-6.6 9.6z"/><path d="M8.5 15.5l3.6 2.6"/>',
   shape: '<rect x="3" y="3" width="11" height="11" rx="1.5"/><circle cx="15.5" cy="15.5" r="5.5"/>',
   design:
     '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/><circle cx="15" cy="15" r="1.4" fill="currentColor" stroke="none"/>',
@@ -118,7 +122,7 @@ function buildRail() {
   tools.append(
     key("pointer", "Pointer · V", "pointer", () => use("pointer")),
     key("pointAt", "Point at · P", "pointAt", () => use("pointAt")),
-    key("draw", "Draw · D", "draw", () => use("draw")),
+    key("draw", "Draw · D · right-click to pick a pen", "draw", () => use("draw")),
     key("shape", "Box / circle · S", "shape", () => flyout("shape"), true),
     key("design", "Design", "design", () => flyout("design"), true),
   );
@@ -147,13 +151,17 @@ function buildRail() {
     key("watch", "Watch for a change · W", "watch", () => use("watch")),
     key("inspect", "Inspect what is there · I", "inspect", () => use("inspect")),
   );
-  // How long it records is a setting on the tool, so it lives on the tool: a right
-  // click, where a right click already means "about this", rather than another key on
-  // a rail that has enough of them.
-  buttons.record.addEventListener("contextmenu", (event) => {
-    event.preventDefault();
-    flyout("record");
-  });
+  // What a key is set to lives on the key: a right click, where a right click already
+  // means "about this", rather than another key on a rail that has enough of them.
+  for (const [id, which] of [
+    ["record", "record"],
+    ["draw", "draw"],
+  ]) {
+    buttons[id].addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      flyout(which);
+    });
+  }
 
   dividers[1].after(exact);
 
@@ -212,6 +220,7 @@ function buildRail() {
   el.flyDesign.append(between);
   row(el.flyDesign, "screenshot", "Screenshot", "screenshot");
   for (const seconds of RECORD_LENGTHS) length(el.flyRecord, seconds);
+  for (const [id, pen] of Object.entries(PENS)) penRow(el.flyDraw, id, pen);
 }
 
 /** One of the lengths a recording can be, on the menu the record key opens. */
@@ -262,6 +271,22 @@ function followTheFold() {
     if (Date.now() < until) following = requestAnimationFrame(again);
   };
   again();
+}
+
+/** One pen on the menu the drawing key opens. */
+function penRow(into, id, pen) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "row";
+  button.dataset.pen = id;
+  button.innerHTML = icon(pen.glyph, 14) + `<span>${pen.label}</span>`;
+  button.addEventListener("click", () => {
+    state.pen = id;
+    // Picking a pen is also picking the tool. Nobody opens this to set a pen and then
+    // goes looking for the key they just right-clicked.
+    use("draw");
+  });
+  into.append(button);
 }
 
 /**

@@ -52,7 +52,7 @@ function startGesture(event) {
   if (event.target.setPointerCapture) event.target.setPointerCapture(event.pointerId);
 
   const point = fractionOf(event);
-  const kind = DRAWS[state.tool];
+  const kind = kindFor(state.tool, state.pen);
 
   // A pin is the click itself; there is nothing to drag out, and waiting for the
   // release would make a tool that should feel instant feel unsure.
@@ -60,14 +60,16 @@ function startGesture(event) {
     addMark({ tool: state.tool, region: null, points: [point] });
     return;
   }
-  gesture = { kind, points: [point] };
+  gesture = { kind, points: [point], screen: screenSize() };
   drawLive();
 }
 
 function extendGesture(event) {
   if (!gesture) return;
   const point = fractionOf(event);
-  if (gesture.kind === "stroke") {
+  // The two pens that keep every point the hand passed through. An arrow or a line
+  // keeps two, because a line somebody drew wobbling is not a line they meant.
+  if (gesture.kind === "stroke" || gesture.kind === "highlight") {
     // A 120Hz pointer emits points a fraction of a pixel apart; keeping them all makes
     // a path attribute nothing can read and every frame has to re-parse.
     const last = gesture.points[gesture.points.length - 1];
@@ -91,7 +93,7 @@ function release() {
   const box = boxOf(finished.points);
   // A press that went nowhere is a click, not a region. Without this every stray click
   // becomes a zero-sized mark that is invisible, un-hittable, and still counted.
-  if (finished.kind !== "stroke" && box.w < 0.004 && box.h < 0.004) {
+  if (!PATHS.includes(finished.kind) && box.w < 0.004 && box.h < 0.004) {
     // Except for the two tools that photograph: not dragging one out is how somebody
     // asks for the whole screen, and refusing that as a slip would leave the simplest
     // thing the toolbar does with no way to ask for it.
@@ -103,12 +105,15 @@ function release() {
 
   const made = {
     tool: state.tool,
-    region:
-      finished.kind === "stroke" || finished.kind === "span"
-        ? null
-        : { shape: finished.kind === "ellipse" ? "ellipse" : "box", box },
+    region: PATHS.includes(finished.kind)
+      ? null
+      : { shape: finished.kind === "ellipse" ? "ellipse" : "box", box },
     points: finished.points,
   };
+  // Which pen drew it. Carried on the mark rather than read from the toolbar later:
+  // the pen can be changed while a mark is still waiting in the tray, and a mark should
+  // not quietly become a different drawing because somebody picked up a highlighter.
+  if (state.tool === "draw") made.pen = state.pen;
   // Settled once, here, rather than recomputed wherever it happens to be needed: the
   // rail can move to a screen of another size, and the answer is about the pixels that
   // were under the hand at the time.
@@ -150,8 +155,14 @@ function drawLive() {
     }
     path.setAttribute(
       "fill",
-      gesture.kind === "stroke" ? "none" : "color-mix(in srgb, var(--accent, #ff6b6b) 13%, transparent)",
+      PATHS.includes(gesture.kind)
+        ? "none"
+        : "color-mix(in srgb, var(--accent, #ff6b6b) 13%, transparent)",
     );
+    // A highlighter shows its real width while it is being drawn, or somebody finds out
+    // how much it covered only after letting go.
+    path.setAttribute("stroke-width", gesture.kind === "highlight" ? String(HIGHLIGHT_WIDE) : "2");
+    path.setAttribute("stroke-opacity", gesture.kind === "highlight" ? "0.32" : "1");
   };
   step();
 }
@@ -306,18 +317,28 @@ function drawMarks() {
     // A span has no region — it is two points and the distance between them — so the
     // shape cannot be read off the mark the way a box's can. Without this the number
     // was drawn and the line it measures was not.
-    const kind = DRAWS[mark.tool] === "span" ? "span" : mark.tool === "draw" ? "stroke" : mark.region && mark.region.shape;
+    const kind =
+      DRAWS[mark.tool] === "span"
+        ? "span"
+        : mark.tool === "draw"
+          ? kindFor("draw", mark.pen)
+          : mark.region && mark.region.shape;
     if (!kind) continue;
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", pathFor({ kind, points: mark.points }));
+    // The size of the layer, because an arrowhead built in the unit square it is
+    // stretched from comes out as a different shape on every screen.
+    path.setAttribute("d", pathFor({ kind, points: mark.points, screen: screenSize() }));
     path.setAttribute(
       "fill",
-      kind === "stroke" || kind === "span"
+      PATHS.includes(kind)
         ? "none"
         : "color-mix(in srgb, var(--accent, #ff6b6b) 13%, transparent)",
     );
     path.setAttribute("stroke", "var(--accent, #ff6b6b)");
-    path.setAttribute("stroke-width", "2");
+    // A highlighter is a wide translucent stripe rather than a line: it is meant to sit
+    // over words and leave them readable, which a solid stroke does not.
+    path.setAttribute("stroke-width", kind === "highlight" ? String(HIGHLIGHT_WIDE) : "2");
+    if (kind === "highlight") path.setAttribute("stroke-opacity", "0.32");
     path.setAttribute("stroke-linecap", "round");
     path.setAttribute("stroke-linejoin", "round");
     path.setAttribute("vector-effect", "non-scaling-stroke");
@@ -364,6 +385,11 @@ function drawMarks() {
  * an answer, and only from the other side — the echo of the question going in is not a
  * reply to it.
  */
+/** How big the layer the marks are stretched over actually is, in pixels. */
+function screenSize() {
+  return { width: window.innerWidth, height: window.innerHeight };
+}
+
 function screenNow() {
   return { width: window.innerWidth, height: window.innerHeight };
 }

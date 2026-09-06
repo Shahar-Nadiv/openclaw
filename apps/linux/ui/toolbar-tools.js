@@ -147,6 +147,9 @@ function homeOf(mark) {
 /** What a mark is called in the message: for a design mark, which kind it is. */
 function labelOf(mark) {
   if (mark.tool === "design") return kindOf(mark).label;
+  // "Draw" says nothing about what was drawn. An arrow points at something and a
+  // highlighter runs over it, and an agent reading the message should be told which.
+  if (mark.tool === "draw") return (PENS[mark.pen] || PENS[PEN_FIRST]).label;
   return TOOLS[mark.tool] ? TOOLS[mark.tool].label : mark.tool;
 }
 
@@ -446,6 +449,89 @@ const DRAWS = {
   watch: "box",
 };
 
+/**
+ * What the drawing tool draws with.
+ *
+ * One key with four pens, picked by right-clicking it, the way the record key is asked
+ * how long. They are all the same gesture — put the pointer down, move, let go — and
+ * differ only in what is left behind, which is not four keys' worth of difference on a
+ * rail this size.
+ *
+ * `kind` is what the shape becomes. Freehand and highlighter keep every point the hand
+ * passed through; an arrow and a line keep two, because a line somebody drew wobbling
+ * is not a line they meant.
+ */
+const PENS = {
+  freehand: { label: "Freehand", glyph: "draw", kind: "stroke" },
+  arrow: { label: "Arrow", glyph: "arrow", kind: "arrow" },
+  line: { label: "Line", glyph: "line", kind: "line" },
+  highlight: { label: "Highlighter", glyph: "highlight", kind: "highlight" },
+};
+
+/** Which pen the drawing tool starts with. */
+const PEN_FIRST = "freehand";
+
+/** The kinds that are a path somebody drew rather than an area they enclosed. */
+const PATHS = ["stroke", "span", "arrow", "line", "highlight"];
+
+/**
+ * What a tool draws right now: its own kind, or — for the drawing tool — its pen's.
+ *
+ * The one tool whose shape is a setting rather than a fact about the key, which is why
+ * `DRAWS` cannot answer this on its own.
+ */
+function kindFor(tool, pen) {
+  if (tool !== "draw") return DRAWS[tool];
+  return (PENS[pen] || PENS[PEN_FIRST]).kind;
+}
+
+/**
+ * An arrowhead: how far back along its own line the barbs sit, how far out, and the
+ * shortest and longest a head may be.
+ *
+ * A share of the arrow rather than a fixed size, so a short arrow does not arrive as a
+ * head with a stub behind it — bounded at both ends, because a share of a very long
+ * arrow is a head the size of a window.
+ *
+ * These four and `HIGHLIGHT_WIDE` are restated in `src/colai_capture.rs`, which draws
+ * the same marks onto the picture that gets sent. They have to agree: what somebody
+ * sees on the glass is a promise about what the agent will be looking at, and a preview
+ * drawn to different numbers is a promise this toolbar quietly breaks. The test suite
+ * reads the Rust side back out and compares.
+ */
+const ARROW_HEAD = 0.22;
+const ARROW_WIDE = 0.42;
+const ARROW_LEAST = 12;
+const ARROW_MOST = 42;
+
+/** How wide a highlighter lays down, in pixels of the display it is drawn on. */
+const HIGHLIGHT_WIDE = 22;
+
+/**
+ * The two barbs of an arrowhead, as fractions of the display, given its line.
+ *
+ * Worked out in real pixels and converted back, because this layer is a unit square
+ * stretched across the whole desktop: a head sized in those units is a different shape
+ * on every screen, and square to the line comes out leaning.
+ */
+function headOf(from, to, screen) {
+  const [dx, dy] = [(to.x - from.x) * screen.width, (to.y - from.y) * screen.height];
+  const long = Math.hypot(dx, dy);
+  if (long === 0) return null;
+  const back = Math.min(Math.max(long * ARROW_HEAD, ARROW_LEAST), ARROW_MOST);
+  const [ux, uy] = [dx / long, dy / long];
+  // Back along the line, then out to either side of it.
+  const [bx, by] = [to.x - (ux * back) / screen.width, to.y - (uy * back) / screen.height];
+  const [sx, sy] = [
+    (-uy * back * ARROW_WIDE) / screen.width,
+    (ux * back * ARROW_WIDE) / screen.height,
+  ];
+  return [
+    { x: bx + sx, y: by + sy },
+    { x: bx - sx, y: by - sy },
+  ];
+}
+
 /** The tools for which a click that selected nothing means the whole display. */
 const WHOLE_DISPLAY = ["screenshot", "design"];
 
@@ -656,7 +742,16 @@ function boxOf(points) {
 function pathFor(shape) {
   if (!shape || shape.points.length === 0) return "";
   const points = shape.points;
-  if (shape.kind === "stroke" || shape.kind === "span") {
+  if (shape.kind === "arrow") {
+    // Drawn as one path so the halo behind it in the picture follows the head as well
+    // as the shaft — a shaft with a floating outline round it is worse than no outline.
+    const [from, to] = [points[0], points[points.length - 1]];
+    const line = `M${from.x} ${from.y}L${to.x} ${to.y}`;
+    const head = headOf(from, to, shape.screen || { width: 1, height: 1 });
+    if (!head) return line;
+    return `${line}M${head[0].x} ${head[0].y}L${to.x} ${to.y}L${head[1].x} ${head[1].y}`;
+  }
+  if (PATHS.includes(shape.kind)) {
     // A span is a stroke of exactly two points. It is drawn without end ticks on
     // purpose: this layer is a unit square stretched to the screen, so anything meant
     // to be square to the line comes out leaning.

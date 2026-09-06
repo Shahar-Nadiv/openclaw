@@ -18,6 +18,7 @@ const el = {
   flyShape: document.getElementById("fly-shape"),
   flyDesign: document.getElementById("fly-design"),
   flyRecord: document.getElementById("fly-record"),
+  flyDraw: document.getElementById("fly-draw"),
   flyAutomate: document.getElementById("fly-automate"),
   flyAgents: document.getElementById("fly-agents"),
   agentRows: document.getElementById("agent-rows"),
@@ -85,6 +86,8 @@ const state = {
   // defaults each time rather than kept: a schedule is about one piece of work, and
   // yesterday's interval sitting in the box is a job somebody creates by accident.
   cron: { ...AUTOMATION_FIRST },
+  // Which pen the drawing tool draws with. Chosen by right-clicking the key.
+  pen: PEN_FIRST,
   // Which kind of design the next design mark asks for. Chosen on the menu, and
   // changeable on the mark itself afterwards.
   designKind: DESIGN_FIRST,
@@ -179,6 +182,9 @@ function render() {
       button.title = state.watching.length
         ? `${counted(state.watching.length, "region")} being watched · W`
         : "Watch for a change · W";
+    } else if (id === "draw") {
+      button.setAttribute("aria-pressed", String(state.tool === "draw" || state.open === "draw"));
+      button.title = `Draw · ${(PENS[state.pen] || PENS[PEN_FIRST]).label} · D · right-click to pick a pen`;
     } else if (id === "record") {
       button.setAttribute("aria-pressed", String(state.tool === "record" || state.open === "record"));
       button.title = `Record ${state.recordFor} seconds · R · right-click for how long`;
@@ -228,6 +234,10 @@ function render() {
   // folded.
   for (const tool of EXACT) buttons[tool].dataset.folded = String(state.tucked);
   if (state.open === "automate") drawAutomation();
+  el.flyDraw.hidden = state.open !== "draw";
+  for (const button of el.flyDraw.children) {
+    button.setAttribute("aria-pressed", String(button.dataset.pen === state.pen));
+  }
   el.flyRecord.hidden = state.open !== "record";
   for (const button of el.flyRecord.children) {
     button.setAttribute("aria-pressed", String(Number(button.dataset.seconds) === state.recordFor));
@@ -248,6 +258,7 @@ function render() {
     [el.flyShape, buttons.shape],
     [el.flyDesign, buttons.design],
     [el.flyRecord, buttons.record],
+    [el.flyDraw, buttons.draw],
     [el.flyAutomate, buttons.send],
     [el.flySend, buttons.send],
     [el.flyAgents, buttons.agents],

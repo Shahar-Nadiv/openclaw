@@ -22,6 +22,20 @@ use serde::Serialize;
 
 use crate::colai_marks::{crop_for, drawn_as, points_within, Mark};
 use tauri::{AppHandle, Manager};
+/// An arrowhead: how far back along its own line the barbs sit, and how far out.
+///
+/// A share of the arrow rather than a fixed size, so a short arrow does not arrive as a
+/// head with a stub behind it — bounded at both ends, because a share of a very long
+/// arrow is a head the size of a window.
+const ARROW_HEAD: f64 = 0.22;
+const ARROW_LEAST: f64 = 12.0;
+const ARROW_MOST: f64 = 42.0;
+const ARROW_WIDE: f64 = 0.42;
+
+/// How wide a highlighter lays down, and how much of the screen shows through it.
+const HIGHLIGHT_WIDE: f64 = 22.0;
+const HIGHLIGHT_THROUGH: f64 = 0.32;
+
 const THUMB_EDGE: i32 = 180;
 /// The widest edge a picture keeps before it is shrunk.
 ///
@@ -393,6 +407,27 @@ fn draw_mark(
             let (x, y) = within[0];
             ink.arc(x, y, 13.0, 0.0, std::f64::consts::TAU);
         }
+        "arrow" => {
+            // Shaft and head in one path, so the dark outline behind it in the picture
+            // follows both. A head with its own floating outline is worse than none.
+            let [(x0, y0), (x1, y1)] = [within[0], within[within.len() - 1]];
+            let (dx, dy) = (x1 - x0, y1 - y0);
+            let long = dx.hypot(dy).max(1.0);
+            let back = (long * ARROW_HEAD).clamp(ARROW_LEAST, ARROW_MOST);
+            let (ux, uy) = (dx / long, dy / long);
+            let (bx, by) = (x1 - ux * back, y1 - uy * back);
+            let (sx, sy) = (-uy * back * ARROW_WIDE, ux * back * ARROW_WIDE);
+            ink.move_to(x0, y0);
+            ink.line_to(x1, y1);
+            ink.move_to(bx + sx, by + sy);
+            ink.line_to(x1, y1);
+            ink.line_to(bx - sx, by - sy);
+        }
+        "line" => {
+            let [(x0, y0), (x1, y1)] = [within[0], within[within.len() - 1]];
+            ink.move_to(x0, y0);
+            ink.line_to(x1, y1);
+        }
         "span" => {
             // Here the ticks are worth drawing: this is real pixels, not the unit
             // square the page draws into, so square to the line really is square.
@@ -420,6 +455,18 @@ fn draw_mark(
 
     ink.set_line_cap(gdk::cairo::LineCap::Round);
     ink.set_line_join(gdk::cairo::LineJoin::Round);
+    // A highlighter is not a line with an outline round it. It is meant to sit over
+    // words and leave them readable, so it goes on once, wide and translucent, with no
+    // dark halo — the halo is what makes every other mark legible against a busy screen
+    // and is exactly what would make this one opaque.
+    if drawn == "highlight" {
+        ink.set_source_rgba(red, green, blue, HIGHLIGHT_THROUGH);
+        ink.set_line_width(HIGHLIGHT_WIDE);
+        trace(ink);
+        return ink
+            .stroke()
+            .map_err(|error| format!("Could not draw the mark: {error}"));
+    }
     ink.set_source_rgba(0.0, 0.0, 0.0, 0.45);
     ink.set_line_width(7.0);
     trace(ink);
