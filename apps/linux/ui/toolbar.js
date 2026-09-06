@@ -576,21 +576,17 @@ async function start() {
     render();
   }).catch(() => {});
 
-  // What this connection may do, so a menu can offer only what will work.
-  void invoke("colai_allowed")
-    .then((allowed) => {
-      state.allowed = allowed || [];
-      render();
-    })
-    .catch(() => {});
-
   void loadWho();
   // The Gateway connects a moment after the app does, so the first ask usually lands
   // before there is anything to answer it. Asked again rather than leaving the rail
   // saying "unavailable" until somebody happens to open the menu.
   for (const wait of [1500, 4000, 9000]) {
     setTimeout(() => {
-      if (state.whoTrouble) void loadWho();
+      // Or while this machine still has no idea what it is allowed to do. The two
+      // usually fail together — nothing answers before the handshake — but tying the
+      // retry to only one of them makes that coincidence load-bearing, and the menu
+      // that depends on the other spends the session refusing.
+      if (state.whoTrouble || state.allowed.length === 0) void loadWho();
     }, wait);
   }
   render();

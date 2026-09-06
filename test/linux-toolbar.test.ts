@@ -151,7 +151,7 @@ type ToolbarHelpers = {
   asksSomething: (said: string) => boolean;
   canGoBack: (
     row: { kind: string; id?: string; sessionKey?: string } | null,
-    allowed: string[],
+    allowed: string[] | undefined,
   ) => { can: boolean; why: string | null };
   pointSaid: (
     point: { said?: string; at?: number | null },
@@ -1857,7 +1857,20 @@ describe("taking a conversation back", () => {
     const no = canGoBack({ kind: "session", id: "s1", sessionKey: "s1" }, ["operator.read"]);
     expect(no.can).toBe(false);
     expect(no.why).toContain("not allowed");
-    expect(canGoBack({ kind: "session", id: "s1", sessionKey: "s1" }, []).can).toBe(false);
+  });
+
+  test("not having heard yet is not a refusal", () => {
+    // The Gateway connects a moment after the app does, so the first ask lands before
+    // there is anything to answer it. Reading that silence as "no" turned a moment of
+    // waiting into a permanent-sounding refusal that never corrected itself — which is
+    // exactly what shipped.
+    const row = { kind: "session", id: "s1", sessionKey: "s1" };
+    for (const nothing of [[], undefined]) {
+      const yet = canGoBack(row, nothing);
+      expect(yet.can).toBe(false);
+      expect(yet.why).toContain("Still asking");
+      expect(yet.why).not.toContain("not allowed");
+    }
   });
 
   test("the two verbs differ in exactly one decision, and say so", () => {

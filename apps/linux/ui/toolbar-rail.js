@@ -463,11 +463,17 @@ async function loadWho() {
   try {
     // Asked together, because the menu shows them together: two answers a second apart
     // would let the rail claim a receiver that the list below it does not offer.
-    const [agents, sessions, projects] = await Promise.all([
+    const [agents, sessions, projects, allowed] = await Promise.all([
       invoke("colai_agents", { receiving: pick("agent") }),
       invoke("colai_sessions", { receiving: pick("session") }),
       invoke("colai_threads", { receiving: pick("thread") }),
+      // What this connection may do, asked with the rest rather than once at startup.
+      // The Gateway connects a moment after the app does — which is why the ask below
+      // is retried — so a single question at load is answered before there is anything
+      // to answer it, and a menu would spend the session saying it was not allowed.
+      invoke("colai_allowed"),
     ]);
+    state.allowed = allowed || [];
     state.agents = agents || [];
     state.sessions = sessions || [];
     state.projects = projects || [];

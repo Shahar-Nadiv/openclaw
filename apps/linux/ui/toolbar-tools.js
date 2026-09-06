@@ -545,7 +545,13 @@ const GOING_BACK = {
  */
 function canGoBack(row, allowed) {
   if (!row) return { can: false, why: "There is nothing selected." };
-  if (!(allowed || []).includes("operator.admin")) {
+  // No list is not an empty list. Before the Gateway has answered, this machine has not
+  // been refused anything — it has not been asked — and saying otherwise turns a moment
+  // of waiting into a permanent-sounding no.
+  if (!allowed || allowed.length === 0) {
+    return { can: false, why: "Still asking the Gateway what this machine may do." };
+  }
+  if (!allowed.includes("operator.admin")) {
     return { can: false, why: "This machine is not allowed to rewind conversations." };
   }
   if (row.kind === "session" && row.id) return { can: true, why: null };
