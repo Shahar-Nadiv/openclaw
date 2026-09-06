@@ -745,9 +745,10 @@ body {
 }
 
 .answer-said {
+  /* Placed by `placeAnswer`, in the coordinates of the layer rather than of the pin:
+     an answer at the edge of a display opens on the side that fits, which is not a
+     fixed offset from anything. */
   position: absolute;
-  top: 18px;
-  left: 18px;
   width: 320px;
   max-height: 40vh;
   /* The panel does not scroll; the reply inside it does. A long answer used to carry

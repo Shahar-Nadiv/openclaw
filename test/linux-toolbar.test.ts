@@ -73,6 +73,12 @@ type ToolbarHelpers = {
     screen: { width: number; height: number },
   ) => { x: number; y: number; w: number; h: number };
   RECORD_CLEAR: number;
+  answerAt: (
+    at: Point,
+    box: { width: number; height: number },
+    room: { left: number; top: number; right: number; bottom: number },
+  ) => { left: number; top: number };
+  ANSWER_AWAY: number;
 };
 
 /** A file or folder somebody dropped on the toolbar, as the page holds it. */
@@ -80,7 +86,7 @@ type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY };`,
   context,
 );
 const {
@@ -104,6 +110,8 @@ const {
   secondsLeft,
   recordFrame,
   RECORD_CLEAR,
+  answerAt,
+  ANSWER_AWAY,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -766,5 +774,71 @@ describe("watching a region", () => {
     const frame = recordFrame(box, screen);
     expect((box.x - frame.x) * screen.width).toBeGreaterThan(12);
     expect((box.y - frame.y) * screen.height).toBeGreaterThan(12);
+  });
+});
+
+describe("where an answer opens", () => {
+  // One display, and a second one to its right — the shape of the desk this is used on.
+  const left = { x: 0, y: 0, width: 1920, height: 1080 };
+  const right = { x: 1920, y: 0, width: 1920, height: 1080 };
+  const panel = { width: 320, height: 260 };
+  const room = (screen: Screen) => usable(screen);
+
+  test("in the middle it opens down and to the right, where the eye already is", () => {
+    expect(answerAt({ x: 600, y: 400 }, panel, room(left))).toEqual({
+      left: 600 + ANSWER_AWAY,
+      top: 400 + ANSWER_AWAY,
+    });
+  });
+
+  test("against the right edge it opens to the left instead of off the screen", () => {
+    // The bug this exists for: an answer about something near the edge ran past it, and
+    // the half nobody could see was the end with Accept and Decline on it.
+    const put = answerAt({ x: 1900, y: 400 }, panel, room(left));
+    expect(put.left).toBe(1900 - ANSWER_AWAY - panel.width);
+    expect(put.left + panel.width).toBeLessThan(left.width);
+  });
+
+  test("against the bottom it opens upward", () => {
+    const put = answerAt({ x: 600, y: 1060 }, panel, room(left));
+    expect(put.top).toBe(1060 - ANSWER_AWAY - panel.height);
+    expect(put.top + panel.height).toBeLessThan(left.height);
+  });
+
+  test("a corner flips both ways at once", () => {
+    const put = answerAt({ x: 1900, y: 1060 }, panel, room(left));
+    expect(put.left).toBeLessThan(1900);
+    expect(put.top).toBeLessThan(1060);
+  });
+
+  test("the edge of a display is an edge, even with another display beyond it", () => {
+    // The overlay is every screen at once, so "there is room to the right" can mean
+    // "there is room on the next monitor". A panel opened across a bezel is a panel
+    // read in two halves.
+    const put = answerAt({ x: 1900, y: 400 }, panel, room(left));
+    expect(put.left + panel.width).toBeLessThanOrEqual(left.width);
+    // And a pin on the second display opens inside the second display, not the first.
+    const over = answerAt({ x: 3800, y: 400 }, panel, room(right));
+    expect(over.left).toBeGreaterThanOrEqual(right.x);
+  });
+
+  test("a panel wider than its screen still starts on it", () => {
+    // Nothing here can make it fit, so the one thing that must hold is that the corner
+    // somebody reads from first is on the display they are looking at.
+    const narrow = { x: 0, y: 0, width: 260, height: 400 };
+    const put = answerAt({ x: 250, y: 380 }, panel, room(narrow));
+    expect(put.left).toBeGreaterThanOrEqual(0);
+    expect(put.top).toBeGreaterThanOrEqual(0);
+  });
+
+  test("a panel keeps clear of a panel or taskbar the desktop has reserved", () => {
+    // `usable` already knows about reserved edges, and an answer pushed under a dock is
+    // as unreadable as one pushed off the screen.
+    const docked = {
+      ...left,
+      reserved: { top: 0, right: 0, bottom: 60, left: 0 },
+    };
+    const put = answerAt({ x: 600, y: 1050 }, panel, room(docked));
+    expect(put.top + panel.height).toBeLessThanOrEqual(left.height - 60);
   });
 });

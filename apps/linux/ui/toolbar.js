@@ -1150,8 +1150,14 @@ function spanLabel(points, said) {
  * between them, and everything between them is somebody's desktop.
  */
 function drawAnswers() {
+  // Panels are laid out after everything is mounted, because where one goes depends on
+  // how big it turns out to be, and a reply's height is not known until it is in the
+  // page. Kept beside their pins rather than inside them: a panel that has been moved
+  // to the other side of its pin to fit on the screen is no longer at a fixed offset
+  // from it, and nesting it would mean fighting its own parent's position.
+  const placing = [];
   el.answers.replaceChildren(
-    ...state.answers.map((answer) => {
+    ...state.answers.flatMap((answer) => {
       const at = document.createElement("div");
       at.className = "answer-at";
       at.style.left = `${answer.at.x * 100}%`;
@@ -1216,11 +1222,28 @@ function drawAnswers() {
         foot.append(no, yes);
 
         panel.append(head, said, foot);
-        at.append(panel);
+        placing.push([panel, { x: answer.at.x * window.innerWidth, y: answer.at.y * window.innerHeight }]);
+        return [at, panel];
       }
-      return at;
+      return [at];
     }),
   );
+  for (const [panel, at] of placing) placeAnswer(panel, at);
+}
+
+/** Put an opened answer where `answerAt` says it goes, and no taller than its screen. */
+function placeAnswer(panel, at) {
+  panel.style.left = "0px";
+  panel.style.top = "0px";
+  const room = usable(screenAt(state.screens, at));
+  // Never taller than the display it is on. The stylesheet caps it at a share of the
+  // window, and this window is every screen at once — stack two monitors and a share
+  // of the pair is more than the whole of either. Set before it is measured, because
+  // where it goes depends on how tall it ended up.
+  panel.style.maxHeight = `min(40vh, ${Math.max(120, room.bottom - room.top - EDGE * 2)}px)`;
+  const { left, top } = answerAt(at, panel.getBoundingClientRect(), room);
+  panel.style.left = `${Math.round(left)}px`;
+  panel.style.top = `${Math.round(top)}px`;
 }
 
 /**

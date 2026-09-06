@@ -73,16 +73,6 @@ const WIREFRAME_HOME = "docs/Design/";
 const RECORD_LENGTHS = [2, 5, 10, 15];
 
 /**
- * How much of a dropped file travels with the message, and how much of a whole send does.
- *
- * A file goes into the message base64-encoded, through one websocket frame, and comes
- * out the far end as bytes an agent has to be given. That is the right thing for a
- * screenshot, a log, a stylesheet — and the wrong thing for a video, an archive, or a
- * directory of them, which is why anything past these limits is named rather than
- * carried. Naming is not a failure: the receiving agent is usually on this machine and
- * can open the path itself, and the ones that cannot would not have survived the frame.
- */
-/**
  * How far outside a recorded region the toolbar may draw while recording it.
  *
  * The frames are the region plus `OUTLINE_ROOM` — twelve pixels of context, in
@@ -95,6 +85,42 @@ const RECORD_LENGTHS = [2, 5, 10, 15];
  * back as the panel rather than as a red rectangle somebody drew around it.
  */
 const RECORD_CLEAR = 16;
+
+/** How far an opened answer sits from the pin it belongs to, on whichever side it fits. */
+const ANSWER_AWAY = 18;
+
+/**
+ * Where an answer opens: beside its pin, on the side of it that fits.
+ *
+ * An answer used to open down and to the right at a fixed offset, which is fine in the
+ * middle of a display and unreadable at the end of one — a reply about something near
+ * the right edge ran off it, and the half nobody could see included the buttons for
+ * agreeing with it.
+ *
+ * Flipped rather than nudged back. Sliding it onto the screen would put it under its
+ * own pin, and the pin is what closes it again.
+ *
+ * `room` is the pin's own screen, not the desktop: the overlay spans every display, so
+ * "there is space to the right" can mean "there is space on the next monitor", which
+ * puts half a panel across a bezel.
+ */
+function answerAt(at, box, room) {
+  // Beside the pin on one axis, then held inside the room on that axis anyway. The
+  // second half is not belt and braces: a pin can sit *in* the strip a desktop has
+  // reserved for its own panel — that is where somebody's dock is, and things worth
+  // pointing at live there — and flipping away from a pin that is already past the edge
+  // lands the panel back over the very thing the room excludes.
+  const beside = (from, near, far, size) => {
+    const put = from + ANSWER_AWAY + size <= far - EDGE ? from + ANSWER_AWAY : from - ANSWER_AWAY - size;
+    // The near edge wins when the panel is wider than the room it has: the corner
+    // somebody reads from first is the one that has to be on the display.
+    return Math.max(near + EDGE, Math.min(put, far - EDGE - size));
+  };
+  return {
+    left: beside(at.x, room.left, room.right, box.width),
+    top: beside(at.y, room.top, room.bottom, box.height),
+  };
+}
 
 /** Whole seconds left of a recording, never past its ends. */
 function secondsLeft(until, now) {
@@ -117,6 +143,16 @@ function recordFrame(box, screen) {
   return { x, y, w: box.w + across * 2, h: box.h + down * 2 };
 }
 
+/**
+ * How much of a dropped file travels with the message, and how much of a whole send does.
+ *
+ * A file goes into the message base64-encoded, through one websocket frame, and comes
+ * out the far end as bytes an agent has to be given. That is the right thing for a
+ * screenshot, a log, a stylesheet — and the wrong thing for a video, an archive, or a
+ * directory of them, which is why anything past these limits is named rather than
+ * carried. Naming is not a failure: the receiving agent is usually on this machine and
+ * can open the path itself, and the ones that cannot would not have survived the frame.
+ */
 const CARRY_FILE = 8 * 1024 * 1024;
 const CARRY_SEND = 20 * 1024 * 1024;
 
