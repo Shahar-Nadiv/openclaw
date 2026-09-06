@@ -36,6 +36,7 @@
 
         <div id="fly-shape" class="flyout" role="menu" hidden></div>
         <div id="fly-design" class="flyout flyout-wide" role="menu" hidden></div>
+        <div id="fly-send" class="flyout flyout-send" role="dialog" hidden></div>
         <div id="fly-agents" class="agents" role="menu" hidden>
           <p class="agents-title">Select who receives your edits</p>
           <div id="agent-rows" class="agent-rows"></div>
@@ -58,6 +59,21 @@
     ></svg>
     <div id="pins" class="pins" aria-hidden="true"></div>
     <div id="capture" class="capture" hidden></div>
+
+    <!--
+      What to do with the mark just made.
+
+      A sibling of the rail rather than a child of it, because it belongs to the region
+      somebody marked and not to the toolbar; it opens where they were looking. The
+      shape measurement takes the union of the two, so the pointer can reach both.
+    -->
+    <div
+      id="popup"
+      class="popup"
+      role="dialog"
+      aria-label="What to do with this mark"
+      hidden
+    ></div>
 
     <script src="toolbar.js"></script>
   </body>

@@ -11,6 +11,13 @@
  * connector owns the surface. A tool that writes and a tool that only marks are
  * different in kind, so that difference is data here rather than a branch buried in a
  * handler.
+ *
+ * Nothing writes yet, and that is not the column going unused. Creating a wireframe
+ * asks an agent to write a document; it never reaches into the application that was
+ * pointed at, and calling it a write would have the gate refuse a tool that was never
+ * going to touch the surface. The column means what it says, and the first tool that
+ * genuinely changes somebody's window will be refused by it until a connector owns
+ * that window.
  */
 const TOOLS = {
   pointer: { label: "Pointer", press: "V", glyph: "pointer", writes: false },
@@ -18,15 +25,108 @@ const TOOLS = {
   draw: { label: "Draw", press: "D", glyph: "draw", writes: false },
   box: { label: "Box", press: "B", glyph: "box", writes: false },
   circle: { label: "Circle", press: "O", glyph: "circle", writes: false },
-  wireframe: { label: "Create wireframe", glyph: "wireframe", writes: true },
+  wireframe: { label: "Create wireframe", glyph: "wireframe", writes: false },
   screenshot: { label: "Screenshot", glyph: "screenshot", writes: false },
 };
 
-/** What each tool draws while it is being dragged, if anything. */
-const DRAWS = { box: "box", circle: "ellipse", draw: "stroke" };
+/**
+ * What a batch of marks is being sent *for*.
+ *
+ * The instruction an agent is given changes what comes back more than anything else in
+ * the message, and it is the one thing somebody should not have to type again every
+ * time. Data rather than branches, so the chips on the composer and the sentence in the
+ * message are read from the same place and cannot drift apart.
+ */
+const MODES = {
+  ask: { label: "Ask", says: "Answer the question. Do not change anything yet." },
+  plan: {
+    label: "Plan",
+    says: "Work out what needs to change and lay out the steps. Do not edit anything yet.",
+  },
+  debug: {
+    label: "Debug",
+    says: "Work out why this is happening, and read the code before concluding anything.",
+  },
+  build: { label: "Build", says: "Make this change." },
+};
+
+/** Where a wireframe goes when nobody says otherwise. */
+const WIREFRAME_HOME = "docs/Design/";
+
+/**
+ * What each tool draws while it is being dragged, if anything.
+ *
+ * A screenshot and a wireframe drag out a region like any other area tool. Released
+ * without having moved, they mean the whole display — the one gesture where a click
+ * that selected nothing is a request rather than a slip.
+ */
+const DRAWS = {
+  box: "box",
+  circle: "ellipse",
+  draw: "stroke",
+  screenshot: "box",
+  wireframe: "box",
+};
+
+/** The tools for which a click that selected nothing means the whole display. */
+const WHOLE_DISPLAY = ["screenshot", "wireframe"];
 
 /** Single letters that pick a tool, from the tooltips the rail shows. */
 const KEYS = { v: "pointer", p: "pointAt", d: "draw", b: "box", o: "circle" };
+
+/**
+ * What the agent actually reads.
+ *
+ * The pictures carry what a region looks like. This carries what was meant by it: which
+ * tool made each mark, what was written on it, and what the whole batch is for. Numbered
+ * to match the order the pictures are attached in, because an agent looking at three
+ * images needs to know which sentence belongs to which one, and "the second thing" is
+ * not an answer when the images arrive as a set.
+ *
+ * The instruction goes last. Everything above it is what is being talked about, and the
+ * last line is what to do — the same order a person would say it out loud.
+ */
+function summaryFor(marks, mode, text, surface) {
+  const said = [];
+  const said_of = (mark, at) => {
+    const tool = TOOLS[mark.tool];
+    const note = (mark.note || "").trim();
+    const named = `${at + 1}. ${tool ? tool.label : mark.tool} (mark-${at + 1}.png)`;
+    return note ? `${named} — ${note}` : named;
+  };
+  if (marks.length) {
+    const where = (surface && surface.app) || "screen";
+    said.push(
+      marks.length === 1
+        ? `One thing marked on ${where}:`
+        : `${marks.length} things marked on ${where}:`,
+    );
+    said.push("");
+    marks.forEach((mark, at) => said.push(said_of(mark, at)));
+    // A wireframe is the one mark that asks for a file rather than an opinion, so it
+    // says where the file goes. Stated per mark: two of them in one batch are two
+    // documents, not one with two names.
+    marks.forEach((mark, at) => {
+      if (mark.tool !== "wireframe") return;
+      const home = (mark.dest || "").trim() || WIREFRAME_HOME;
+      said.push("");
+      said.push(
+        `Turn mark-${at + 1}.png into a wireframe and write it to ${home}, matching the ` +
+          `.dc.html documents already there — the same <x-dc> wrapper and the shared _ds/ ` +
+          `stylesheets they use.`,
+      );
+    });
+    said.push("");
+  }
+  const asked = MODES[mode] || MODES.plan;
+  said.push(`${asked.label}: ${asked.says}`);
+  const own = (text || "").trim();
+  if (own) {
+    said.push("");
+    said.push(own);
+  }
+  return said.join("\n");
+}
 
 /**
  * How close to an edge counts as docked.
@@ -181,6 +281,7 @@ const GLYPHS = {
     '<rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="3 2.5"/><path d="M7 8h10M7 12h6M7 16h8"/>',
   screenshot:
     '<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/>',
+  send: '<path d="M21 3L10.5 13.5"/><path d="M21 3l-6.8 18-3.7-7.5L3 9.8z"/>',
 };
 
 function icon(name, size) {
@@ -201,6 +302,8 @@ const el = {
   marks: document.getElementById("marks"),
   pins: document.getElementById("pins"),
   capture: document.getElementById("capture"),
+  popup: document.getElementById("popup"),
+  flySend: document.getElementById("fly-send"),
 };
 
 const state = {
@@ -231,6 +334,18 @@ const state = {
   receiving: { kind: "agent", id: null, name: null, emoji: null },
   marks: [],
   undone: [],
+  // The mark whose popup is open, if any. One at a time: two dialogs about two regions
+  // is a conversation nobody can follow.
+  popup: null,
+  // What the next send is for, and anything else somebody wants to say with it.
+  mode: "plan",
+  text: "",
+  // Conversations held elsewhere that have already been agreed to. Continuing one hands
+  // it to the Gateway, which is a real change of ownership, so it is asked once and then
+  // remembered rather than asked on every send.
+  adopted: [],
+  // Set while a send is in the air, so a second click cannot post it twice.
+  sending: false,
 };
 
 /* ── the rail ───────────────────────────────────────────────────────────── */
@@ -277,10 +392,19 @@ function buildRail() {
   agents.addEventListener("click", () => flyout("agents"));
   buttons.agents = agents;
 
+  const send = document.createElement("button");
+  send.type = "button";
+  send.className = "key send-key";
+  send.title = "Send what you marked";
+  send.innerHTML =
+    icon("send") + '<span class="send-many"></span><span class="caret">▾</span>';
+  send.addEventListener("click", () => flyout("send"));
+  buttons.send = send;
+
   const gear = key("settings", "Settings · ⌘,", "settings", () =>
     invoke("colai_open_settings"),
   );
-  dividers[2].after(agents, gear);
+  dividers[2].after(send, agents, gear);
 
   row(el.flyShape, "box", "Box", "box", "B");
   row(el.flyShape, "circle", "Circle", "circle", "O");
@@ -427,6 +551,7 @@ async function loadWho() {
           id: fallback.id,
           name: fallback.name,
           emoji: fallback.emoji,
+          locator: null,
         };
       }
     }
@@ -437,8 +562,11 @@ async function loadWho() {
   render();
 }
 
-function receive(kind, id, name, emoji) {
-  state.receiving = { kind, id, name, emoji: emoji || null };
+function receive(kind, id, name, emoji, locator) {
+  // The locator travels with the choice. A conversation held elsewhere is addressed by
+  // its catalog, host and thread together, and by the time somebody sends, the list it
+  // came from may have been reloaded out from under the id.
+  state.receiving = { kind, id, name, emoji: emoji || null, locator: locator || null };
   state.open = null;
   void loadWho();
 }
@@ -517,7 +645,15 @@ function release() {
   const box = boxOf(finished.points);
   // A press that went nowhere is a click, not a region. Without this every stray click
   // becomes a zero-sized mark that is invisible, un-hittable, and still counted.
-  if (finished.kind !== "stroke" && box.w < 0.004 && box.h < 0.004) return;
+  if (finished.kind !== "stroke" && box.w < 0.004 && box.h < 0.004) {
+    // Except for the two tools that photograph: not dragging one out is how somebody
+    // asks for the whole screen, and refusing that as a slip would leave the simplest
+    // thing the toolbar does with no way to ask for it.
+    if (WHOLE_DISPLAY.includes(state.tool)) {
+      addMark({ tool: state.tool, region: null, points: [] });
+    }
+    return;
+  }
 
   addMark({
     tool: state.tool,
@@ -565,10 +701,348 @@ function drawLive() {
 
 function addMark(mark) {
   mark.id = `mark-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  mark.note = "";
+  // In the next send unless somebody says otherwise. Marking something and then having
+  // to go and tick it is a step nobody asked for.
+  mark.chosen = true;
+  if (mark.tool === "wireframe") mark.dest = WIREFRAME_HOME;
   state.marks.push(mark);
   // A new mark ends the redo trail: what was undone is no longer what comes next.
   state.undone = [];
   render();
+  void shoot(mark);
+}
+
+/**
+ * Photograph what a mark is about, then ask what to do with it.
+ *
+ * The page makes itself invisible first. The overlay is transparent, so a page that
+ * draws nothing composites to nothing and the picture comes out without the toolbar in
+ * it — which hiding the window would also achieve, at the cost of the window manager
+ * handing the keyboard somewhere else the moment it came back.
+ *
+ * Two frames and a moment: the compositor has to have presented the empty overlay
+ * before the pixels underneath it are read, and a frame callback only says the page has
+ * drawn, not that anybody has seen it.
+ */
+async function shoot(mark) {
+  document.body.style.visibility = "hidden";
+  try {
+    await new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn)));
+    await new Promise((waited) => setTimeout(waited, 40));
+    const taken = await invoke("colai_capture_mark", { mark, accent: accentNow() });
+    mark.thumb = taken.thumb;
+    mark.shot = `${taken.width}\u00d7${taken.height}`;
+  } catch (error) {
+    // The mark still exists and can still be described; it simply arrives without a
+    // picture. Saying which is better than a popup that looks broken.
+    mark.trouble = error && error.message ? error.message : String(error);
+  } finally {
+    document.body.style.visibility = "";
+  }
+  state.popup = mark.id;
+  render();
+}
+
+/** The colour the app is themed in, if it has told us one. */
+function accentNow() {
+  const said = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+  return said || undefined;
+}
+
+/* ── what to do with what was marked ─────────────────────────────────────── */
+
+/** The marks that go in the next send, in the order they were made. */
+function chosenMarks() {
+  return state.marks.filter((mark) => mark.chosen);
+}
+
+/** Who is receiving, as the shell needs them named. */
+function receiverNow() {
+  const who = state.receiving;
+  if (!who.id) return null;
+  return { kind: who.kind, id: who.id, locator: who.locator || null };
+}
+
+/** Whether sending to this receiver would hand a conversation over without asking. */
+function needsAgreeing() {
+  return state.receiving.kind === "thread" && !state.adopted.includes(state.receiving.id);
+}
+
+/**
+ * Send what was marked.
+ *
+ * The message is composed here rather than in the shell, because what an agent reads is
+ * a decision about the marks somebody made and belongs beside them. The shell resolves
+ * the receiver, attaches the pictures and reports what happened.
+ */
+async function sendMarks(ids) {
+  if (state.sending) return;
+  const who = receiverNow();
+  if (!who) {
+    state.receipt = { did: "Nobody is receiving", through: "Choose an agent or a conversation first", agent: null, blocked: true };
+    render();
+    return;
+  }
+  const going = state.marks.filter((mark) => ids.includes(mark.id));
+  state.sending = true;
+  render();
+  try {
+    const sent = await invoke("colai_send", {
+      receiver: who,
+      message: summaryFor(going, state.mode, state.text, state.surface),
+      markIds: ids,
+    });
+    if (who.kind === "thread") state.adopted = [...state.adopted, who.id];
+    // What went is gone; what was left unticked is still there, which is the whole
+    // point of being able to untick it.
+    state.marks = state.marks.filter((mark) => !ids.includes(mark.id));
+    state.text = "";
+    state.popup = null;
+    state.open = null;
+    state.receipt = {
+      did: `Sent ${counted(going.length, "mark")}`,
+      through: state.receiving.name || who.id,
+      agent: sent.pictures ? counted(sent.pictures, "picture") : "no pictures",
+      blocked: false,
+    };
+  } catch (error) {
+    state.receipt = {
+      did: "Could not send",
+      through: error && error.message ? error.message : String(error),
+      agent: null,
+      blocked: true,
+    };
+  } finally {
+    state.sending = false;
+    render();
+  }
+}
+
+/** The popup that opens on a finished mark. */
+function drawPopup() {
+  const mark = state.marks.find((held) => held.id === state.popup);
+  if (!mark) {
+    el.popup.hidden = true;
+    return;
+  }
+  el.popup.hidden = false;
+  const rows = [];
+
+  const head = document.createElement("div");
+  head.className = "popup-head";
+  if (mark.thumb) {
+    const shot = document.createElement("img");
+    shot.className = "popup-shot";
+    shot.src = mark.thumb;
+    shot.alt = "";
+    head.append(shot);
+  }
+  const named = document.createElement("div");
+  named.className = "popup-named";
+  const what = document.createElement("strong");
+  what.textContent = TOOLS[mark.tool] ? TOOLS[mark.tool].label : mark.tool;
+  const size = document.createElement("span");
+  size.className = "popup-size";
+  size.textContent = mark.trouble ? mark.trouble : mark.shot || "taking a picture…";
+  named.append(what, size);
+  head.append(named);
+  rows.push(head);
+
+  const note = document.createElement("textarea");
+  note.className = "popup-note";
+  note.rows = 2;
+  note.placeholder = "What about it?";
+  note.value = mark.note || "";
+  note.addEventListener("input", () => {
+    mark.note = note.value;
+  });
+  rows.push(note);
+
+  if (mark.tool === "wireframe") {
+    const where = document.createElement("input");
+    where.className = "popup-note popup-dest";
+    where.type = "text";
+    where.value = mark.dest || WIREFRAME_HOME;
+    where.setAttribute("aria-label", "Where the wireframe document goes");
+    where.addEventListener("input", () => {
+      mark.dest = where.value;
+    });
+    rows.push(where);
+  }
+
+  const foot = document.createElement("div");
+  foot.className = "popup-foot";
+  const to = document.createElement("button");
+  to.type = "button";
+  to.className = "popup-to";
+  to.textContent = state.receiving.name || "Choose who receives";
+  to.title = "Change who receives this";
+  to.addEventListener("click", () => {
+    state.popup = null;
+    flyout("agents");
+  });
+  const keep = document.createElement("button");
+  keep.type = "button";
+  keep.className = "popup-do";
+  keep.textContent = "Keep";
+  keep.addEventListener("click", () => {
+    state.popup = null;
+    render();
+  });
+  const now = document.createElement("button");
+  now.type = "button";
+  now.className = "popup-do popup-go";
+  now.disabled = state.sending;
+  now.textContent = state.sending ? "Sending…" : needsAgreeing() ? "Send and adopt" : "Send now";
+  now.addEventListener("click", () => void sendMarks([mark.id]));
+  foot.append(to, keep, now);
+  rows.push(foot);
+
+  // Said before it happens, not after. Continuing a conversation held in another agent
+  // hands it to the Gateway, and somebody driving that thread from a terminal should
+  // find that out from the toolbar rather than from the terminal.
+  if (needsAgreeing()) {
+    const warned = document.createElement("p");
+    warned.className = "popup-warn";
+    warned.textContent = `Sending adopts “${state.receiving.name}” into OpenClaw, which takes it over from wherever it is running now.`;
+    rows.splice(rows.length - 1, 0, warned);
+  }
+
+  el.popup.replaceChildren(...rows);
+  placePopup(mark);
+}
+
+/**
+ * Put the popup beside the mark it is about, and inside the screen.
+ *
+ * Beside rather than on top: covering the thing somebody just pointed at, while asking
+ * them what they meant by it, is the one place this must not open.
+ */
+function placePopup(mark) {
+  const room = usable({ width: window.innerWidth, height: window.innerHeight }, state.reserved);
+  // A whole-display capture has no corner to sit beside, so it opens in the middle
+  // rather than at Math.max of nothing, which is negative infinity and the top-left.
+  const edges = mark.region
+    ? {
+        right: (mark.region.box.x + mark.region.box.w) * window.innerWidth,
+        bottom: (mark.region.box.y + mark.region.box.h) * window.innerHeight,
+      }
+    : mark.points.length
+      ? {
+          right: Math.max(...mark.points.map((spot) => spot.x)) * window.innerWidth,
+          bottom: Math.max(...mark.points.map((spot) => spot.y)) * window.innerHeight,
+        }
+      : { right: window.innerWidth / 2, bottom: window.innerHeight / 2 };
+  el.popup.style.left = "0px";
+  el.popup.style.top = "0px";
+  const box = el.popup.getBoundingClientRect();
+  const left = Math.min(Math.max(edges.right + 14, room.left + EDGE), room.right - box.width - EDGE);
+  const top = Math.min(Math.max(edges.bottom + 14, room.top + EDGE), room.bottom - box.height - EDGE);
+  el.popup.style.left = `${Math.round(left)}px`;
+  el.popup.style.top = `${Math.round(top)}px`;
+}
+
+/** The composer: everything marked so far, and what to do with the ticked ones. */
+function drawComposer() {
+  const rows = [];
+  const title = document.createElement("p");
+  title.className = "agents-title";
+  title.textContent = "Send what you marked";
+  rows.push(title);
+
+  if (state.marks.length === 0) {
+    const none = document.createElement("p");
+    none.className = "agent-empty";
+    none.textContent = "Nothing marked yet. Point at something, or just write below.";
+    rows.push(none);
+  }
+  for (const mark of state.marks) {
+    const row = document.createElement("label");
+    row.className = "row mark-row";
+    const tick = document.createElement("input");
+    tick.type = "checkbox";
+    tick.className = "mark-tick";
+    tick.checked = Boolean(mark.chosen);
+    tick.addEventListener("change", () => {
+      mark.chosen = tick.checked;
+      render();
+    });
+    const shot = document.createElement("span");
+    shot.className = "mark-shot";
+    if (mark.thumb) {
+      const picture = document.createElement("img");
+      picture.src = mark.thumb;
+      picture.alt = "";
+      shot.append(picture);
+    }
+    const said = document.createElement("span");
+    said.className = "agent-name";
+    const tool = TOOLS[mark.tool] ? TOOLS[mark.tool].label : mark.tool;
+    said.textContent = mark.note ? `${tool} — ${mark.note}` : tool;
+    said.title = said.textContent;
+    row.append(tick, shot, said);
+    rows.push(row);
+  }
+
+  const modes = document.createElement("div");
+  modes.className = "mode-row";
+  for (const [id, mode] of Object.entries(MODES)) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.setAttribute("aria-pressed", String(state.mode === id));
+    chip.textContent = mode.label;
+    chip.title = mode.says;
+    chip.addEventListener("click", () => {
+      state.mode = id;
+      render();
+    });
+    modes.append(chip);
+  }
+  rows.push(modes);
+
+  const text = document.createElement("textarea");
+  text.className = "popup-note";
+  text.rows = 3;
+  text.placeholder = "Anything else to say?";
+  text.value = state.text;
+  text.addEventListener("input", () => {
+    state.text = text.value;
+  });
+  rows.push(text);
+
+  if (needsAgreeing()) {
+    const warned = document.createElement("p");
+    warned.className = "popup-warn";
+    warned.textContent = `Sending adopts “${state.receiving.name}” into OpenClaw, which takes it over from wherever it is running now.`;
+    rows.push(warned);
+  }
+
+  const foot = document.createElement("div");
+  foot.className = "popup-foot";
+  const to = document.createElement("button");
+  to.type = "button";
+  to.className = "popup-to";
+  to.textContent = state.receiving.name || "Choose who receives";
+  to.addEventListener("click", () => flyout("agents"));
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "popup-do popup-go";
+  const going = chosenMarks();
+  go.disabled = state.sending || (going.length === 0 && !state.text.trim());
+  go.textContent = state.sending
+    ? "Sending…"
+    : needsAgreeing()
+      ? "Send and adopt"
+      : going.length
+        ? `Send ${counted(going.length, "mark")}`
+        : "Send";
+  go.addEventListener("click", () => void sendMarks(going.map((mark) => mark.id)));
+  foot.append(to, go);
+  rows.push(foot);
+
+  el.flySend.replaceChildren(...rows);
 }
 
 /* ── where the rail sits ─────────────────────────────────────────────────── */
@@ -796,6 +1270,8 @@ function render() {
       );
     } else if (id === "agents") {
       button.setAttribute("aria-pressed", String(state.open === "agents"));
+    } else if (id === "send") {
+      button.setAttribute("aria-pressed", String(state.open === "send"));
     } else if (TOOLS[id]) {
       button.setAttribute("aria-pressed", String(state.tool === id));
     }
@@ -823,21 +1299,35 @@ function render() {
     button.setAttribute("aria-pressed", String(button.dataset.tool === state.tool));
   }
 
+  const waiting = chosenMarks().length;
+  buttons.send.querySelector(".send-many").textContent = waiting ? String(waiting) : "";
+  buttons.send.dataset.waiting = String(waiting > 0);
+
   el.flyShape.hidden = state.open !== "shape";
   el.flyDesign.hidden = state.open !== "design";
   el.flyAgents.hidden = state.open !== "agents";
+  el.flySend.hidden = state.open !== "send";
+  // Filled before it is placed. A menu is measured to decide whether it fits on the
+  // screen, and measuring it empty answers a question about a different menu — which is
+  // how a full list of conversations came to hang off the bottom of the display while
+  // the same code, run again a moment later, put it back.
+  if (state.open === "send") drawComposer();
+  if (state.open === "agents") drawWho();
   for (const [node, from] of [
     [el.flyShape, 150],
     [el.flyDesign, 190],
-    [el.flyAgents, 230],
+    [el.flySend, 230],
+    [el.flyAgents, 270],
   ]) {
     placeFlyout(node, vertical, from);
   }
-  if (state.open === "agents") drawWho();
 
   drawMarks();
+  drawPopup();
   drawReceipt();
-  el.capture.hidden = state.tool === "pointer";
+  // The catcher swallows every click on the screen, which is what a marking tool wants
+  // and the opposite of what a popup asking a question wants.
+  el.capture.hidden = state.tool === "pointer" || state.popup !== null;
   shape();
 }
 
@@ -990,7 +1480,7 @@ function threadRow(thread) {
     name: thread.title,
     note: thread.whereAt,
     receiving: state.receiving.kind === "thread" && state.receiving.id === thread.id,
-    onPick: () => receive("thread", thread.id, thread.title, null),
+    onPick: () => receive("thread", thread.id, thread.title, null, thread.locator),
   });
   row.classList.add("row-nested");
   return row;
@@ -1097,10 +1587,13 @@ function drawReceipt() {
  */
 let shaped = "";
 function shape() {
+  // The popup opens over the region it is about, well away from the rail, so the two are
+  // measured as two rectangles rather than one that swallows the desktop between them.
   const rects =
-    state.tool !== "pointer"
+    state.tool !== "pointer" && state.popup === null
       ? [{ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }]
       : [boxAround(el.wrap)];
+  if (state.popup !== null && !el.popup.hidden) rects.push(boxAround(el.popup));
   const key = JSON.stringify(rects);
   if (key === shaped) return;
   shaped = key;
@@ -1147,6 +1640,13 @@ function boxAround(node) {
 /* ── keys ────────────────────────────────────────────────────────────────── */
 
 window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.popup !== null) {
+    // The mark is kept. Escape means "not now", not "never mind" — the thing was still
+    // marked, and it is in the tray.
+    state.popup = null;
+    render();
+    return;
+  }
   if (event.key === "Escape") {
     use("pointer");
     void invoke("colai_release");
@@ -1227,6 +1727,14 @@ async function start() {
   }
 
   void loadWho();
+  // The Gateway connects a moment after the app does, so the first ask usually lands
+  // before there is anything to answer it. Asked again rather than leaving the rail
+  // saying "unavailable" until somebody happens to open the menu.
+  for (const wait of [1500, 4000, 9000]) {
+    setTimeout(() => {
+      if (state.whoTrouble) void loadWho();
+    }, wait);
+  }
   render();
   clamp();
   // The rail redraws itself when a flyout opens, and the shape has to grow to hold it.

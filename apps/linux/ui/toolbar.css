@@ -357,6 +357,226 @@ body {
   color: #8e8e93;
 }
 
+/* ── sending what was marked ──────────────────────────────────────────────── */
+
+.send-key {
+  gap: 4px;
+  padding: 0 8px;
+}
+/* Lit only when something is actually waiting to go. A badge that is always there stops
+   being a count and becomes decoration. */
+.send-key[data-waiting="true"] {
+  color: #f7f7f8;
+}
+.send-many {
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+  color: #1c1c1e;
+  background: var(--accent, #ff6b6b);
+}
+.send-many:empty {
+  display: none;
+}
+
+.flyout-send {
+  width: 320px;
+  padding: 0 0 6px;
+}
+.flyout-send .agents-title {
+  padding: 12px 14px 6px;
+}
+.flyout-send > .row,
+.flyout-send > .mode-row,
+.flyout-send > .popup-note,
+.flyout-send > .popup-foot,
+.flyout-send > .popup-warn,
+.flyout-send > .agent-empty {
+  margin-left: 8px;
+  margin-right: 8px;
+  width: calc(100% - 16px);
+}
+
+/* A mark waiting to be sent, and the tick that decides whether it goes this time. */
+.mark-row {
+  cursor: pointer;
+  gap: 8px;
+}
+.mark-tick {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent, #ff6b6b);
+  cursor: pointer;
+}
+.mark-shot {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 26px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 5px;
+  background: rgb(255 255 255 / 8%);
+}
+.mark-shot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mode-row {
+  display: flex;
+  gap: 4px;
+  padding: 8px 0 2px;
+}
+.chip {
+  all: unset;
+  flex: 1;
+  padding: 5px 0;
+  border-radius: 7px;
+  text-align: center;
+  font-size: 11.5px;
+  color: #8e8e93;
+  background: rgb(255 255 255 / 6%);
+  cursor: pointer;
+}
+.chip:hover {
+  color: #f7f7f8;
+}
+.chip[aria-pressed="true"] {
+  background: var(--accent, #ff6b6b);
+  color: #1c1c1e;
+}
+
+/* ── the popup that opens on a mark ───────────────────────────────────────── */
+
+.popup {
+  position: absolute;
+  z-index: 70;
+  width: 290px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgb(20 20 22 / 98%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 60%);
+}
+.popup-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 2px 8px;
+}
+.popup-shot {
+  width: 62px;
+  height: 44px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid rgb(255 255 255 / 12%);
+}
+.popup-named {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+  font-size: 12.5px;
+}
+.popup-size {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: #8e8e93;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.popup-note {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 8px;
+  resize: none;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: #f7f7f8;
+  background: rgb(255 255 255 / 7%);
+  border: 1px solid rgb(255 255 255 / 10%);
+}
+.popup-note:focus {
+  outline: none;
+  border-color: var(--accent, #ff6b6b);
+}
+.popup-note::placeholder {
+  color: #8e8e93;
+}
+.popup-dest {
+  margin-top: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.popup-warn {
+  margin: 8px 0 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #f7f7f8;
+  background: rgb(255 123 123 / 12%);
+  border: 1px solid rgb(255 123 123 / 40%);
+}
+
+.popup-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 9px;
+}
+.popup-to {
+  all: unset;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: #8e8e93;
+  cursor: pointer;
+}
+.popup-to:hover {
+  color: #f7f7f8;
+}
+.popup-do {
+  all: unset;
+  flex-shrink: 0;
+  padding: 6px 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #f7f7f8;
+  background: rgb(255 255 255 / 9%);
+  cursor: pointer;
+}
+.popup-do:hover {
+  background: rgb(255 255 255 / 14%);
+}
+.popup-go {
+  color: #1c1c1e;
+  background: var(--accent, #ff6b6b);
+}
+.popup-go:hover {
+  filter: brightness(1.08);
+}
+.popup-do[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+
 /* ── the receipt ──────────────────────────────────────────────────────────── */
 
 /*

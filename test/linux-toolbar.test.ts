@@ -33,24 +33,48 @@ type ToolbarHelpers = {
     agent: string | null,
   ) => { did: string; through: string; agent: string | null; blocked: boolean };
   counted: (many: number, noun: string) => string;
+  MODES: Record<string, { label: string; says: string }>;
+  summaryFor: (
+    marks: { tool: string; note?: string; dest?: string }[],
+    mode: string,
+    text: string,
+    surface: Surface,
+  ) => string;
 };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource.slice(0, browserBindingsStart)}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, receiptFor, counted };`,
+  `${toolbarSource.slice(0, browserBindingsStart)}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, receiptFor, counted, MODES, summaryFor };`,
   context,
 );
-const { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, receiptFor, counted } =
+const { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, receiptFor, counted, MODES, summaryFor } =
   context.helpers as ToolbarHelpers;
+
+/*
+ * No shipped tool changes a surface yet, so the gate has nothing to refuse — and the
+ * gate is the product's whole thesis, which makes "untested because unused" the wrong
+ * answer. This is the tool the first real one will be: it writes, and everything below
+ * asks the gate what happens to it.
+ */
+TOOLS.surfaceWrite = { label: "Surface write", writes: true };
 
 describe("what a tool is allowed to do", () => {
   // The whole point of the toolbar: it reads anything and changes only what a connector
   // owns. That difference is data so this test and the rail read the same list.
-  test("only the tools that change a surface are marked as writing", () => {
-    expect(TOOLS.wireframe.writes).toBe(true);
-    for (const marking of ["pointer", "pointAt", "draw", "box", "circle", "screenshot"]) {
-      expect(TOOLS[marking]!.writes, marking).toBe(false);
+  test("nothing writes yet, because nothing yet reaches into somebody's window", () => {
+    // Creating a wireframe asks an agent to write a document. It never touches the
+    // application that was pointed at, so calling it a write would have the gate refuse
+    // a tool that was never going to change a surface.
+    for (const tool of Object.keys(TOOLS)) {
+      if (tool === "surfaceWrite") continue;
+      expect(TOOLS[tool]!.writes, tool).toBe(false);
     }
+  });
+
+  test("creating a wireframe is not refused, because it changes no surface", () => {
+    // It asks an agent for a document. Refusing it on an unconnected window would be
+    // the gate answering a question nobody asked.
+    expect(receiptFor("wireframe", { app: "Notes", connector: null }, "Ada").blocked).toBe(false);
   });
 
   test("every drawing tool has a shape, and the pointer has none", () => {
@@ -58,6 +82,9 @@ describe("what a tool is allowed to do", () => {
     expect(DRAWS.circle).toBe("ellipse");
     expect(DRAWS.draw).toBe("stroke");
     expect(DRAWS.pointer).toBeUndefined();
+    // Both photographing tools drag out a region like any other area tool.
+    expect(DRAWS.screenshot).toBe("box");
+    expect(DRAWS.wireframe).toBe("box");
   });
 });
 
@@ -66,7 +93,7 @@ describe("the receipt", () => {
   const bare: Surface = { app: "Notes", connector: null };
 
   test("a write on an unconnected surface is refused and says so", () => {
-    const said = receiptFor("wireframe", bare, "Ada");
+    const said = receiptFor("surfaceWrite", bare, "Ada");
     expect(said.blocked).toBe(true);
     expect(said.did).toContain("Notes isn't connected");
     // The sentence the product turns on: the region was noticed, and nothing changed.
@@ -74,7 +101,7 @@ describe("the receipt", () => {
   });
 
   test("not knowing what is in front is not permission", () => {
-    expect(receiptFor("wireframe", null, null).blocked).toBe(true);
+    expect(receiptFor("surfaceWrite", null, null).blocked).toBe(true);
   });
 
   test("marking works everywhere, connector or not", () => {
@@ -83,7 +110,7 @@ describe("the receipt", () => {
   });
 
   test("a write through a connector names the connector", () => {
-    const said = receiptFor("wireframe", connected, "Ada");
+    const said = receiptFor("surfaceWrite", connected, "Ada");
     expect(said.blocked).toBe(false);
     expect(said.through).toBe("canvas-bridge");
   });
@@ -197,5 +224,67 @@ describe("who the rail says can receive", () => {
     expect(counted(1, "agent")).toBe("1 agent");
     expect(counted(11, "session")).toBe("11 sessions");
     expect(counted(0, "session")).toBe("0 sessions");
+  });
+});
+
+describe("what the agent is actually sent", () => {
+  const surface = { app: "Openclaw Desktop", connector: null };
+
+  test("marks are numbered to match the pictures attached with them", () => {
+    const said = summaryFor(
+      [{ tool: "box", note: "this padding is wrong" }, { tool: "pointAt" }],
+      "plan",
+      "",
+      surface,
+    );
+    expect(said).toContain("2 things marked on Openclaw Desktop:");
+    // The number, the tool and the file name travel together, because three images
+    // arriving as a set are only tellable apart by their names.
+    expect(said).toContain("1. Box (mark-1.png) — this padding is wrong");
+    expect(said).toContain("2. Point at (mark-2.png)");
+  });
+
+  test("one thing is one thing, not 1 things", () => {
+    expect(summaryFor([{ tool: "circle" }], "ask", "", surface)).toContain(
+      "One thing marked on Openclaw Desktop:",
+    );
+  });
+
+  test("the instruction comes last, and what you wrote comes after it", () => {
+    const said = summaryFor(
+      [{ tool: "box" }],
+      "debug",
+      "only when the panel is collapsed",
+      surface,
+    );
+    const lines = said.split("\n").filter(Boolean);
+    expect(lines.at(-2)).toBe(`Debug: ${MODES.debug!.says}`);
+    expect(lines.at(-1)).toBe("only when the panel is collapsed");
+  });
+
+  test("a wireframe says where its document goes, and every wireframe says it once", () => {
+    const said = summaryFor(
+      [{ tool: "wireframe", dest: "docs/Design/rail.dc.html" }, { tool: "wireframe" }],
+      "build",
+      "",
+      surface,
+    );
+    expect(said).toContain(
+      "Turn mark-1.png into a wireframe and write it to docs/Design/rail.dc.html",
+    );
+    // The second one had no path, so it falls back rather than borrowing the first's.
+    expect(said).toContain("Turn mark-2.png into a wireframe and write it to docs/Design/,");
+  });
+
+  test("with nothing marked it is still a sendable instruction", () => {
+    const said = summaryFor([], "ask", "what does the rail do?", null);
+    expect(said).not.toContain("marked on");
+    expect(said).toBe(`Ask: ${MODES.ask!.says}\n\nwhat does the rail do?`);
+  });
+
+  test("not knowing what is in front does not invent an application", () => {
+    expect(summaryFor([{ tool: "box" }], "plan", "", null)).toContain(
+      "One thing marked on screen:",
+    );
   });
 });
