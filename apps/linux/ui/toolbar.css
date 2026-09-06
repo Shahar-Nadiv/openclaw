@@ -410,6 +410,17 @@ body {
   width: calc(100% - 16px);
 }
 
+/* What the toolbar noticed is in front, offered rather than taken. */
+.suggest-row {
+  cursor: pointer;
+  gap: 8px;
+  margin-top: 4px;
+  border: 1px dashed rgb(255 255 255 / 18%);
+}
+.suggest-row:hover {
+  border-color: var(--accent, #ff6b6b);
+}
+
 /* A mark waiting to be sent, and the tick that decides whether it goes this time. */
 .mark-row {
   cursor: pointer;

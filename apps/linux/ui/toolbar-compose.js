@@ -404,15 +404,35 @@ function drawComposer() {
   to.type = "button";
   to.className = "popup-to";
   to.textContent = state.receiving.name || "Choose who receives";
-  // Never silently. A receiver the toolbar worked out for itself has to say so, or
-  // somebody finds out where their work went by reading it somewhere else.
-  if (!state.picked && state.inFront && state.receiving.kind === "thread") {
-    const why = document.createElement("span");
-    why.className = "popup-why";
-    why.textContent = ` · ${state.inFront.label} is in front`;
-    to.append(why);
-  }
   to.addEventListener("click", () => flyout("agents"));
+  // What the toolbar can see, offered rather than done.
+  //
+  // Choosing one of these is not like choosing an agent: sending to a conversation
+  // held in another agent adopts it, which hands it to the Gateway and can fail
+  // outright if something is already running it. That is a decision, and a decision
+  // taken on somebody's behalf because a window happened to be in front is the toolbar
+  // arranging a handover nobody asked for. So it says what it sees and waits.
+  if (state.inFront && state.inFront.threads.length && !state.picked) {
+    const suggested = state.inFront.threads[0];
+    const offer = document.createElement("button");
+    offer.type = "button";
+    offer.className = "row suggest-row";
+    const face = document.createElement("span");
+    face.className = "agent-avatar-dot";
+    face.textContent = suggested.title.slice(0, 1).toUpperCase();
+    const said = document.createElement("span");
+    said.className = "agent-name";
+    said.textContent = suggested.title;
+    const why = document.createElement("span");
+    why.className = "row-key";
+    why.textContent = `${state.inFront.label} is in front`;
+    offer.append(face, said, why);
+    offer.addEventListener("click", () =>
+      receive("thread", suggested.id, suggested.title, null, suggested.locator),
+    );
+    rows.push(offer);
+  }
+
   // When the thing in front has a project, offer a conversation that starts there
   // rather than one that has to be told where "there" is.
   if (state.inFront && state.inFront.path) {

@@ -368,16 +368,6 @@ async function loadWho() {
     // The conversation about whatever is on the screen in front, when it is obvious
     // which that is. Telling the toolbar what it can already see was the most repeated
     // act in using it.
-    if (!state.picked && state.inFront && state.inFront.threads.length) {
-      const latest = state.inFront.threads[0];
-      state.receiving = {
-        kind: "thread",
-        id: latest.id,
-        name: latest.title,
-        emoji: null,
-        locator: latest.locator,
-      };
-    }
     // Nobody picked yet, so the Gateway's own default stands in — the first thing
     // somebody marks still has somewhere to go.
     if (state.receiving.id === null) {
