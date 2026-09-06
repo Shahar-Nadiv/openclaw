@@ -1339,34 +1339,44 @@ describe("the glass and the picture draw the same mark", () => {
   });
 });
 
-describe("a key says what is behind it", () => {
-  const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+describe("nothing is reachable only by right click", () => {
+  /*
+   * The failure this guards is invisible by construction: a menu behind a key that
+   * looks like every other key is a menu nobody finds. It happened twice — the design
+   * family, then the pens — and both times the only symptom was somebody asking where
+   * the feature had gone.
+   *
+   * So a right click may be a shortcut to a menu, never the only way in. Every flyout
+   * a right click opens must also be opened by an ordinary press of something visible.
+   */
+  const page = ["toolbar-rail.js", "toolbar-compose.js", "toolbar.js"]
+    .map((file) => readFileSync(new URL(`../apps/linux/ui/${file}`, import.meta.url), "utf8"))
+    .join("\n");
 
-  test("every key with a right-click menu wears the wedge", () => {
-    // The bug this exists for is invisible by construction: a menu behind a key that
-    // looks like every other key is a menu nobody finds. It happened twice — the design
-    // family and then the pens — and both times the only symptom was somebody asking
-    // where the feature was.
-    const wearing = new Set([...rail.matchAll(/key\("(\w+)"[^\n]*\bMORE\)/g)].map((f) => f[1]));
-    const listening = new Set(
-      [
-        ...(/for \(const \[id, which\] of \[([\s\S]*?)\]\) \{/.exec(rail)?.[1] ?? "").matchAll(
-          /\["(\w+)", "\w+"\]/g,
-        ),
-      ].map((f) => f[1]),
+  test("every menu a right click opens is opened by a visible control too", () => {
+    const hidden = new Set(
+      [...page.matchAll(/addEventListener\("contextmenu"[\s\S]{0,400}?\}\);/g)].flatMap((block) =>
+        [...block[0].matchAll(/flyout\("(\w+)"\)/g)].map((found) => found[1]!),
+      ),
     );
-    expect(listening.size).toBeGreaterThan(0);
-    // As sets, because the order two lists happen to be written in is not the invariant.
-    expect(wearing).toEqual(listening);
+    const shown = new Set(
+      [
+        ...page
+          .replaceAll(/addEventListener\("contextmenu"[\s\S]{0,400}?\}\);/g, "")
+          .matchAll(/flyout\("(\w+)"\)/g),
+      ].map((found) => found[1]!),
+    );
+    expect(hidden.size).toBeGreaterThan(0);
+    for (const menu of hidden) {
+      expect(shown.has(menu), `${menu} is only reachable by right click`).toBe(true);
+    }
   });
 
-  test("the two marks mean two different things and are not the same mark", () => {
-    // A caret means the key *is* a menu; a wedge means the key is a tool that has
-    // variants. A key that opened a list when somebody meant to draw is the worse half
-    // of that trade, so they must not look alike.
-    expect(rail).toContain('const MENU = "caret"');
-    expect(rail).toContain('const MORE = "wedge"');
-    const sheet = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
-    expect(sheet).toContain(".key-more");
+  test("there is one mark for a menu, and it is the caret", () => {
+    // Box and circle, the kinds of design, the pens, the recording lengths and the
+    // folded group all behave the same way: press the key, a list opens, pick from it.
+    // A second idiom for the same idea is a second thing to learn for no gain.
+    expect(page).toContain('const MENU = "caret"');
+    expect(page).not.toContain("key-more");
   });
 });

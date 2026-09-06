@@ -100,19 +100,15 @@ function openclawMark(size) {
 const buttons = {};
 
 /**
- * The two marks a key can wear, and why they are not the same mark.
+ * One mark, one meaning: a caret says this key opens a menu.
  *
- * A caret beside the glyph means the key *is* a menu: pressing it opens a list and
- * nothing else happens. A wedge in the corner means the key is a tool that has variants
- * — pressing it draws, and the variants are a right click away. Same idea, different
- * promise, so they cannot look alike; a key that opened a menu when somebody expected
- * to draw would be the worse half of that trade.
- *
- * The wedge is the older idiom, off every drawing application there has ever been, and
- * it is here because without it a right-click menu is a feature nobody finds.
+ * Every key with something behind it wears it and behaves the same way — press it, a
+ * list opens, pick from the list. Box and circle work that way, so do the kinds of
+ * design, and so do the pens and the recording lengths. A second idiom for the same
+ * idea is a second thing to learn for no gain, and the one that was tried here — a
+ * corner wedge meaning "right-click me" — was a menu people had to be told about.
  */
 const MENU = "caret";
-const MORE = "wedge";
 
 function key(id, title, glyph, onClick, mark) {
   const button = document.createElement("button");
@@ -125,8 +121,7 @@ function key(id, title, glyph, onClick, mark) {
     // Only the keys that count something get somewhere to put it; the rest would carry
     // an empty span for the life of the rail.
     (id === "watch" ? '<span class="watch-many"></span>' : "") +
-    (mark === MENU ? '<span class="caret">▾</span>' : "") +
-    (mark === MORE ? '<span class="key-more" aria-hidden="true"></span>' : "");
+    (mark === MENU ? '<span class="caret">▾</span>' : "");
   button.addEventListener("click", onClick);
   buttons[id] = button;
   return button;
@@ -138,7 +133,7 @@ function buildRail() {
   tools.append(
     key("pointer", "Pointer · V", "pointer", () => use("pointer")),
     key("pointAt", "Point at · P", "pointAt", () => use("pointAt")),
-    key("draw", "Draw · D · right-click to pick a pen", "draw", () => use("draw"), MORE),
+    key("draw", "Draw · D", "draw", () => flyout("draw"), MENU),
     key("shape", "Box / circle · S", "shape", () => flyout("shape"), MENU),
     key("design", "Design", "design", () => flyout("design"), MENU),
   );
@@ -162,23 +157,11 @@ function buildRail() {
     key("exact", "Measure, colour, record…", "more", toggleTucked, MENU),
     key("measure", "Measure · M", "measure", () => use("measure")),
     key("colour", "Colour · C", "colour", () => use("colour")),
-    key("record", "Record · R · right-click for how long", "record", () => use("record"), MORE),
+    key("record", "Record · R", "record", () => flyout("record"), MENU),
     key("compare", "Before and after · A", "compare", () => compareStep()),
     key("watch", "Watch for a change · W", "watch", () => use("watch")),
     key("inspect", "Inspect what is there · I", "inspect", () => use("inspect")),
   );
-  // What a key is set to lives on the key: a right click, where a right click already
-  // means "about this", rather than another key on a rail that has enough of them.
-  for (const [id, which] of [
-    ["record", "record"],
-    ["draw", "draw"],
-  ]) {
-    buttons[id].addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      flyout(which);
-    });
-  }
-
   dividers[1].after(exact);
 
   const agents = document.createElement("button");

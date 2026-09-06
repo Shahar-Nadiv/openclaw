@@ -184,10 +184,10 @@ function render() {
         : "Watch for a change · W";
     } else if (id === "draw") {
       button.setAttribute("aria-pressed", String(state.tool === "draw" || state.open === "draw"));
-      button.title = `Draw · ${(PENS[state.pen] || PENS[PEN_FIRST]).label} · D · right-click to pick a pen`;
+      button.title = `Draw · ${(PENS[state.pen] || PENS[PEN_FIRST]).label} · D`;
     } else if (id === "record") {
       button.setAttribute("aria-pressed", String(state.tool === "record" || state.open === "record"));
-      button.title = `Record ${state.recordFor} seconds · R · right-click for how long`;
+      button.title = `Record ${state.recordFor} seconds · R`;
     } else if (TOOLS[id]) {
       button.setAttribute("aria-pressed", String(state.tool === id));
     }

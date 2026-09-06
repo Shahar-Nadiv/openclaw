@@ -622,6 +622,20 @@ function drawComposer() {
     foot.append(fresh);
   }
 
+  // The other thing that can be done with what is in the tray. A row rather than a
+  // fourth button in the foot, and visible rather than a right click somebody has to
+  // be told about — the send key opens this panel, so this panel is where scheduling
+  // has to be findable from.
+  const later = document.createElement("button");
+  later.type = "button";
+  later.className = "row row-quiet";
+  later.textContent = "Run this on a schedule…";
+  later.addEventListener("click", () => {
+    state.cron = { ...AUTOMATION_FIRST };
+    flyout("automate");
+  });
+  rows.push(later);
+
   const go = document.createElement("button");
   go.type = "button";
   go.className = "popup-do popup-go";
