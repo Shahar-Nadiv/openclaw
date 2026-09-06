@@ -34,7 +34,6 @@ function cancelMark(id) {
   const at = state.marks.findIndex((mark) => mark.id === id);
   if (at >= 0) state.undone.push(state.marks.splice(at, 1)[0]);
   state.popup = null;
-  if (state.comparing === id) state.comparing = null;
   render();
 }
 

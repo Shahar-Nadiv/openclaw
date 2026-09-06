@@ -68,8 +68,6 @@ const state = {
   // The mark whose popup is open, if any. One at a time: two dialogs about two regions
   // is a conversation nobody can follow.
   popup: null,
-  // A before-and-after that has its before and is waiting for the world to change.
-  comparing: null,
   // How long a recording covers. Somebody's choice, not a constant.
   recordFor: RECORD_LENGTHS[0],
   // Files and folders somebody brought in, as paths this machine can still find them
@@ -157,13 +155,6 @@ function render() {
       button.setAttribute("aria-pressed", String(state.open === "agents"));
     } else if (id === "send") {
       button.setAttribute("aria-pressed", String(state.open === "send"));
-    } else if (id === "compare") {
-      // Lit while it is holding a "before", because a toolbar quietly waiting on you is
-      // a toolbar you have forgotten about.
-      button.setAttribute("aria-pressed", String(state.comparing !== null || state.tool === "compare"));
-      button.title = state.comparing
-        ? "Capture the after · A"
-        : "Before and after · A";
     } else if (id === "exact") {
       // Lit while the tool in your hand is one of the folded ones, because a folded
       // rail has no other way of saying which tool is out.
@@ -378,12 +369,6 @@ function listenForKeys() {
 function onKey(event) {
   if (event.key === "Escape" && state.popup !== null) {
     cancelMark(state.popup);
-    return;
-  }
-  if (event.key === "Escape" && state.comparing !== null) {
-    // A before with no after is half a thought. Escape drops it the way it drops a
-    // popup: onto the redo trail, not into nothing.
-    cancelMark(state.comparing);
     return;
   }
   if (event.key === "Escape") {

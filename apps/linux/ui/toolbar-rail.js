@@ -41,8 +41,6 @@ const GLYPHS = {
   measure: '<path d="M4 6v12M20 6v12M4 12h16"/><path d="M8.5 9l-3 3 3 3M15.5 9l3 3-3 3"/>',
   record:
     '<rect x="2.5" y="5" width="14" height="14" rx="2.5"/><path d="M16.5 10.2l5-2.7v9l-5-2.7z"/>',
-  compare:
-    '<rect x="2.5" y="5.5" width="8" height="13" rx="1.5"/><rect x="13.5" y="5.5" width="8" height="13" rx="1.5" stroke-dasharray="2.6 2.2"/>',
   inspect:
     '<path d="M3 3.5h7M3 3.5v7M21 3.5h-7M21 3.5v7M3 20.5h7M3 20.5v-7M21 20.5h-7M21 20.5v-7"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
   colour:
@@ -159,7 +157,6 @@ function buildRail() {
     key("measure", "Measure · M", "measure", () => use("measure")),
     key("colour", "Colour · C", "colour", () => use("colour")),
     key("record", "Record · R", "record", () => flyout("record"), MENU),
-    key("compare", "Before and after · A", "compare", () => compareStep()),
     key("watch", "Watch for a change · W", "watch", () => use("watch")),
     key("inspect", "Inspect what is there · I", "inspect", () => use("inspect")),
   );
@@ -247,7 +244,7 @@ function length(into, seconds) {
 }
 
 /** The tools that fold away together, in the order they sit on the rail. */
-const EXACT = ["measure", "colour", "record", "compare", "watch", "inspect"];
+const EXACT = ["measure", "colour", "record", "watch", "inspect"];
 
 /** Fold them shut, or open them out, and remember which. */
 function toggleTucked() {

@@ -1861,17 +1861,15 @@ where
                     ))
                 })
         }
-        GatewayRequest::ChatAbort { key } => {
-            request_on_socket(
-                socket,
-                "chat.abort",
-                serde_json::json!({ "sessionKey": key }),
-                budget,
-                dispatch,
-            )
-            .await
-            .map(|_| GatewayResponse::CanvasSurface(None))
-        }
+        GatewayRequest::ChatAbort { key } => request_on_socket(
+            socket,
+            "chat.abort",
+            serde_json::json!({ "sessionKey": key }),
+            budget,
+            dispatch,
+        )
+        .await
+        .map(|_| GatewayResponse::CanvasSurface(None)),
         GatewayRequest::CronAdd(asked) => {
             let params = serde_json::to_value(asked).map_err(|error| {
                 RequestFailure::transport(format!("Could not encode cron.add: {error}"))

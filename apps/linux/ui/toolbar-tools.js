@@ -31,7 +31,6 @@ const TOOLS = {
   measure: { label: "Measure", press: "M", glyph: "measure", writes: false },
   colour: { label: "Colour", press: "C", glyph: "colour", writes: false },
   record: { label: "Recording", press: "R", glyph: "record", writes: false },
-  compare: { label: "Before and after", press: "A", glyph: "compare", writes: false },
   inspect: { label: "Inspect", press: "I", glyph: "inspect", writes: false },
   watch: { label: "Watch", press: "W", glyph: "watch", writes: false },
   design: { label: "Design", glyph: "wireframe", writes: false },
@@ -312,14 +311,10 @@ function samePlace(one, two) {
 /**
  * Whether a mark's frames would rather arrive as one sheet than as a run of pictures.
  *
- * A recording, and only a recording. Eight frames of a screen cost about fifteen thousand
- * image tokens sent separately and under a thousand laid out in a grid — and the grid is
- * the better picture, because the sequence is visible at a glance instead of having to be
- * reassembled from eight unrelated images.
- *
- * A before-and-after is not on this list on purpose. It is two frames whose whole point is
- * comparing detail between them, and halving each one to fit a grid would spend exactly
- * the thing somebody made the mark for. Two pictures is also not a bill.
+ * A recording, and only a recording — it is the one tool that produces more than one
+ * picture. Eight frames of a screen cost about fifteen thousand image tokens sent
+ * separately and under a thousand laid out in a grid, and the grid is the better picture:
+ * the sequence is visible at a glance instead of having to be reassembled.
  */
 function sheeted(mark) {
   return mark.tool === "record" && mark.frames > 1;
@@ -686,7 +681,6 @@ const DRAWS = {
   design: "box",
   measure: "span",
   record: "box",
-  compare: "box",
   watch: "box",
 };
 
@@ -786,7 +780,6 @@ const KEYS = {
   m: "measure",
   c: "colour",
   r: "record",
-  a: "compare",
   i: "inspect",
   w: "watch",
 };
@@ -1137,8 +1130,7 @@ function detailOf(mark) {
     return mark.seen ? saidOf(mark.seen) : "this window exposes no structure";
   }
   // A recording says how long it covers, because a run of pictures with no duration is
-  // just pictures. A comparison says nothing here: its own name is "Before and after",
-  // and the two files in order say the rest.
+  // just pictures.
   // The length is carried on the mark rather than computed from the frame count,
   // because the count is capped and the length is not: two seconds and fifteen are the
   // same eight pictures, spread further apart.

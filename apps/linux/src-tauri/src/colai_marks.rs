@@ -153,12 +153,11 @@ pub(crate) fn points_within(mark: &Mark, crop: Crop, width: i32, height: i32) ->
 /// around the edge of a picture is noise.
 pub(crate) fn drawn_as(mark: &Mark) -> Option<&'static str> {
     // Nothing is drawn on a picture whose whole meaning is another picture beside it.
-    // A box on the "before" of a pair is the one difference an agent can be certain of,
-    // and it is ours — so a before-and-after and a watch both go bare, and the crop is
-    // the statement.
+    // A box on the "before" of a watched pair is the one difference an agent could be
+    // certain of, and it would be ours — so those go bare, and the crop is the statement.
     if matches!(
         mark.tool.as_str(),
-        "screenshot" | "design" | "record" | "compare" | "watch"
+        "screenshot" | "design" | "record" | "watch"
     ) {
         return None;
     }
@@ -350,7 +349,7 @@ mod tests {
         // them is the only thing in the picture that does not move.
         let mut recorded = mark("record", boxed(0.1, 0.1, 0.3, 0.3), vec![]);
         assert_eq!(drawn_as(&recorded), None);
-        recorded.tool = "compare".to_string();
+        recorded.tool = "watch".to_string();
         assert_eq!(drawn_as(&recorded), None);
     }
 

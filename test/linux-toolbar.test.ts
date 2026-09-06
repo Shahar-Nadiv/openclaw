@@ -597,12 +597,6 @@ describe("marks that are more than one picture", () => {
     expect(Math.max(...RECORD_LENGTHS)).toBe(15);
   });
 
-  test("a comparison adds nothing, because its name already said it", () => {
-    // The tool is called "Before and after" and its two files are in order. Repeating
-    // that under the title is the toolbar talking to itself.
-    expect(detailOf({ tool: "compare", frames: 2 })).toBeNull();
-  });
-
   test("one frame is not a sequence", () => {
     expect(detailOf({ tool: "record", frames: 1, seconds: 2 })).toBeNull();
     expect(detailOf({ tool: "box", frames: 1 })).toBeNull();
@@ -886,7 +880,6 @@ describe("watching a region", () => {
     );
     assert.ok(list, "the tools drawn_as leaves bare");
     expect(list[1]).toContain('"watch"');
-    expect(list[1]).toContain('"compare"');
     // And a design mark, which is a picture somebody is going to build from. A red box
     // drawn across it is a red box in the wireframe.
     expect(list[1]).toContain('"design"');
@@ -1780,12 +1773,6 @@ describe("knowing an agent is working", () => {
 describe("which marks arrive as one picture", () => {
   test("a recording does, because eight pictures of a screen is a bill", () => {
     expect(sheeted({ tool: "record", frames: 8 })).toBe(true);
-  });
-
-  test("a before-and-after does not, because comparing detail is its whole point", () => {
-    // Halving each of two frames to fit a grid would spend exactly the thing somebody
-    // made the mark for. Two pictures is also not a bill.
-    expect(sheeted({ tool: "compare", frames: 2 })).toBe(false);
   });
 
   test("a single picture is already one picture", () => {

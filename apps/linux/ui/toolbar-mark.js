@@ -201,14 +201,6 @@ function addMark(mark) {
  */
 async function shoot(mark, again) {
   await photograph(mark, again);
-  // A before-and-after is not finished by its first picture. It waits, visibly, for
-  // whatever is about to happen to happen.
-  if (mark.tool === "compare" && !again) {
-    state.comparing = mark.id;
-    render();
-    return;
-  }
-  state.comparing = null;
   state.popup = mark.id;
   render();
   // The note is a text field and one way out is a key, and neither works while the
@@ -274,22 +266,6 @@ async function photograph(mark, again) {
   }
 }
 
-/**
- * The second half of a before-and-after, or the start of one.
- *
- * The same key does both, because they are one gesture with a pause in the middle:
- * mark the thing, go and change it, press again. A separate button for the second half
- * would be a button that does nothing most of the time.
- */
-function compareStep() {
-  const waiting = state.marks.find((mark) => mark.id === state.comparing);
-  if (!waiting) {
-    use("compare");
-    return;
-  }
-  state.comparing = null;
-  void shoot(waiting, true);
-}
 
 /**
  * Which application is in front, and which project that makes this about.
