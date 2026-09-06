@@ -106,7 +106,7 @@ pub(crate) fn ensure_overlay(app: &AppHandle) -> Result<WebviewWindow, String> {
             .build()
             .map_err(|error| format!("Could not create the colai overlay: {error}"))?;
 
-    cover_primary(&window)?;
+    cover_everything(&window)?;
     /*
      * Wake the Gateway connection, the way Quick Chat does when its window opens.
      *
@@ -124,21 +124,74 @@ pub(crate) fn ensure_overlay(app: &AppHandle) -> Result<WebviewWindow, String> {
     Ok(window)
 }
 
-fn cover_primary(window: &WebviewWindow) -> Result<(), String> {
-    let monitor = window
-        .primary_monitor()
-        .map_err(|error| format!("Could not read the display: {error}"))?
-        .ok_or_else(|| "There is no display to draw on.".to_string())?;
-    let size = *monitor.size();
-    let at = *monitor.position();
+/// Cover every display, not the main one.
+///
+/// The toolbar is a layer over the desktop, and somebody with two screens has one
+/// desktop. Sized to a single monitor it could not be dragged onto the other screen —
+/// there was no window there to drag it into — and, worse and more quietly, every tool
+/// stopped working over there: the layer that catches a drag simply did not exist on
+/// that half of the desk, so marking a region on the laptop screen did nothing at all
+/// and looked like a broken toolbar rather than a missing window.
+fn cover_everything(window: &WebviewWindow) -> Result<(), String> {
+    let screens: Vec<Span> = window
+        .available_monitors()
+        .map_err(|error| format!("Could not read the displays: {error}"))?
+        .iter()
+        .map(|monitor| {
+            let at = *monitor.position();
+            let size = *monitor.size();
+            Span {
+                x: at.x,
+                y: at.y,
+                width: size.width,
+                height: size.height,
+            }
+        })
+        .collect();
+    let all = spanning(&screens).ok_or_else(|| "There is no display to draw on.".to_string())?;
     window
-        .set_position(PhysicalPosition::new(at.x, at.y))
+        .set_position(PhysicalPosition::new(all.x, all.y))
         .map_err(|error| format!("Could not place the overlay: {error}"))?;
     window
-        .set_size(PhysicalSize::new(size.width, size.height))
+        .set_size(PhysicalSize::new(all.width, all.height))
         .map_err(|error| format!("Could not size the overlay: {error}"))?;
     keep_composited(window);
     Ok(())
+}
+
+/// A rectangle of the desktop, in physical pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Span {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The one rectangle that holds every screen.
+///
+/// Screens are not laid out in a grid and need not touch: a second display can sit above
+/// and to the left of the first, which is why this is a union rather than a sum of
+/// widths. A gap between two screens ends up inside the span and belongs to nobody; the
+/// overlay draws nothing there and the pointer passes straight through it.
+pub(crate) fn spanning(screens: &[Span]) -> Option<Span> {
+    let first = screens.first()?;
+    let mut left = first.x;
+    let mut top = first.y;
+    let mut right = first.x.saturating_add(first.width as i32);
+    let mut bottom = first.y.saturating_add(first.height as i32);
+    for screen in screens.iter().skip(1) {
+        left = left.min(screen.x);
+        top = top.min(screen.y);
+        right = right.max(screen.x.saturating_add(screen.width as i32));
+        bottom = bottom.max(screen.y.saturating_add(screen.height as i32));
+    }
+    Some(Span {
+        x: left,
+        y: top,
+        width: (right - left).max(1) as u32,
+        height: (bottom - top).max(1) as u32,
+    })
 }
 
 /// Tell the window manager this is a layer, not a fullscreen application.
@@ -352,7 +405,7 @@ fn window_title(said: &str) -> String {
 #[tauri::command]
 pub(crate) fn colai_summon(app: AppHandle) -> Result<(), String> {
     let window = ensure_overlay(&app)?;
-    cover_primary(&window)?;
+    cover_everything(&window)?;
     window
         .show()
         .map_err(|error| format!("Could not show the overlay: {error}"))
@@ -422,41 +475,72 @@ pub(crate) fn colai_open_settings(app: AppHandle) -> Result<(), String> {
 ///
 /// The real answer is to measure the obstruction from Colai's own capture of the screen
 /// once the screen service exists, and stop asking the desktop about itself.
+/// One screen, in the overlay's own coordinates, with what the desktop keeps of it.
+///
+/// Local rather than absolute, because the page thinks in its own window and a second
+/// display can start at a negative coordinate. Each screen carries its own reserved
+/// edges: a panel belongs to the screen it is on, and four numbers for the whole desk
+/// cannot say which one that is.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScreenSpan {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub reserved: Reserved,
+}
+
+/// The screens the toolbar has to live on.
+///
+/// The rail docks to the edges of the screen it is on, not to the edges of the desk.
+/// Once the overlay spans two displays those are different things, and the difference is
+/// the whole point: the top of the desk is under the shell's panel on one screen and
+/// empty air on the other, and an inner edge belongs to both screens and to no edge of
+/// the desk at all.
 #[tauri::command]
-pub(crate) fn colai_reserved(app: AppHandle) -> Reserved {
+pub(crate) fn colai_screens(app: AppHandle) -> Vec<ScreenSpan> {
     #[cfg(target_os = "linux")]
     {
-        let from_work_area = app
-            .get_webview_window(OVERLAY_LABEL)
-            .and_then(|window| work_area_insets(&window))
-            .unwrap_or_default();
-        widen_for_dock(from_work_area)
+        app.get_webview_window(OVERLAY_LABEL)
+            .and_then(|window| screen_spans(&window))
+            .unwrap_or_default()
     }
     #[cfg(not(target_os = "linux"))]
     {
         let _ = app;
-        Reserved::default()
+        Vec::new()
     }
 }
 
 #[cfg(target_os = "linux")]
-fn work_area_insets(window: &WebviewWindow) -> Option<Reserved> {
+fn screen_spans(window: &WebviewWindow) -> Option<Vec<ScreenSpan>> {
     use gtk::prelude::*;
 
     let gtk_window = window.gtk_window().ok()?;
-    let gdk_window = gtk_window.window()?;
     let display = gtk_window.display();
-    let monitor = display.monitor_at_window(&gdk_window)?;
-
-    let whole = monitor.geometry();
-    let usable = monitor.workarea();
-
-    Some(Reserved {
-        top: (usable.y() - whole.y()).max(0),
-        left: (usable.x() - whole.x()).max(0),
-        right: ((whole.x() + whole.width()) - (usable.x() + usable.width())).max(0),
-        bottom: ((whole.y() + whole.height()) - (usable.y() + usable.height())).max(0),
-    })
+    let at = window.outer_position().ok()?;
+    let mut spans = Vec::new();
+    for which in 0..display.n_monitors() {
+        let Some(monitor) = display.monitor(which) else {
+            continue;
+        };
+        let whole = monitor.geometry();
+        let usable = monitor.workarea();
+        spans.push(ScreenSpan {
+            x: whole.x() - at.x,
+            y: whole.y() - at.y,
+            width: whole.width(),
+            height: whole.height(),
+            reserved: widen_for_dock(Reserved {
+                top: (usable.y() - whole.y()).max(0),
+                left: (usable.x() - whole.x()).max(0),
+                right: (whole.x() + whole.width() - usable.x() - usable.width()).max(0),
+                bottom: (whole.y() + whole.height() - usable.y() - usable.height()).max(0),
+            }),
+        });
+    }
+    (!spans.is_empty()).then_some(spans)
 }
 
 /// Add the dock's band on the edge it lives on, when it reserves nothing itself.
@@ -919,6 +1003,50 @@ mod tests {
         assert_eq!(project_root("/.claude/worktrees/orphan"), None);
         assert_eq!(project_root("///"), None);
         assert_eq!(project_root("   "), None);
+    }
+
+    fn screen(x: i32, y: i32, width: u32, height: u32) -> Span {
+        Span {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn the_overlay_spans_every_screen_rather_than_the_main_one() {
+        // Two side by side, which is the layout that made the tools stop working on the
+        // second screen: there was no overlay over there to catch anything.
+        assert_eq!(
+            spanning(&[screen(0, 0, 1920, 1080), screen(1920, 0, 1920, 1080)]),
+            Some(screen(0, 0, 3840, 1080)),
+        );
+        assert_eq!(
+            spanning(&[screen(0, 0, 1920, 1080)]),
+            Some(screen(0, 0, 1920, 1080))
+        );
+        assert_eq!(spanning(&[]), None);
+    }
+
+    #[test]
+    fn a_screen_above_and_to_the_left_still_fits_inside_the_span() {
+        // Screens are not a row. A second display placed up and left of the first has
+        // negative coordinates, and adding widths would put the overlay nowhere near it.
+        assert_eq!(
+            spanning(&[screen(0, 0, 1920, 1080), screen(-1280, -300, 1280, 800)]),
+            Some(screen(-1280, -300, 3200, 1380)),
+        );
+    }
+
+    #[test]
+    fn screens_that_do_not_touch_leave_a_gap_inside_the_span() {
+        // The gap belongs to nobody. The overlay draws nothing there and the pointer
+        // goes straight through it, which is what the input shape already guarantees.
+        assert_eq!(
+            spanning(&[screen(0, 0, 800, 600), screen(1200, 0, 800, 600)]),
+            Some(screen(0, 0, 2000, 600)),
+        );
     }
 
     #[test]

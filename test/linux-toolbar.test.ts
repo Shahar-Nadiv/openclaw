@@ -10,21 +10,15 @@ assert.notEqual(browserBindingsStart, -1, "toolbar pure-helper boundary");
 
 type Point = { x: number; y: number };
 type Reserved = { top: number; right: number; bottom: number; left: number };
+type Screen = { x: number; y: number; width: number; height: number; reserved?: Reserved };
 type Surface = { app: string; connector: string | null } | null;
 
 type ToolbarHelpers = {
   TOOLS: Record<string, { label: string; writes: boolean }>;
   DRAWS: Record<string, string>;
-  dockFor: (
-    at: Point,
-    screen: { width: number; height: number },
-    reserved?: Reserved,
-    was?: string | null,
-  ) => string | null;
-  usable: (
-    screen: { width: number; height: number },
-    reserved?: Reserved,
-  ) => { left: number; top: number; right: number; bottom: number };
+  dockFor: (at: Point, screens: Screen[], was?: string | null) => string | null;
+  usable: (screen: Screen) => { left: number; top: number; right: number; bottom: number };
+  screenAt: (screens: Screen[], at: Point) => Screen | null;
   boxOf: (points: Point[]) => { x: number; y: number; w: number; h: number };
   pathFor: (shape: { kind: string; points: Point[] } | null) => string;
   receiptFor: (
@@ -44,11 +38,22 @@ type ToolbarHelpers = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource.slice(0, browserBindingsStart)}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, receiptFor, counted, MODES, summaryFor };`,
+  `${toolbarSource.slice(0, browserBindingsStart)}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, receiptFor, counted, MODES, summaryFor, screenAt };`,
   context,
 );
-const { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, receiptFor, counted, MODES, summaryFor } =
-  context.helpers as ToolbarHelpers;
+const {
+  TOOLS,
+  DRAWS,
+  dockFor,
+  usable,
+  boxOf,
+  pathFor,
+  receiptFor,
+  counted,
+  MODES,
+  summaryFor,
+  screenAt,
+} = context.helpers as ToolbarHelpers;
 
 /*
  * No shipped tool changes a surface yet, so the gate has nothing to refuse — and the
@@ -117,26 +122,62 @@ describe("the receipt", () => {
 });
 
 describe("where the rail sits", () => {
-  const screen = { width: 1440, height: 900 };
+  const laptop = { x: 0, y: 0, width: 1920, height: 1080 };
+  const desk = { x: 1920, y: 0, width: 1920, height: 1080 };
+  const one = [laptop];
+  const both = [laptop, desk];
 
   test("docks to whichever edge the hand is nearest", () => {
-    expect(dockFor({ x: 12, y: 400 }, screen)).toBe("left");
-    expect(dockFor({ x: 1430, y: 400 }, screen)).toBe("right");
-    expect(dockFor({ x: 500, y: 20 }, screen)).toBe("top");
-    expect(dockFor({ x: 500, y: 880 }, screen)).toBe("bottom");
-    expect(dockFor({ x: 500, y: 400 }, screen)).toBeNull();
+    expect(dockFor({ x: 12, y: 400 }, one)).toBe("left");
+    expect(dockFor({ x: 1910, y: 400 }, one)).toBe("right");
+    expect(dockFor({ x: 500, y: 20 }, one)).toBe("top");
+    expect(dockFor({ x: 500, y: 1060 }, one)).toBe("bottom");
+    expect(dockFor({ x: 900, y: 500 }, one)).toBeNull();
+  });
+
+  /*
+   * The overlay covers the whole desk, and the desk is not one screen. Docking to the
+   * outer edges of everything would mean the inner edge of either display — where a
+   * person actually parks a toolbar on a two-screen desk — could not be reached at all,
+   * and the top of the desk is under the shell's panel on one screen and empty air on
+   * the other.
+   */
+  test("docks to the screen it is over, not to the edges of the desk", () => {
+    // Just inside the second screen's left edge: its own edge, not the middle of nowhere.
+    expect(dockFor({ x: 1930, y: 500 }, both)).toBe("left");
+    // And the first screen's right edge is still an edge, though the desk continues.
+    expect(dockFor({ x: 1910, y: 500 }, both)).toBe("right");
   });
 
   /*
    * A desktop's own panels are drawn above every window by the compositor, so a rail
    * docked flush to a screen edge is simply hidden under one. Measuring from the room
-   * that is left is what keeps both visible.
+   * that is left is what keeps both visible — and the panel belongs to its own screen.
    */
-  test("measures edges from the room it has, not the screen", () => {
-    const dock = { top: 32, right: 0, bottom: 0, left: 66 };
-    expect(dockFor({ x: 100, y: 400 }, screen, dock)).toBe("left");
-    expect(dockFor({ x: 300, y: 400 }, screen, dock)).toBeNull();
-    expect(dockFor({ x: 500, y: 60 }, screen, dock)).toBe("top");
+  test("measures edges from the room that screen has", () => {
+    const panelled = [laptop, { ...desk, reserved: { top: 32, right: 0, bottom: 0, left: 66 } }];
+    expect(usable(panelled[1]!)).toEqual({
+      left: 1986,
+      top: 32,
+      right: 3840,
+      bottom: 1080,
+    });
+    // Both screens dock to their own top, and the two tops are not the same line: on
+    // the panelled one the rail lands below the shell's bar, on the other at the very
+    // edge. One number for the whole desk could only have been right for one of them.
+    expect(dockFor({ x: 2400, y: 60 }, panelled)).toBe("top");
+    expect(dockFor({ x: 400, y: 40 }, panelled)).toBe("top");
+    expect(usable(panelled[0]!).top).toBe(0);
+    expect(usable(panelled[1]!).top).toBe(32);
+  });
+
+  test("a point in a gap between screens still belongs to one", () => {
+    // Displays need not touch. A hand in the gap has to dock somewhere, and the nearest
+    // screen is the only answer that is not arbitrary.
+    const apart = [laptop, { x: 2200, y: 0, width: 1920, height: 1080 }];
+    expect(screenAt(apart, { x: 2000, y: 500 })).toBe(apart[0]);
+    expect(screenAt(apart, { x: 2150, y: 500 })).toBe(apart[1]);
+    expect(screenAt([], { x: 0, y: 0 })).toBeNull();
   });
 
   /*
@@ -146,36 +187,18 @@ describe("where the rail sits", () => {
    * still while the hand does.
    */
   test("a dock survives a wobble that a fresh decision would not", () => {
-    // Past the docking margin but not past the leaving one: still docked.
-    expect(dockFor({ x: 100, y: 400 }, screen, undefined, "left")).toBe("left");
-    // Well clear of it, and near nothing else: undocked.
-    expect(dockFor({ x: 400, y: 400 }, screen, undefined, "left")).toBeNull();
+    expect(dockFor({ x: 100, y: 400 }, one, "left")).toBe("left");
+    expect(dockFor({ x: 400, y: 400 }, one, "left")).toBeNull();
   });
 
   test("a corner commits to one edge instead of shivering between two", () => {
-    // Both edges are within reach and the hand is marginally nearer the top. Held
-    // against the left dock, that is a wobble, not a decision.
-    expect(dockFor({ x: 30, y: 24 }, screen, undefined, "left")).toBe("left");
-    // Plainly nearer the top now, so the toolbar goes.
-    expect(dockFor({ x: 60, y: 8 }, screen, undefined, "left")).toBe("top");
-    // With nothing held, a corner still answers once rather than twice.
-    expect(dockFor({ x: 24, y: 24 }, screen)).toBe("left");
+    expect(dockFor({ x: 30, y: 24 }, one, "left")).toBe("left");
+    expect(dockFor({ x: 60, y: 8 }, one, "left")).toBe("top");
+    expect(dockFor({ x: 24, y: 24 }, one)).toBe("left");
   });
 
   test("leaving one edge hands over to another it landed on", () => {
-    // Dragged from the left edge along to the bottom: left is given up because the hand
-    // is clear of it, and bottom is taken because the hand is on it.
-    expect(dockFor({ x: 700, y: 890 }, screen, undefined, "left")).toBe("bottom");
-  });
-
-  test("reports the room left over", () => {
-    expect(usable(screen, { top: 32, right: 0, bottom: 0, left: 66 })).toEqual({
-      left: 66,
-      top: 32,
-      right: 1440,
-      bottom: 900,
-    });
-    expect(usable(screen)).toEqual({ left: 0, top: 0, right: 1440, bottom: 900 });
+    expect(dockFor({ x: 700, y: 1070 }, one, "left")).toBe("bottom");
   });
 });
 

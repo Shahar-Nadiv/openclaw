@@ -149,21 +149,53 @@ function isVertical(dock) {
 }
 
 /**
- * The part of the screen the toolbar may use.
+ * The part of a screen the toolbar may use.
  *
  * Not the whole screen. A desktop's own panels — GNOME's top bar, Ubuntu's dock — are
  * drawn by the compositor above every window, so a toolbar docked flush to a screen edge
  * disappears underneath one. Keeping out of them is the only arrangement where both stay
  * visible.
+ *
+ * Per screen, because the overlay covers the whole desk and the desk is not one screen.
+ * The shell's panel is along the top of one display and nowhere near the other; four
+ * numbers for the desk as a whole would either lose the panel or reserve a strip of a
+ * screen that has none.
  */
-function usable(screen, reserved) {
-  const edges = reserved || NOTHING_RESERVED;
+function usable(screen) {
+  const edges = (screen && screen.reserved) || NOTHING_RESERVED;
   return {
-    left: edges.left,
-    top: edges.top,
-    right: screen.width - edges.right,
-    bottom: screen.height - edges.bottom,
+    left: screen.x + edges.left,
+    top: screen.y + edges.top,
+    right: screen.x + screen.width - edges.right,
+    bottom: screen.y + screen.height - edges.bottom,
   };
+}
+
+/**
+ * Which screen something is on.
+ *
+ * The nearest one when it is on none — a desk of two displays that do not line up has
+ * gaps between and beside them, and a point in a gap still has to belong somewhere or
+ * the rail has no edges to dock to.
+ */
+function screenAt(screens, at) {
+  if (!screens || screens.length === 0) return null;
+  const holding = screens.find(
+    (screen) =>
+      at.x >= screen.x &&
+      at.x < screen.x + screen.width &&
+      at.y >= screen.y &&
+      at.y < screen.y + screen.height,
+  );
+  if (holding) return holding;
+  return screens.reduce((best, screen) => (awayFrom(screen, at) < awayFrom(best, at) ? screen : best));
+}
+
+/** How far a point is from a screen's box, zero when it is inside it. */
+function awayFrom(screen, at) {
+  const across = Math.max(screen.x - at.x, 0, at.x - (screen.x + screen.width));
+  const down = Math.max(screen.y - at.y, 0, at.y - (screen.y + screen.height));
+  return Math.hypot(across, down);
 }
 
 /**
@@ -181,8 +213,10 @@ function usable(screen, reserved) {
  * so in a corner, where two edges are both within reach, the toolbar commits to one and
  * stays there until you plainly mean the other.
  */
-function dockFor(at, screen, reserved, was) {
-  const room = usable(screen, reserved);
+function dockFor(at, screens, was) {
+  const screen = screenAt(screens, at);
+  if (!screen) return null;
+  const room = usable(screen);
   const gaps = {
     left: at.x - room.left,
     right: room.right - at.x,
@@ -312,7 +346,9 @@ const state = {
   at: null,
   open: null,
   surface: null,
-  reserved: NOTHING_RESERVED,
+  // Every display, each with what its own desktop keeps of it. The overlay covers the
+  // whole desk, so which screen a thing is on is a question that now has to be asked.
+  screens: [],
   agents: [],
   sessions: [],
   // Conversations held elsewhere, already grouped by the folder they belong to.
@@ -920,7 +956,6 @@ function drawPopup() {
  * them what they meant by it, is the one place this must not open.
  */
 function placePopup(mark) {
-  const room = usable({ width: window.innerWidth, height: window.innerHeight }, state.reserved);
   // A whole-display capture has no corner to sit beside, so it opens in the middle
   // rather than at Math.max of nothing, which is negative infinity and the top-left.
   const edges = mark.region
@@ -937,6 +972,9 @@ function placePopup(mark) {
   el.popup.style.left = "0px";
   el.popup.style.top = "0px";
   const box = el.popup.getBoundingClientRect();
+  // On the screen the mark is on: a popup for something marked on the second display
+  // belongs there, not pinned inside the first one's edges.
+  const room = usable(screenAt(state.screens, { x: edges.right, y: edges.bottom }));
   const left = Math.min(Math.max(edges.right + 14, room.left + EDGE), room.right - box.width - EDGE);
   const top = Math.min(Math.max(edges.bottom + 14, room.top + EDGE), room.bottom - box.height - EDGE);
   el.popup.style.left = `${Math.round(left)}px`;
@@ -1050,8 +1088,6 @@ function drawComposer() {
 el.grip.addEventListener("pointerdown", (event) => {
   event.preventDefault();
   const box = el.wrap.getBoundingClientRect();
-  const screen = { width: window.innerWidth, height: window.innerHeight };
-  const room = usable(screen, state.reserved);
   let grabX = event.clientX - box.left;
   let grabY = event.clientY - box.top;
   let edge = state.dock;
@@ -1059,9 +1095,14 @@ el.grip.addEventListener("pointerdown", (event) => {
 
   const move = (moved) => {
     const size = el.wrap.getBoundingClientRect();
-    const x = Math.max(room.left, Math.min(room.right - size.width, moved.clientX - grabX));
-    const y = Math.max(room.top, Math.min(room.bottom - size.height, moved.clientY - grabY));
-    const now = dockFor({ x: moved.clientX, y: moved.clientY }, screen, state.reserved, edge);
+    const hand = { x: moved.clientX, y: moved.clientY };
+    // The screen under the hand, which changes mid-drag the moment the rail is carried
+    // across the seam between two of them. Everything below is about that screen, so it
+    // has to be worked out before the rail is placed rather than after.
+    const room = usable(screenAt(state.screens, hand));
+    const x = Math.max(room.left, Math.min(room.right - size.width, hand.x - grabX));
+    const y = Math.max(room.top, Math.min(room.bottom - size.height, hand.y - grabY));
+    const now = dockFor(hand, state.screens, edge);
     if (now !== edge) {
       const turned = isVertical(now) !== isVertical(edge);
       // A rail that was 420 wide and becomes 44 wide has no sensible relationship to
@@ -1086,6 +1127,8 @@ el.grip.addEventListener("pointerdown", (event) => {
     window.removeEventListener("pointerup", up);
     const size = el.wrap.getBoundingClientRect();
     const rest = { x: last.x, y: last.y };
+    // The screen it was let go over, not the one it was picked up from.
+    const room = usable(screenAt(state.screens, last));
     // Against the edge of the room the toolbar has, not the edge of the screen.
     if (edge === "left") rest.x = room.left + EDGE;
     if (edge === "right") rest.x = room.right - size.width - EDGE;
@@ -1207,8 +1250,7 @@ function remember() {
 }
 
 function recall() {
-  const screen = { width: window.innerWidth, height: window.innerHeight };
-  const room = usable(screen, state.reserved);
+  const room = usable(screenAt(state.screens, { x: 0, y: 0 }));
   try {
     const saved = window.localStorage.getItem(WHERE);
     if (saved) {
@@ -1234,7 +1276,7 @@ function clamp() {
   if (!state.at) return;
   const size = el.wrap.getBoundingClientRect();
   if (!size.width) return;
-  const room = usable({ width: window.innerWidth, height: window.innerHeight }, state.reserved);
+  const room = usable(screenAt(state.screens, state.at));
   state.at = {
     x: Math.min(Math.max(state.at.x, room.left + EDGE), room.right - size.width - EDGE),
     y: Math.min(Math.max(state.at.y, room.top + EDGE), room.bottom - size.height - EDGE),
@@ -1357,8 +1399,8 @@ function placeFlyout(node, vertical, from) {
  * when a menu is too long to fit either way — the top of a list is where reading starts.
  */
 function within(node, axis, at) {
-  const room = usable({ width: window.innerWidth, height: window.innerHeight }, state.reserved);
   const box = node.getBoundingClientRect();
+  const room = usable(screenAt(state.screens, { x: box.left, y: box.top }));
   const near = axis === "y" ? room.top + EDGE : room.left + EDGE;
   const far = axis === "y" ? room.bottom - EDGE : room.right - EDGE;
   const head = axis === "y" ? box.top : box.left;
@@ -1709,9 +1751,22 @@ window.addEventListener("unhandledrejection", (event) => {
 async function start() {
   buildRail();
   try {
-    state.reserved = (await invoke("colai_reserved")) || NOTHING_RESERVED;
+    state.screens = (await invoke("colai_screens")) || [];
   } catch {
-    state.reserved = NOTHING_RESERVED;
+    state.screens = [];
+  }
+  // One screen the size of the window, when the shell cannot say. Everything below
+  // works in screens, and none of it should have to ask whether there are any.
+  if (state.screens.length === 0) {
+    state.screens = [
+      {
+        x: 0,
+        y: 0,
+        width: window.innerWidth,
+        height: window.innerHeight,
+        reserved: NOTHING_RESERVED,
+      },
+    ];
   }
   recall();
   place();

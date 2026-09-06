@@ -1436,7 +1436,7 @@ fn main() {
         updater::updater_ready,
         colai::colai_shape,
         colai::colai_frontmost,
-        colai::colai_reserved,
+        colai::colai_screens,
         colai::colai_agents,
         colai::colai_sessions,
         colai::colai_threads,
