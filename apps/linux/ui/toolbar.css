@@ -107,11 +107,6 @@ body {
   margin: 4px 0;
 }
 
-/* `all: unset` below throws away the browser's own `[hidden] { display: none }`, so a
-   folded key would stay on the rail while claiming to be hidden. Stated back. */
-.key[hidden] {
-  display: none;
-}
 .key {
   all: unset;
   box-sizing: border-box;
@@ -599,17 +594,6 @@ body {
   font-size: 10.5px;
   letter-spacing: 0.1px;
 }
-/* The way back onto the rail, at the foot of the folded group's menu. A row, but not
-   a tool — quieter, so it does not read as a seventh thing to pick. */
-.row-quiet {
-  justify-content: center;
-  color: #8e8e93;
-  font-size: 11.5px;
-}
-.row-quiet:hover {
-  color: #f7f7f8;
-}
-
 .chip[aria-pressed="true"] {
   background: var(--accent, #ff6b6b);
   color: #1c1c1e;

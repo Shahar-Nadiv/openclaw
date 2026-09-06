@@ -171,10 +171,7 @@ function place() {
 
 function remember() {
   try {
-    window.localStorage.setItem(
-      WHERE,
-      JSON.stringify({ ...state.at, dock: state.dock, tucked: state.tucked }),
-    );
+    window.localStorage.setItem(WHERE, JSON.stringify({ ...state.at, dock: state.dock }));
   } catch {
     // A toolbar that will not remember where it was put is worth more than one that
     // refuses to appear.
@@ -189,10 +186,6 @@ function recall() {
       const put = JSON.parse(saved);
       state.at = { x: put.x, y: put.y };
       state.dock = put.dock || null;
-      // Only an explicit `false` unfolds them. A toolbar remembered from before this
-      // existed has no opinion, and the short rail is the one to give somebody who has
-      // not said.
-      state.tucked = put.tucked !== false;
       return;
     }
   } catch {

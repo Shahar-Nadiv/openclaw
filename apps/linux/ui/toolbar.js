@@ -18,7 +18,6 @@ const el = {
   flyShape: document.getElementById("fly-shape"),
   flyDesign: document.getElementById("fly-design"),
   flyRecord: document.getElementById("fly-record"),
-  flyExact: document.getElementById("fly-exact"),
   flyAutomate: document.getElementById("fly-automate"),
   flyAgents: document.getElementById("fly-agents"),
   agentRows: document.getElementById("agent-rows"),
@@ -86,9 +85,6 @@ const state = {
   // defaults each time rather than kept: a schedule is about one piece of work, and
   // yesterday's interval sitting in the box is a job somebody creates by accident.
   cron: { ...AUTOMATION_FIRST },
-  // Whether the exact tools are folded behind one key. Remembered with the dock,
-  // because it is the same kind of fact: how somebody wants this thing to sit.
-  tucked: true,
   // The regions being watched. Each one is a mark that has had its "before" taken and
   // is waiting for the world to move.
   watching: [],
@@ -147,16 +143,6 @@ function render() {
       button.title = state.comparing
         ? "Capture the after · A"
         : "Before and after · A";
-    } else if (id === "exact") {
-      // Lit when the tool in your hand is one of the folded ones, because otherwise a
-      // folded rail has no way of saying which tool is out.
-      button.setAttribute(
-        "aria-pressed",
-        String(state.open === "exact" || (state.tucked && EXACT.some(([tool]) => tool === state.tool))),
-      );
-      button.title = state.tucked
-        ? "Measure, colour, record… · click to choose"
-        : "Fold these back into one key";
     } else if (id === "watch") {
       // Pressed means "this is the tool in your hand", the same as every other key —
       // a running watch is not a held tool, and lighting it the same way made the rail
@@ -206,14 +192,8 @@ function render() {
 
   el.flyShape.hidden = state.open !== "shape";
   el.flyDesign.hidden = state.open !== "design";
-  el.flyExact.hidden = state.open !== "exact";
   el.flyAutomate.hidden = state.open !== "automate";
   if (state.open === "automate") drawAutomation();
-  // Folded away, the six are simply not on the rail. Hidden rather than removed, so the
-  // keys keep their identity — an `aria-pressed` written to a button that was rebuilt
-  // every render is a button screen readers announce as new every time.
-  for (const [tool] of EXACT) buttons[tool].hidden = state.tucked;
-  buttons.exact.querySelector(".caret").textContent = state.tucked ? "▾" : "\u00d7";
   el.flyRecord.hidden = state.open !== "record";
   for (const button of el.flyRecord.children) {
     button.setAttribute("aria-pressed", String(Number(button.dataset.seconds) === state.recordFor));
@@ -234,7 +214,6 @@ function render() {
     [el.flyShape, buttons.shape],
     [el.flyDesign, buttons.design],
     [el.flyRecord, buttons.record],
-    [el.flyExact, buttons.exact],
     [el.flyAutomate, buttons.send],
     [el.flySend, buttons.send],
     [el.flyAgents, buttons.agents],

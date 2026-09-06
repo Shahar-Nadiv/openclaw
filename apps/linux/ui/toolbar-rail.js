@@ -34,8 +34,6 @@ const GLYPHS = {
     '<path d="M3 3.5h7M3 3.5v7M21 3.5h-7M21 3.5v7M3 20.5h7M3 20.5v-7M21 20.5h-7M21 20.5v-7"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
   colour:
     '<path d="M12 3.5s6 6.4 6 10.1a6 6 0 0 1-12 0C6 9.9 12 3.5 12 3.5z"/><path d="M8.6 14.4a3.4 3.4 0 0 0 3.4 3.2"/>',
-  more:
-    '<circle cx="6" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="18" r="1.7" fill="currentColor" stroke="none"/>',
   watch:
     '<path d="M2 12s3.8-6.5 10-6.5S22 12 22 12s-3.8 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/>',
 };
@@ -123,16 +121,8 @@ function buildRail() {
   );
   dividers[1].after(edits);
 
-  // The exact tools, folded behind one key by default.
-  //
-  // Six of them, and every one is a thing somebody reaches for occasionally and then
-  // not again for an hour — which is exactly the shape of thing that should not be
-  // taking a sixth of a toolbar. Folded, the key opens a menu of them; unfolded, they
-  // sit on the rail and the key puts them back. Somebody who uses Measure all day
-  // unfolds it once and it stays unfolded.
   const exact = document.createDocumentFragment();
   exact.append(
-    key("exact", "Measure, colour, record…", "more", toggleTucked, true),
     key("measure", "Measure · M", "measure", () => use("measure")),
     key("colour", "Colour · C", "colour", () => use("colour")),
     key("record", "Record · R · right-click for how long", "record", () => use("record")),
@@ -149,14 +139,6 @@ function buildRail() {
   });
 
   dividers[1].after(exact);
-
-  for (const [tool, label, press] of EXACT) row(el.flyExact, tool, label, tool, press);
-  const unfold = document.createElement("button");
-  unfold.type = "button";
-  unfold.className = "row row-quiet";
-  unfold.textContent = "Show these on the rail";
-  unfold.addEventListener("click", () => tuck(false));
-  el.flyExact.append(unfold);
 
   const agents = document.createElement("button");
   agents.type = "button";
@@ -220,39 +202,6 @@ function length(into, seconds) {
     use("record");
   });
   into.append(button);
-}
-
-/** The tools that fold away together, in the order they sit on the rail. */
-const EXACT = [
-  ["measure", "Measure", "M"],
-  ["colour", "Colour", "C"],
-  ["record", "Record", "R"],
-  ["compare", "Before and after", "A"],
-  ["watch", "Watch for a change", "W"],
-  ["inspect", "Inspect what is there", "I"],
-];
-
-/**
- * The key at the head of the folded group.
- *
- * Folded, it opens a menu of the six, so nothing is ever more than two clicks away.
- * Unfolded, the same key is how they go back. One control, and its tooltip says which
- * of the two it is about to do.
- */
-function toggleTucked() {
-  if (state.tucked) {
-    flyout("exact");
-    return;
-  }
-  tuck(true);
-}
-
-/** Fold them away, or put them on the rail, and remember which. */
-function tuck(away) {
-  state.tucked = away;
-  state.open = null;
-  remember();
-  render();
 }
 
 function row(into, tool, label, glyph, press) {
