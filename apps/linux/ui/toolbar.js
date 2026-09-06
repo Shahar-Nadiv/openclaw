@@ -641,6 +641,12 @@ el.capture.addEventListener("pointerdown", (event) => {
   // is underneath, and swallowing it is how an overlay earns a reputation.
   if (event.button !== 0) return;
   event.preventDefault();
+  // Anywhere off the popup is the third way out of it. The catcher covers the whole
+  // desk and the popup is stacked above it, so this only ever fires outside.
+  if (state.popup !== null) {
+    cancelMark(state.popup);
+    return;
+  }
   if (event.target.setPointerCapture) event.target.setPointerCapture(event.pointerId);
 
   const point = fractionOf(event);
@@ -778,6 +784,9 @@ async function shoot(mark) {
   }
   state.popup = mark.id;
   render();
+  // The note is a text field and one way out is a key, and neither works while the
+  // window manager treats this window as scenery.
+  void invoke("colai_take_keyboard").catch(() => {});
 }
 
 /** The colour the app is themed in, if it has told us one. */
@@ -787,6 +796,22 @@ function accentNow() {
 }
 
 /* ── what to do with what was marked ─────────────────────────────────────── */
+
+/**
+ * Put a mark back, exactly as undo would.
+ *
+ * There are three ways out of the popup — the cross, Escape, and a click anywhere off
+ * it — and all of them mean the same thing, because somebody who wants out of a dialog
+ * should not have to work out which exit destroys their work. None of them do: the mark
+ * goes onto the redo trail, so a dismissal that was not meant is one keystroke from
+ * being taken back.
+ */
+function cancelMark(id) {
+  const at = state.marks.findIndex((mark) => mark.id === id);
+  if (at >= 0) state.undone.push(state.marks.splice(at, 1)[0]);
+  state.popup = null;
+  render();
+}
 
 /** The marks that go in the next send, in the order they were made. */
 function chosenMarks() {
@@ -883,6 +908,17 @@ function drawPopup() {
   size.textContent = mark.trouble ? mark.trouble : mark.shot || "taking a picture…";
   named.append(what, size);
   head.append(named);
+
+  // The visible way out, beside the two ways that are not. A dialog with only "Keep"
+  // and "Send" makes dismissing it look like a choice somebody has to make.
+  const shut = document.createElement("button");
+  shut.type = "button";
+  shut.className = "popup-shut";
+  shut.title = "Discard this mark · Esc";
+  shut.setAttribute("aria-label", "Discard this mark");
+  shut.textContent = "\u00d7";
+  shut.addEventListener("click", () => cancelMark(mark.id));
+  head.append(shut);
   rows.push(head);
 
   const note = document.createElement("textarea");
@@ -1367,9 +1403,9 @@ function render() {
   drawMarks();
   drawPopup();
   drawReceipt();
-  // The catcher swallows every click on the screen, which is what a marking tool wants
-  // and the opposite of what a popup asking a question wants.
-  el.capture.hidden = state.tool === "pointer" || state.popup !== null;
+  // Left mounted while a popup is open, which is how a click off the popup is heard at
+  // all — the popup is stacked above it, so its own controls still get their clicks.
+  el.capture.hidden = state.tool === "pointer";
   shape();
 }
 
@@ -1632,7 +1668,7 @@ function shape() {
   // The popup opens over the region it is about, well away from the rail, so the two are
   // measured as two rectangles rather than one that swallows the desktop between them.
   const rects =
-    state.tool !== "pointer" && state.popup === null
+    state.tool !== "pointer"
       ? [{ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }]
       : [boxAround(el.wrap)];
   if (state.popup !== null && !el.popup.hidden) rects.push(boxAround(el.popup));
@@ -1683,10 +1719,7 @@ function boxAround(node) {
 
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.popup !== null) {
-    // The mark is kept. Escape means "not now", not "never mind" — the thing was still
-    // marked, and it is in the tray.
-    state.popup = null;
-    render();
+    cancelMark(state.popup);
     return;
   }
   if (event.key === "Escape") {

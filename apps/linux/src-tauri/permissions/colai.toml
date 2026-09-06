@@ -17,6 +17,7 @@ commands.allow = [
   "colai_shape",
   "colai_frontmost",
   "colai_screens",
+  "colai_take_keyboard",
   "colai_agents",
   "colai_sessions",
   "colai_threads",

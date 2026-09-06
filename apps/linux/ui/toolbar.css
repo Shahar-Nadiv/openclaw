@@ -480,8 +480,33 @@ body {
   border-radius: 6px;
   border: 1px solid rgb(255 255 255 / 12%);
 }
+/* The way out. Quiet until it is looked for, which is what a dismissal should be. */
+.popup-shut {
+  all: unset;
+  flex-shrink: 0;
+  align-self: flex-start;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-size: 15px;
+  line-height: 1;
+  color: #8e8e93;
+  cursor: pointer;
+}
+.popup-shut:hover {
+  background: rgb(255 255 255 / 10%);
+  color: #f7f7f8;
+}
+.popup-shut:focus-visible {
+  outline: 2px solid var(--accent, #ff6b6b);
+  outline-offset: 1px;
+}
+
 .popup-named {
   display: flex;
+  flex: 1;
   flex-direction: column;
   min-width: 0;
   gap: 2px;

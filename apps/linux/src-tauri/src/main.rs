@@ -1437,6 +1437,7 @@ fn main() {
         colai::colai_shape,
         colai::colai_frontmost,
         colai::colai_screens,
+        colai::colai_take_keyboard,
         colai::colai_agents,
         colai::colai_sessions,
         colai::colai_threads,

@@ -401,6 +401,34 @@ fn window_title(said: &str) -> String {
         .to_string()
 }
 
+/// Take the keyboard, because the popup has things to type into.
+///
+/// The overlay is hinted as a dock so the shell stacks it predictably above everything
+/// and never offers it in the switcher — and a dock is not a thing a window manager
+/// hands the keyboard to on its own. That cost nothing while the toolbar was buttons.
+/// A mark that can carry a note, and a popup whose way out is a key, both need it.
+///
+/// Asked for only when a popup opens: taking somebody's keyboard away from what they
+/// were typing, at any other moment, would be the overlay behaving like an application.
+#[tauri::command]
+pub(crate) fn colai_take_keyboard(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window(OVERLAY_LABEL)
+        .ok_or_else(|| "The toolbar is not open.".to_string())?;
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::GtkWindowExt;
+        if let Ok(gtk_window) = window.gtk_window() {
+            // A dock says "do not focus me" through this hint as well as its type, and
+            // the type is the half worth keeping.
+            gtk_window.set_accept_focus(true);
+        }
+    }
+    window
+        .set_focus()
+        .map_err(|error| format!("Could not reach the keyboard: {error}"))
+}
+
 /// Somebody asked for the toolbar.
 #[tauri::command]
 pub(crate) fn colai_summon(app: AppHandle) -> Result<(), String> {
