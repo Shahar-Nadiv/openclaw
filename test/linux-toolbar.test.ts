@@ -16,9 +16,10 @@ type ToolbarHelpers = {
   TOOLS: Record<string, { label: string; writes: boolean }>;
   DRAWS: Record<string, string>;
   dockFor: (
-    box: { x: number; y: number; width: number; height: number },
+    at: Point,
     screen: { width: number; height: number },
     reserved?: Reserved,
+    was?: string | null,
   ) => string | null;
   usable: (
     screen: { width: number; height: number },
@@ -90,14 +91,13 @@ describe("the receipt", () => {
 
 describe("where the rail sits", () => {
   const screen = { width: 1440, height: 900 };
-  const bar = { width: 420, height: 48 };
 
-  test("docks to whichever edge it is dragged near", () => {
-    expect(dockFor({ x: 12, y: 400, ...bar }, screen)).toBe("left");
-    expect(dockFor({ x: 1000, y: 400, ...bar }, screen)).toBe("right");
-    expect(dockFor({ x: 500, y: 20, ...bar }, screen)).toBe("top");
-    expect(dockFor({ x: 500, y: 870, ...bar }, screen)).toBe("bottom");
-    expect(dockFor({ x: 500, y: 400, ...bar }, screen)).toBeNull();
+  test("docks to whichever edge the hand is nearest", () => {
+    expect(dockFor({ x: 12, y: 400 }, screen)).toBe("left");
+    expect(dockFor({ x: 1430, y: 400 }, screen)).toBe("right");
+    expect(dockFor({ x: 500, y: 20 }, screen)).toBe("top");
+    expect(dockFor({ x: 500, y: 880 }, screen)).toBe("bottom");
+    expect(dockFor({ x: 500, y: 400 }, screen)).toBeNull();
   });
 
   /*
@@ -107,9 +107,38 @@ describe("where the rail sits", () => {
    */
   test("measures edges from the room it has, not the screen", () => {
     const dock = { top: 32, right: 0, bottom: 0, left: 66 };
-    expect(dockFor({ x: 70, y: 400, ...bar }, screen, dock)).toBe("left");
-    expect(dockFor({ x: 200, y: 400, ...bar }, screen, dock)).toBeNull();
-    expect(dockFor({ x: 500, y: 40, ...bar }, screen, dock)).toBe("top");
+    expect(dockFor({ x: 100, y: 400 }, screen, dock)).toBe("left");
+    expect(dockFor({ x: 300, y: 400 }, screen, dock)).toBeNull();
+    expect(dockFor({ x: 500, y: 60 }, screen, dock)).toBe("top");
+  });
+
+  /*
+   * The bug this margin exists for: a horizontal rail is ten times wider than a vertical
+   * one, so an answer measured from the rail changes the next answer, and the toolbar
+   * flipped orientation at pointer speed in a corner. These say the decision holds
+   * still while the hand does.
+   */
+  test("a dock survives a wobble that a fresh decision would not", () => {
+    // Past the docking margin but not past the leaving one: still docked.
+    expect(dockFor({ x: 100, y: 400 }, screen, undefined, "left")).toBe("left");
+    // Well clear of it, and near nothing else: undocked.
+    expect(dockFor({ x: 400, y: 400 }, screen, undefined, "left")).toBeNull();
+  });
+
+  test("a corner commits to one edge instead of shivering between two", () => {
+    // Both edges are within reach and the hand is marginally nearer the top. Held
+    // against the left dock, that is a wobble, not a decision.
+    expect(dockFor({ x: 30, y: 24 }, screen, undefined, "left")).toBe("left");
+    // Plainly nearer the top now, so the toolbar goes.
+    expect(dockFor({ x: 60, y: 8 }, screen, undefined, "left")).toBe("top");
+    // With nothing held, a corner still answers once rather than twice.
+    expect(dockFor({ x: 24, y: 24 }, screen)).toBe("left");
+  });
+
+  test("leaving one edge hands over to another it landed on", () => {
+    // Dragged from the left edge along to the bottom: left is given up because the hand
+    // is clear of it, and bottom is taken because the hand is on it.
+    expect(dockFor({ x: 700, y: 890 }, screen, undefined, "left")).toBe("bottom");
   });
 
   test("reports the room left over", () => {

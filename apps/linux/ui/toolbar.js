@@ -35,6 +35,10 @@ const KEYS = { v: "pointer", p: "pointAt", d: "draw", b: "box", o: "circle" };
  * parked near the side is not dragged into an orientation change it was not asked for.
  */
 const DOCK_WITHIN = 80;
+/** How far the hand has to leave an edge before the rail gives that edge up. */
+const DOCK_LEAVE = 120;
+/** How much nearer a rival edge has to be before it takes a dock over. */
+const DOCK_BEAT = 24;
 /** How far a docked rail sits from the edge of the room it has. */
 const EDGE = 14;
 
@@ -62,13 +66,38 @@ function usable(screen, reserved) {
   };
 }
 
-function dockFor(box, screen, reserved) {
+/**
+ * Which edge a drag is claiming, decided from the hand rather than from the rail.
+ *
+ * The rail's own box cannot answer this. A horizontal rail is around 480 wide and a
+ * vertical one around 44, so a gap measured from the box depends on the answer the box
+ * already has — dock to the right, turn, and the gap that decided it is suddenly 400px
+ * wider, so it undocks, turns back, and docks again. That ran at pointer speed and read
+ * as the toolbar shivering in the corner.
+ *
+ * The hand is the one thing in this that nothing here moves, so distances come from it,
+ * and two margins make the answer decisive. An edge is not given up until the hand is
+ * well clear of it, and a rival has to be meaningfully nearer before it takes over —
+ * so in a corner, where two edges are both within reach, the toolbar commits to one and
+ * stays there until you plainly mean the other.
+ */
+function dockFor(at, screen, reserved, was) {
   const room = usable(screen, reserved);
-  if (box.x - room.left < DOCK_WITHIN) return "left";
-  if (room.right - (box.x + box.width) < DOCK_WITHIN) return "right";
-  if (box.y - room.top < DOCK_WITHIN) return "top";
-  if (room.bottom - (box.y + box.height) < DOCK_WITHIN) return "bottom";
-  return null;
+  const gaps = {
+    left: at.x - room.left,
+    right: room.right - at.x,
+    top: at.y - room.top,
+    bottom: room.bottom - at.y,
+  };
+  // Ties keep the earlier edge, so a corner has one answer rather than two.
+  const nearest = Object.keys(gaps).reduce((best, edge) =>
+    gaps[edge] < gaps[best] ? edge : best,
+  );
+  const held = was && was in gaps;
+  if (held && gaps[was] <= DOCK_LEAVE) {
+    return gaps[nearest] + DOCK_BEAT < gaps[was] ? nearest : was;
+  }
+  return gaps[nearest] < DOCK_WITHIN ? nearest : null;
 }
 
 /** The smallest box containing every point, in fractions of the surface. */
@@ -558,7 +587,7 @@ el.grip.addEventListener("pointerdown", (event) => {
     const size = el.wrap.getBoundingClientRect();
     const x = Math.max(room.left, Math.min(room.right - size.width, moved.clientX - grabX));
     const y = Math.max(room.top, Math.min(room.bottom - size.height, moved.clientY - grabY));
-    const now = dockFor({ x, y, width: size.width, height: size.height }, screen, state.reserved);
+    const now = dockFor({ x: moved.clientX, y: moved.clientY }, screen, state.reserved, edge);
     if (now !== edge) {
       // A rail that was 420 wide and becomes 44 wide has no sensible relationship to
       // where the hand was on it; re-grabbing near the corner is what keeps it on screen.
