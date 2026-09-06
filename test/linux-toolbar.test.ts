@@ -39,7 +39,13 @@ type ToolbarHelpers = {
     projects: { label: string | null; path?: string }[],
     front: { app?: string; title?: string } | null,
   ) => { label: string | null } | null;
-  detailOf: (mark: { tool: string; px?: number; hex?: string; frames?: number }) => string | null;
+  detailOf: (mark: {
+    tool: string;
+    px?: number;
+    hex?: string;
+    frames?: number;
+    seen?: { role: string; name: string; at: number[]; within?: string[] } | null;
+  }) => string | null;
   summaryFor: (
     marks: {
       tool: string;
@@ -473,5 +479,41 @@ describe("the project in front of you", () => {
     expect(projectInFront(projects, null)).toBeNull();
     expect(projectInFront(projects, { title: "", app: "" })).toBeNull();
     expect(projectInFront([], { title: "colai", app: "Code" })).toBeNull();
+  });
+});
+
+describe("what the desktop says is there", () => {
+  const seen = {
+    role: "push button",
+    name: "Send",
+    at: [412, 88, 96, 32],
+    within: ["panel “Composer”", "frame “OpenClaw”"],
+  };
+
+  test("an element reads as a sentence, role first", () => {
+    // The role is the part a picture cannot be read for. "A red button near the top"
+    // is a guess about something the desktop already knows exactly.
+    expect(detailOf({ tool: "inspect", seen })).toBe(
+      "push button “Send”, 96×32 at 412,88, in panel “Composer” in frame “OpenClaw”",
+    );
+  });
+
+  test("an element with no name is still its role and its place", () => {
+    expect(
+      detailOf({ tool: "inspect", seen: { role: "filler", name: "", at: [0, 0, 10, 4] } }),
+    ).toBe("filler, 10×4 at 0,0");
+  });
+
+  test("a window that exposes nothing says so, rather than saying nothing", () => {
+    // An agent told nothing about structure knows it is reading pixels. An agent told
+    // something vague does not, and will believe it.
+    expect(detailOf({ tool: "inspect", seen: null })).toBe("this window exposes no structure");
+    expect(detailOf({ tool: "inspect" })).toBe("this window exposes no structure");
+  });
+
+  test("an element with no size is a point, not a zero-sized box", () => {
+    expect(
+      detailOf({ tool: "inspect", seen: { role: "caret", name: "", at: [700, 400, 0, 0] } }),
+    ).toBe("caret, at 700,400");
   });
 });

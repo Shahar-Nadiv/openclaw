@@ -31,6 +31,8 @@ const GLYPHS = {
     '<rect x="2.5" y="5" width="14" height="14" rx="2.5"/><path d="M16.5 10.2l5-2.7v9l-5-2.7z"/>',
   compare:
     '<rect x="2.5" y="5.5" width="8" height="13" rx="1.5"/><rect x="13.5" y="5.5" width="8" height="13" rx="1.5" stroke-dasharray="2.6 2.2"/>',
+  inspect:
+    '<path d="M3 3.5h7M3 3.5v7M21 3.5h-7M21 3.5v7M3 20.5h7M3 20.5v-7M21 20.5h-7M21 20.5v-7"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
   colour:
     '<path d="M12 3.5s6 6.4 6 10.1a6 6 0 0 1-12 0C6 9.9 12 3.5 12 3.5z"/><path d="M8.6 14.4a3.4 3.4 0 0 0 3.4 3.2"/>',
 };
@@ -196,6 +198,7 @@ function buildRail() {
     key("colour", "Colour · C", "colour", () => use("colour")),
     key("record", "Record a few seconds · R", "record", () => use("record")),
     key("compare", "Before and after · A", "compare", () => compareStep()),
+    key("inspect", "Inspect what is there · I", "inspect", () => use("inspect")),
   );
   dividers[1].after(exact);
 
@@ -584,6 +587,14 @@ async function shoot(mark, again) {
   try {
     await new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn)));
     await new Promise((waited) => setTimeout(waited, 40));
+    // Asked before the picture, while the window underneath is still the one that was
+    // pointed at and nothing of ours has been drawn over it.
+    if (mark.tool === "inspect") {
+      mark.seen = await invoke("colai_inspect", {
+        x: Math.round(mark.points[0].x * window.innerWidth),
+        y: Math.round(mark.points[0].y * window.innerHeight),
+      }).catch(() => null);
+    }
     const taken = await invoke("colai_capture_mark", { mark, accent: accentNow(), again });
     if (taken.hex) mark.hex = taken.hex;
     mark.frames = taken.frames;

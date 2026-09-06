@@ -1,6 +1,8 @@
 mod cli;
 mod colai;
 mod colai_capture;
+#[cfg(target_os = "linux")]
+mod colai_inspect;
 mod colai_receivers;
 mod colai_send;
 mod discovery;
@@ -1447,6 +1449,8 @@ fn main() {
         colai_send::colai_send,
         colai_send::colai_unwatch,
         colai_send::colai_start_here,
+        #[cfg(target_os = "linux")]
+        colai_inspect::colai_inspect,
         colai::colai_summon,
         colai::colai_release,
         colai::colai_open_settings

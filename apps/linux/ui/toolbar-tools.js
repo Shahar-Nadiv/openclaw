@@ -32,6 +32,7 @@ const TOOLS = {
   colour: { label: "Colour", press: "C", glyph: "colour", writes: false },
   record: { label: "Recording", press: "R", glyph: "record", writes: false },
   compare: { label: "Before and after", press: "A", glyph: "compare", writes: false },
+  inspect: { label: "Inspect", press: "I", glyph: "inspect", writes: false },
   wireframe: { label: "Create wireframe", glyph: "wireframe", writes: false },
   screenshot: { label: "Screenshot", glyph: "screenshot", writes: false },
 };
@@ -95,6 +96,7 @@ const KEYS = {
   c: "colour",
   r: "record",
   a: "compare",
+  i: "inspect",
 };
 
 /**
@@ -399,6 +401,12 @@ function detailOf(mark) {
     return `${mark.px}px apart`;
   }
   if (mark.tool === "colour" && mark.hex) return mark.hex;
+  // What the desktop said was there, when it was willing to say. The wording matters:
+  // an agent told nothing about structure knows it is reading pixels, where an agent
+  // told something vague does not.
+  if (mark.tool === "inspect") {
+    return mark.seen ? saidOf(mark.seen) : "this window exposes no structure";
+  }
   // A recording says how long it covers, because a run of pictures with no duration is
   // just pictures. A comparison says nothing here: its own name is "Before and after",
   // and the two files in order say the rest.
@@ -406,6 +414,21 @@ function detailOf(mark) {
     return `${mark.frames} frames over ${(mark.frames * RECORD_EVERY) / 1000}s`;
   }
   return null;
+}
+
+/**
+ * One element, as a sentence.
+ *
+ * Role first, because that is the part a picture cannot be read for; the name next,
+ * because that is what a person would call it; then where it sits, because "Button"
+ * alone says nothing about which button.
+ */
+function saidOf(seen) {
+  const called = seen.name ? `${seen.role} “${seen.name}”` : seen.role;
+  const [x, y, width, height] = seen.at;
+  const where = width && height ? `${width}×${height} at ${x},${y}` : `at ${x},${y}`;
+  const within = (seen.within || []).length ? `, in ${seen.within.join(" in ")}` : "";
+  return `${called}, ${where}${within}`;
 }
 
 /** A count with its noun, so the rail reads as a sentence rather than a gauge. */
