@@ -69,7 +69,7 @@ async function startHere() {
         hostId: example.locator.hostId,
         agentId: example.locator.agentId || "main",
         cwd: project.path,
-        initialMessage: summaryFor(going, state.mode, state.text, state.surface),
+        initialMessage: summaryFor(going, state.mode, state.text, state.surface, state.files),
       },
     });
     // The marks stay. A new conversation has been opened with them, and until it is
@@ -133,13 +133,20 @@ async function sendMarks(ids) {
   try {
     const sent = await invoke("colai_send", {
       receiver: who,
-      message: summaryFor(going, state.mode, state.text, state.surface),
+      message: summaryFor(going, state.mode, state.text, state.surface, state.files),
       markIds: ids,
+      // Only the ones that travel. What is named rather than carried is already in the
+      // message as a path, and sending it twice would mean encoding a gigabyte to say
+      // something the sentence above it already said.
+      files: carrying(state.files)
+        .filter((file) => file.carried)
+        .map((file) => file.path),
     });
     if (who.kind === "thread") state.adopted = [...state.adopted, who.id];
     // What went is gone; what was left unticked is still there, which is the whole
     // point of being able to untick it.
     state.marks = state.marks.filter((mark) => !ids.includes(mark.id));
+    state.files = [];
     state.text = "";
     state.popup = null;
     state.open = null;
@@ -323,6 +330,96 @@ function placePopup(mark) {
 }
 
 /** The composer: everything marked so far, and what to do with the ticked ones. */
+/**
+ * The files and folders coming along, and the two ways to add one.
+ *
+ * Under the note rather than above it, because what somebody types is the point and a
+ * list of attachments that pushes it off the menu is a file manager with a text box in
+ * it. Each one says whether it is travelling or only being named — the difference is
+ * the difference between an agent that can see the thing and one that has to go and
+ * open it, and finding that out after sending is finding it out too late.
+ */
+function fileRows() {
+  const rows = [];
+  for (const file of carrying(state.files)) {
+    const row = document.createElement("div");
+    row.className = "row file-row";
+    row.dataset.carried = String(file.carried);
+    const said = document.createElement("span");
+    said.className = "agent-name";
+    said.textContent = file.name;
+    said.title = file.path;
+    // One label, not two. A size on the left and "named · 41 MB" on the right is the
+    // same fact twice, and the half worth reading first is what is going to happen to
+    // it — so the fate leads and the reason follows it.
+    const how = document.createElement("span");
+    how.className = "row-key";
+    how.textContent = file.carried
+      ? `attached · ${sizeOf(file.bytes)}`
+      : file.why === "no room left"
+        ? `named · no room left, ${sizeOf(file.bytes)}`
+        : `named · ${file.why}`;
+    const drop = document.createElement("button");
+    drop.type = "button";
+    drop.className = "file-drop";
+    drop.title = `Leave ${file.name} out`;
+    drop.setAttribute("aria-label", `Leave ${file.name} out`);
+    drop.textContent = "✕";
+    drop.addEventListener("click", () => {
+      state.files = state.files.filter((had) => had.path !== file.path);
+      render();
+    });
+    row.append(said, how, drop);
+    rows.push(row);
+  }
+
+  const add = document.createElement("div");
+  add.className = "mode-row file-add";
+  for (const [label, folders] of [
+    ["Add files", false],
+    ["Add a folder", true],
+  ]) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.textContent = label;
+    chip.addEventListener("click", () => void pickFiles(folders));
+    add.append(chip);
+  }
+  const hint = document.createElement("span");
+  hint.className = "file-hint";
+  hint.textContent = "or drop them here";
+  add.append(hint);
+  rows.push(add);
+  return rows;
+}
+
+/** Ask the desktop for files, and keep whatever comes back that is not already here. */
+async function pickFiles(folders) {
+  try {
+    bringFiles(await invoke("colai_pick_files", { folders }));
+  } catch (error) {
+    state.trouble = `Could not open the file chooser — ${error && error.message ? error.message : String(error)}`;
+    render();
+  }
+}
+
+/**
+ * Take paths into the send, without taking any of them twice.
+ *
+ * By path, because the same file dropped twice is the same file, and a list that shows
+ * it twice would also encode it twice into the message.
+ */
+function bringFiles(brought) {
+  if (!brought || !brought.length) return;
+  const had = new Set(state.files.map((file) => file.path));
+  state.files = [...state.files, ...brought.filter((file) => !had.has(file.path))];
+  // Opened, because a file dropped onto a closed toolbar has nowhere visible to land,
+  // and something that vanishes on arrival reads as a drop that failed.
+  state.open = "send";
+  render();
+}
+
 function drawComposer() {
   const rows = [];
   const title = document.createElement("p");
@@ -391,6 +488,8 @@ function drawComposer() {
   });
   rows.push(text);
 
+  rows.push(...fileRows());
+
   if (needsAgreeing()) {
     const warned = document.createElement("p");
     warned.className = "popup-warn";
@@ -450,7 +549,8 @@ function drawComposer() {
   go.type = "button";
   go.className = "popup-do popup-go";
   const going = chosenMarks();
-  go.disabled = state.sending || (going.length === 0 && !state.text.trim());
+  go.disabled =
+    state.sending || (going.length === 0 && state.files.length === 0 && !state.text.trim());
   go.textContent = state.sending
     ? "Sending…"
     : needsAgreeing()

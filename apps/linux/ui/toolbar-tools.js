@@ -61,8 +61,63 @@ const MODES = {
 /** Where a wireframe goes when nobody says otherwise. */
 const WIREFRAME_HOME = "docs/Design/";
 
-/** How far apart a recording's frames are, which is what makes it a duration. */
-const RECORD_EVERY = 300;
+/**
+ * How long a recording may cover.
+ *
+ * A short list rather than a slider: the choice is "a moment" or "long enough to go and
+ * do the thing", and four steps say that where sixty would only make somebody pick one.
+ * The frame count does not change with it — a longer recording spreads the same handful
+ * further apart, because every frame is a picture an agent has to be sent.
+ */
+const RECORD_LENGTHS = [2, 5, 10, 15];
+
+/**
+ * How much of a dropped file travels with the message, and how much of a whole send does.
+ *
+ * A file goes into the message base64-encoded, through one websocket frame, and comes
+ * out the far end as bytes an agent has to be given. That is the right thing for a
+ * screenshot, a log, a stylesheet — and the wrong thing for a video, an archive, or a
+ * directory of them, which is why anything past these limits is named rather than
+ * carried. Naming is not a failure: the receiving agent is usually on this machine and
+ * can open the path itself, and the ones that cannot would not have survived the frame.
+ */
+const CARRY_FILE = 8 * 1024 * 1024;
+const CARRY_SEND = 20 * 1024 * 1024;
+
+/** A size somebody can read, rather than a number of bytes nobody can. */
+function sizeOf(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`;
+}
+
+/**
+ * Which of these travel with the message and which are only named, in order.
+ *
+ * In order, and not by size, because the order is the one somebody chose: dropping a
+ * small file after a large one should not silently promote it past the file above it.
+ * Every entry keeps a reason, so the composer can say why something is not coming
+ * along rather than showing it greyed out and leaving somebody to guess.
+ */
+function carrying(files) {
+  let room = CARRY_SEND;
+  let full = false;
+  return (files || []).map((file) => {
+    if (file.folder) return { ...file, carried: false, why: "a folder" };
+    // Its own size, before the budget, so a file nothing could have carried says the
+    // real reason rather than blaming the files above it.
+    if (file.bytes > CARRY_FILE) return { ...file, carried: false, why: sizeOf(file.bytes) };
+    // Once the message is full it stays full, even if something further down would
+    // have squeezed in. A list where the third file is named and the fourth is
+    // attached is a rule nobody can see; a line drawn through it is one they can.
+    if (full || file.bytes > room) {
+      full = true;
+      return { ...file, carried: false, why: "no room left" };
+    }
+    room -= file.bytes;
+    return { ...file, carried: true, why: null };
+  });
+}
 
 /**
  * What each tool draws while it is being dragged, if anything.
@@ -111,7 +166,7 @@ const KEYS = {
  * The instruction goes last. Everything above it is what is being talked about, and the
  * last line is what to do — the same order a person would say it out loud.
  */
-function summaryFor(marks, mode, text, surface) {
+function summaryFor(marks, mode, text, surface, files) {
   const said = [];
   const said_of = (mark, at) => {
     const tool = TOOLS[mark.tool];
@@ -148,6 +203,25 @@ function summaryFor(marks, mode, text, surface) {
     });
     said.push("");
   }
+  // What came in from the file system, split by whether it could travel. Both halves
+  // are worth saying: an agent that knows a path was named rather than attached knows
+  // to go and read it, where one told nothing waits for a picture that never arrives.
+  const brought = carrying(files);
+  const along = brought.filter((file) => file.carried);
+  const named = brought.filter((file) => !file.carried);
+  if (along.length) {
+    said.push(along.length === 1 ? "One file is attached:" : `${along.length} files are attached:`);
+    said.push("");
+    for (const file of along) said.push(`- ${file.name} (${sizeOf(file.bytes)}) — ${file.path}`);
+    said.push("");
+  }
+  if (named.length) {
+    said.push("Not attached. Read these where they are, on the machine this came from:");
+    said.push("");
+    for (const file of named) said.push(`- ${file.path} (${file.why})`);
+    said.push("");
+  }
+
   const asked = MODES[mode] || MODES.plan;
   said.push(`${asked.label}: ${asked.says}`);
   const own = (text || "").trim();
@@ -410,8 +484,11 @@ function detailOf(mark) {
   // A recording says how long it covers, because a run of pictures with no duration is
   // just pictures. A comparison says nothing here: its own name is "Before and after",
   // and the two files in order say the rest.
-  if (mark.tool === "record" && mark.frames > 1) {
-    return `${mark.frames} frames over ${(mark.frames * RECORD_EVERY) / 1000}s`;
+  // The length is carried on the mark rather than computed from the frame count,
+  // because the count is capped and the length is not: two seconds and fifteen are the
+  // same eight pictures, spread further apart.
+  if (mark.tool === "record" && mark.frames > 1 && typeof mark.seconds === "number") {
+    return `${mark.frames} frames over ${Math.round(mark.seconds * 10) / 10}s`;
   }
   return null;
 }

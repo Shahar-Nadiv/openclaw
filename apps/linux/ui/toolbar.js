@@ -88,6 +88,7 @@ const el = {
   grip: document.getElementById("grip"),
   flyShape: document.getElementById("fly-shape"),
   flyDesign: document.getElementById("fly-design"),
+  flyRecord: document.getElementById("fly-record"),
   flyAgents: document.getElementById("fly-agents"),
   agentRows: document.getElementById("agent-rows"),
   trouble: document.getElementById("trouble"),
@@ -134,6 +135,15 @@ const state = {
   popup: null,
   // A before-and-after that has its before and is waiting for the world to change.
   comparing: null,
+  // How long a recording covers. Somebody's choice, not a constant.
+  recordFor: RECORD_LENGTHS[0],
+  // Files and folders somebody brought in, as paths this machine can still find them
+  // by. Not their contents: they are on a disk that is better at holding them than
+  // this page is, and are read at the moment they are sent.
+  files: [],
+  // Set while something is being dragged over the toolbar, so it can say it will
+  // catch it.
+  catching: false,
   // Whether the receiver was chosen rather than worked out. A guess may fill an empty
   // seat; it may never take one somebody has sat in.
   picked: false,
@@ -196,10 +206,18 @@ function buildRail() {
   exact.append(
     key("measure", "Measure · M", "measure", () => use("measure")),
     key("colour", "Colour · C", "colour", () => use("colour")),
-    key("record", "Record a few seconds · R", "record", () => use("record")),
+    key("record", "Record · R · right-click for how long", "record", () => use("record")),
     key("compare", "Before and after · A", "compare", () => compareStep()),
     key("inspect", "Inspect what is there · I", "inspect", () => use("inspect")),
   );
+  // How long it records is a setting on the tool, so it lives on the tool: a right
+  // click, where a right click already means "about this", rather than another key on
+  // a rail that has enough of them.
+  buttons.record.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    flyout("record");
+  });
+
   dividers[1].after(exact);
 
   const agents = document.createElement("button");
@@ -237,6 +255,23 @@ function buildRail() {
   row(el.flyShape, "circle", "Circle", "circle", "O");
   row(el.flyDesign, "wireframe", "Create wireframe", "wireframe");
   row(el.flyDesign, "screenshot", "Screenshot", "screenshot");
+  for (const seconds of RECORD_LENGTHS) length(el.flyRecord, seconds);
+}
+
+/** One of the lengths a recording can be, on the menu the record key opens. */
+function length(into, seconds) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "row";
+  button.dataset.seconds = String(seconds);
+  button.innerHTML = icon("record", 14) + `<span>${seconds} seconds</span>`;
+  button.addEventListener("click", () => {
+    state.recordFor = seconds;
+    // Chosen from the record menu, so the choice is also the tool: nobody opens this to
+    // set a number and then goes looking for the key they just right-clicked.
+    use("record");
+  });
+  into.append(button);
 }
 
 function row(into, tool, label, glyph, press) {
@@ -595,9 +630,15 @@ async function shoot(mark, again) {
         y: Math.round(mark.points[0].y * window.innerHeight),
       }).catch(() => null);
     }
-    const taken = await invoke("colai_capture_mark", { mark, accent: accentNow(), again });
+    const taken = await invoke("colai_capture_mark", {
+      mark,
+      accent: accentNow(),
+      again,
+      seconds: state.recordFor,
+    });
     if (taken.hex) mark.hex = taken.hex;
     mark.frames = taken.frames;
+    mark.seconds = taken.seconds;
     if (!again) mark.thumb = taken.thumb;
     mark.shot = `${taken.width}\u00d7${taken.height}`;
   } catch (error) {
@@ -671,6 +712,7 @@ function render() {
   const vertical = isVertical(state.dock);
   el.wrap.dataset.vertical = String(vertical);
   el.wrap.dataset.dock = state.dock || "";
+  el.wrap.dataset.catching = String(state.catching);
 
   for (const [id, button] of Object.entries(buttons)) {
     if (id === "shape") {
@@ -696,6 +738,9 @@ function render() {
       button.title = state.comparing
         ? "Capture the after · A"
         : "Before and after · A";
+    } else if (id === "record") {
+      button.setAttribute("aria-pressed", String(state.tool === "record" || state.open === "record"));
+      button.title = `Record ${state.recordFor} seconds · R · right-click for how long`;
     } else if (TOOLS[id]) {
       button.setAttribute("aria-pressed", String(state.tool === id));
     }
@@ -729,6 +774,10 @@ function render() {
 
   el.flyShape.hidden = state.open !== "shape";
   el.flyDesign.hidden = state.open !== "design";
+  el.flyRecord.hidden = state.open !== "record";
+  for (const button of el.flyRecord.children) {
+    button.setAttribute("aria-pressed", String(Number(button.dataset.seconds) === state.recordFor));
+  }
   el.flyAgents.hidden = state.open !== "agents";
   el.flySend.hidden = state.open !== "send";
   // Filled before it is placed. A menu is measured to decide whether it fits on the
@@ -737,13 +786,18 @@ function render() {
   // the same code, run again a moment later, put it back.
   if (state.open === "send") drawComposer();
   if (state.open === "agents") drawWho();
-  for (const [node, from] of [
-    [el.flyShape, 150],
-    [el.flyDesign, 190],
-    [el.flySend, 230],
-    [el.flyAgents, 270],
+  // Under the key that opened it, measured rather than guessed. Four hand-tuned
+  // offsets used to stand here, and they were four chances to drift: adding the record
+  // key pushed everything to its right along and left the design menu opening under a
+  // key three along from the one that owns it.
+  for (const [node, anchor] of [
+    [el.flyShape, buttons.shape],
+    [el.flyDesign, buttons.design],
+    [el.flyRecord, buttons.record],
+    [el.flySend, buttons.send],
+    [el.flyAgents, buttons.agents],
   ]) {
-    placeFlyout(node, vertical, from);
+    placeFlyout(node, vertical, vertical ? anchor.offsetTop : anchor.offsetLeft);
   }
 
   drawMarks();
@@ -1119,6 +1173,62 @@ function sayFailed(message) {
     // help, and throwing from an error handler loses the original.
   }
 }
+
+/*
+ * Files dragged onto the toolbar.
+ *
+ * Tauri's own drag-and-drop rather than the page's, because the page's gives a browser
+ * File — bytes, no path, and nothing at all for a folder — where this gives the real
+ * paths on disk. That is the difference between attaching a copy of something and
+ * naming the thing itself, and a folder can only be named.
+ *
+ * The overlay is input-shaped, so a drop only lands where the toolbar actually is: the
+ * rail, or the composer when it is open. Everywhere else the drag goes through to the
+ * desktop, which is right — the transparent part of this window is not a window.
+ */
+listen("tauri://drag-enter", (event) => {
+  state.catching = onTheToolbar(event);
+  render();
+});
+listen("tauri://drag-leave", () => {
+  state.catching = false;
+  render();
+});
+listen("tauri://drag-drop", async (event) => {
+  state.catching = false;
+  const paths = (event.payload && event.payload.paths) || [];
+  // Let go over the desktop, not over the toolbar. The window is the size of the whole
+  // desk, and while a marking tool is out its input shape is the whole desk too, so
+  // catching every drop would mean a file dragged to somebody's desktop quietly landing
+  // in a message instead. The drawn rectangles are the promise; the window is not.
+  if (!paths.length || !onTheToolbar(event)) {
+    render();
+    return;
+  }
+  try {
+    bringFiles(await invoke("colai_describe_files", { paths }));
+  } catch (error) {
+    sayFailed(`Could not read what was dropped — ${error && error.message ? error.message : String(error)}`);
+  }
+});
+
+/** Whether a drag is over the part of this window somebody can actually see. */
+function onTheToolbar(event) {
+  const at = event.payload && event.payload.position;
+  if (!at) return false;
+  // Physical pixels from the window manager, CSS pixels from the page.
+  const scale = window.devicePixelRatio || 1;
+  const [x, y] = [at.x / scale, at.y / scale];
+  const inside = (box) =>
+    x >= box.x && y >= box.y && x <= box.x + box.width && y <= box.y + box.height;
+  if (inside(boxAround(el.wrap))) return true;
+  return state.popup !== null && !el.popup.hidden && inside(boxAround(el.popup));
+}
+
+// WebKit's own context menu has nothing on it that belongs on a screen overlay — and
+// worse, it is a native window that outlives the toolbar's shape, so it appears over the
+// desktop and has to be dismissed before anything else can be clicked.
+window.addEventListener("contextmenu", (event) => event.preventDefault());
 
 window.addEventListener("error", (event) => sayFailed(event.message || String(event.error)));
 

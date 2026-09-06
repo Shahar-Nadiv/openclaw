@@ -27,6 +27,8 @@ commands.allow = [
   "colai_unwatch",
   "colai_start_here",
   "colai_inspect",
+  "colai_describe_files",
+  "colai_pick_files",
   "colai_release",
   "colai_open_settings",
 ]

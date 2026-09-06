@@ -201,13 +201,27 @@ pub(crate) struct Shot {
     pub height: i32,
 }
 
-/// How many frames a recording takes, and how far apart.
+/// The most frames a recording will ever take.
 ///
-/// Short and few on purpose: every frame is an image an agent has to be sent, and six
-/// of them a third of a second apart shows something moving without turning one mark
-/// into a photo album.
-const RECORD_FRAMES: usize = 6;
-const RECORD_EVERY: std::time::Duration = std::time::Duration::from_millis(300);
+/// A cap rather than a rate, because the length is somebody's to choose and the number
+/// of images is not: every frame is a picture an agent has to be sent and pay for, and
+/// fifty of them is not a recording, it is a bill. A longer recording spreads the same
+/// handful of frames further apart — which is the honest trade, and the one a person
+/// would make if asked.
+const RECORD_FRAMES: usize = 8;
+/// The shortest gap between frames, so a brief recording still samples quickly enough
+/// to catch something that flickers.
+const RECORD_CLOSEST: u64 = 250;
+
+/// How far apart a recording's frames fall, for a length in seconds.
+///
+/// Across the gaps, not the frames: eight photographs have seven gaps between them, and
+/// dividing by eight would leave the last frame an interval short of the length
+/// somebody asked for — a fifteen-second recording that actually covered thirteen.
+fn record_every(seconds: f64) -> std::time::Duration {
+    let across = (seconds.max(0.25) * 1000.0) / (RECORD_FRAMES - 1) as f64;
+    std::time::Duration::from_millis((across as u64).max(RECORD_CLOSEST))
+}
 
 impl Shot {
     fn weighs(&self) -> usize {
@@ -300,6 +314,9 @@ pub(crate) struct Taken {
     pub hex: Option<String>,
     /// How many pictures were taken. One for everything but a recording.
     pub frames: usize,
+    /// How long they cover, which is the count times the gap and not what was asked
+    /// for: a very short recording still samples at the fastest rate it has.
+    pub seconds: f64,
 }
 
 /// Photograph what a mark is about.
@@ -317,6 +334,8 @@ pub(crate) async fn colai_capture_mark(
     // `again` adds to what this mark already has rather than replacing it: the second
     // half of a before-and-after.
     again: Option<bool>,
+    // How long a recording should cover. Ignored by every other tool.
+    seconds: Option<f64>,
 ) -> Result<Taken, String> {
     let window = app
         .get_webview_window(crate::colai::OVERLAY_LABEL)
@@ -344,6 +363,7 @@ pub(crate) async fn colai_capture_mark(
         .flatten();
     // A recording is the same photograph taken several times. Nothing else about it is
     // special, which is why it costs a loop rather than a second way of taking pictures.
+    let every = record_every(seconds.unwrap_or(2.0));
     let wanted = if mark.tool == "record" {
         RECORD_FRAMES
     } else {
@@ -357,7 +377,7 @@ pub(crate) async fn colai_capture_mark(
     let mut sent = (crop.width, crop.height);
     for taken in 0..wanted {
         if taken > 0 {
-            tokio::time::sleep(RECORD_EVERY).await;
+            tokio::time::sleep(every).await;
         }
         let (done, wait) = std::sync::mpsc::channel();
         let (within, drawn, accent) = (within.clone(), drawn.clone(), accent.clone());
@@ -409,6 +429,15 @@ pub(crate) async fn colai_capture_mark(
         height: sent.1,
         hex,
         frames: held,
+        // What the frames actually cover, which is the gaps between them. Said rather
+        // than the length that was asked for, because the floor on the interval can
+        // stretch a very short recording past it, and an agent timing a change off this
+        // number has to be able to trust it.
+        seconds: if wanted > 1 {
+            ((wanted - 1) as f64 * every.as_millis() as f64) / 1000.0
+        } else {
+            0.0
+        },
     })
 }
 
@@ -820,6 +849,26 @@ mod tests {
         assert_eq!(shots.pick(&["m1".to_string()]).unwrap().len(), 1);
         shots.forget(&["m1".to_string()]).unwrap();
         assert!(shots.pick(&["m1".to_string()]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_longer_recording_spreads_the_same_frames_rather_than_adding_more() {
+        // Fifty images is not a recording, it is a bill. The same eight frames spread
+        // across whatever length was picked, and spread across the gaps between them so
+        // the last one lands on the length rather than an interval short of it.
+        // Within a few milliseconds, because the interval is whole milliseconds and
+        // seven of them rarely divide a length exactly. The message rounds to a tenth
+        // of a second, so this is under the resolution anybody reads it at.
+        let covers =
+            |seconds: f64| (RECORD_FRAMES - 1) as f64 * record_every(seconds).as_secs_f64();
+        assert!((covers(2.0) - 2.0).abs() < 0.01, "{}", covers(2.0));
+        assert!((covers(15.0) - 15.0).abs() < 0.01, "{}", covers(15.0));
+        assert_eq!(record_every(2.0).as_millis(), 285);
+        assert_eq!(record_every(15.0).as_millis(), 2142);
+        // And nothing samples faster than the floor, however short the ask — so a very
+        // brief recording covers more than it was asked for rather than blurring past
+        // the thing it was pointed at.
+        assert_eq!(record_every(0.1).as_millis(), 250);
     }
 
     #[test]

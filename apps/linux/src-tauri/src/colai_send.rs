@@ -42,6 +42,8 @@ pub(crate) struct Sent {
     /// is still described in the message; it just arrives without its picture, and the
     /// receipt should not claim otherwise.
     pub pictures: usize,
+    /// How many of the files somebody brought in actually went with it.
+    pub carried: usize,
     /// Whether the reply will find its way back to the screen.
     ///
     /// Said rather than swallowed. A subscription that quietly failed leaves a mark
@@ -59,14 +61,20 @@ pub(crate) async fn colai_send(
     receiver: Receiver,
     message: String,
     mark_ids: Vec<String>,
+    files: Vec<String>,
 ) -> Result<Sent, String> {
     let message = message.trim().to_string();
     if message.is_empty() {
         return Err("There is nothing to send.".to_string());
     }
     let target = resolve(&gateway, &receiver).await?;
-    let attachments = attach(&shots, &mark_ids)?;
+    let mut attachments = attach(&shots, &mark_ids)?;
     let pictures = attachments.len();
+    // After the pictures, in the order the message describes them. The message has
+    // already decided which of these travel and which are only named; anything in this
+    // list is one that travels.
+    attachments.extend(crate::colai_files::carry(&files));
+    let carried = attachments.len() - pictures;
     let sent = gateway
         .chat_send_to(
             target,
@@ -91,6 +99,7 @@ pub(crate) async fn colai_send(
         session_key: sent.target.session_key,
         run_id: sent.run_id,
         pictures,
+        carried,
         watching,
     })
 }

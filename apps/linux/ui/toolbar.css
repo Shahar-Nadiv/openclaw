@@ -401,6 +401,7 @@ body {
 }
 .flyout-send > .row,
 .flyout-send > .mode-row,
+.flyout-send > .file-add,
 .flyout-send > .popup-note,
 .flyout-send > .popup-foot,
 .flyout-send > .popup-warn,
@@ -447,6 +448,38 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* A file or folder coming along, and how far along it is coming. */
+.file-row {
+  gap: 8px;
+}
+.file-row .agent-name {
+  flex: 1;
+}
+/* Named rather than carried: still going, still readable, just not in the message. */
+.file-row[data-carried="false"] {
+  border: 1px dashed rgb(255 255 255 / 16%);
+}
+.file-drop {
+  all: unset;
+  flex-shrink: 0;
+  padding: 0 3px;
+  color: #8e8e93;
+  font-size: 12px;
+  cursor: pointer;
+}
+.file-drop:hover {
+  color: #f7f7f8;
+}
+.file-add {
+  align-items: center;
+}
+.file-hint {
+  flex-shrink: 0;
+  padding-left: 6px;
+  color: #8e8e93;
+  font-size: 11px;
 }
 
 .mode-row {
@@ -826,4 +859,18 @@ body {
   font-size: 11px;
   font-weight: 600;
   box-shadow: 0 2px 10px rgb(0 0 0 / 45%);
+}
+
+/*
+ * Something is being dragged over the toolbar.
+ *
+ * The whole rail lights rather than a drop zone inside it, because the thing that
+ * catches a file is the window, and the window is the shape you can see. A dashed
+ * rectangle drawn inside it would be a second, smaller promise about a boundary the
+ * desktop has already decided.
+ */
+.rail-wrap[data-catching="true"] .rail,
+.rail-wrap[data-catching="true"] .flyout-send {
+  outline: 2px solid var(--accent, #ff6b6b);
+  outline-offset: 2px;
 }

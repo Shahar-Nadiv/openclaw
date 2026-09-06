@@ -44,6 +44,7 @@ type ToolbarHelpers = {
     px?: number;
     hex?: string;
     frames?: number;
+    seconds?: number;
     seen?: { role: string; name: string; at: number[]; within?: string[] } | null;
   }) => string | null;
   summaryFor: (
@@ -54,16 +55,26 @@ type ToolbarHelpers = {
       px?: number;
       hex?: string;
       frames?: number;
+      seconds?: number;
     }[],
     mode: string,
     text: string,
     surface: Surface,
+    files?: Brought[],
   ) => string;
+  RECORD_LENGTHS: number[];
+  carrying: (
+    files: Brought[] | undefined,
+  ) => (Brought & { carried: boolean; why: string | null })[];
+  sizeOf: (bytes: number) => string;
 };
+
+/** A file or folder somebody dropped on the toolbar, as the page holds it. */
+type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf };`,
   context,
 );
 const {
@@ -81,6 +92,9 @@ const {
   spanOf,
   detailOf,
   projectInFront,
+  RECORD_LENGTHS,
+  carrying,
+  sizeOf,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -99,7 +113,9 @@ describe("what a tool is allowed to do", () => {
     // application that was pointed at, so calling it a write would have the gate refuse
     // a tool that was never going to change a surface.
     for (const tool of Object.keys(TOOLS)) {
-      if (tool === "surfaceWrite") continue;
+      if (tool === "surfaceWrite") {
+        continue;
+      }
       expect(TOOLS[tool]!.writes, tool).toBe(false);
     }
   });
@@ -410,7 +426,27 @@ describe("the two tools that know a number", () => {
 describe("marks that are more than one picture", () => {
   test("a recording says how many frames and how long they cover", () => {
     // The duration is what makes it a recording rather than a pile of screenshots.
-    expect(detailOf({ tool: "record", frames: 6 })).toBe("6 frames over 1.8s");
+    expect(detailOf({ tool: "record", frames: 8, seconds: 2 })).toBe("8 frames over 2s");
+  });
+
+  test("a longer recording is the same frames over longer, and says so", () => {
+    // The frame count is capped, so length is carried rather than computed from it: a
+    // fifteen-second recording that claimed to be two would be worse than no detail,
+    // because an agent reading "8 frames over 2s" would time the change from it.
+    expect(detailOf({ tool: "record", frames: 8, seconds: 15 })).toBe("8 frames over 15s");
+  });
+
+  test("a length that did not come out round is rounded, not printed in full", () => {
+    // The frames are taken on a timer against a live desktop, so the span they actually
+    // cover is never exactly the number somebody picked.
+    expect(detailOf({ tool: "record", frames: 8, seconds: 5.043 })).toBe("8 frames over 5s");
+  });
+
+  test("the lengths on offer stop at fifteen seconds", () => {
+    // A cap, not a habit: past this the frames are so far apart that what comes back is
+    // a slideshow of a screen rather than a recording of a thing happening on it.
+    expect(RECORD_LENGTHS[0]).toBe(2);
+    expect(Math.max(...RECORD_LENGTHS)).toBe(15);
   });
 
   test("a comparison adds nothing, because its name already said it", () => {
@@ -420,16 +456,18 @@ describe("marks that are more than one picture", () => {
   });
 
   test("one frame is not a sequence", () => {
-    expect(detailOf({ tool: "record", frames: 1 })).toBeNull();
+    expect(detailOf({ tool: "record", frames: 1, seconds: 2 })).toBeNull();
     expect(detailOf({ tool: "box", frames: 1 })).toBeNull();
   });
 
   test("the message names a run as a range so the agent reads it in order", () => {
-    const said = summaryFor([{ tool: "record", frames: 6 }, { tool: "box" }], "debug", "", {
-      app: "Figma",
-      connector: null,
-    });
-    expect(said).toContain("1. Recording (mark-1-1.png … mark-1-6.png) — 6 frames over 1.8s");
+    const said = summaryFor(
+      [{ tool: "record", frames: 6, seconds: 2 }, { tool: "box" }],
+      "debug",
+      "",
+      { app: "Figma", connector: null },
+    );
+    expect(said).toContain("1. Recording (mark-1-1.png … mark-1-6.png) — 6 frames over 2s");
     // A mark that photographed once keeps the plain name it always had.
     expect(said).toContain("2. Box (mark-2.png)");
   });
@@ -515,5 +553,83 @@ describe("what the desktop says is there", () => {
     expect(
       detailOf({ tool: "inspect", seen: { role: "caret", name: "", at: [700, 400, 0, 0] } }),
     ).toBe("caret, at 700,400");
+  });
+});
+
+describe("files somebody brought in", () => {
+  const file = (name: string, bytes: number, folder = false) => ({
+    path: `/home/someone/${name}`,
+    name,
+    bytes,
+    folder,
+  });
+
+  /** Whether each of these travels, and what it was told if it does not. */
+  const fates = (files: Brought[]) => carrying(files).map((one) => [one.carried, one.why] as const);
+
+  test("a small file travels with the message", () => {
+    expect(fates([file("notes.md", 400)])).toEqual([[true, null]]);
+  });
+
+  test("a folder is never carried, because there is nothing to carry", () => {
+    // A directory has no bytes to encode. Naming it is not a lesser outcome — an agent
+    // on this machine opens the path, which is what somebody dropping a project means.
+    expect(fates([file("colai", 900_000_000, true)])).toEqual([[false, "a folder"]]);
+  });
+
+  test("a file too big for a message is named with its size, not just refused", () => {
+    // The size is the reason, so the reason is what it says. "Could not attach" leaves
+    // somebody wondering whether the file is broken.
+    expect(fates([file("demo.mp4", 40 * 1024 * 1024)])).toEqual([[false, "40 MB"]]);
+  });
+
+  test("the send fills up, and what fills it is decided in the order it was dropped", () => {
+    // Not by size, and not resumed once the message is full: a list where the third
+    // file is named and the fourth is attached is a rule nobody can see. The tiny file
+    // at the end would have fitted, and is named anyway, so the line through the list
+    // stays a line.
+    expect(
+      fates([
+        file("a.bin", 7 * 1024 * 1024),
+        file("b.bin", 7 * 1024 * 1024),
+        file("c.bin", 7 * 1024 * 1024),
+        file("d.txt", 10),
+      ]),
+    ).toEqual([
+      [true, null],
+      [true, null],
+      [false, "no room left"],
+      [false, "no room left"],
+    ]);
+  });
+
+  test("nothing brought in is not an error", () => {
+    expect(carrying(undefined)).toEqual([]);
+    expect(carrying([])).toEqual([]);
+  });
+
+  test("a size reads as a size", () => {
+    expect(sizeOf(400)).toBe("400 B");
+    expect(sizeOf(4096)).toBe("4 KB");
+    expect(sizeOf(3_500_000)).toBe("3.3 MB");
+  });
+
+  test("the message says what is attached and what is only named, and why", () => {
+    const said = summaryFor([], "ask", "", { app: "Files", connector: null }, [
+      file("notes.md", 400),
+      file("colai", 900_000_000, true),
+    ]);
+    expect(said).toContain("One file is attached:");
+    expect(said).toContain("- notes.md (400 B) — /home/someone/notes.md");
+    expect(said).toContain(
+      "Not attached. Read these where they are, on the machine this came from:",
+    );
+    expect(said).toContain("- /home/someone/colai (a folder)");
+  });
+
+  test("a send with no files says nothing about files", () => {
+    const said = summaryFor([{ tool: "box" }], "ask", "", { app: "Files", connector: null }, []);
+    expect(said).not.toContain("attached");
+    expect(said).not.toContain("Not attached");
   });
 });
