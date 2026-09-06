@@ -4,9 +4,19 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { describe, expect, it as test } from "vitest";
 
-const toolbarSource = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
-const browserBindingsStart = toolbarSource.indexOf("const tauri = window");
-assert.notEqual(browserBindingsStart, -1, "toolbar pure-helper boundary");
+/*
+ * The whole file, not a slice of one.
+ *
+ * These decisions used to live above a boundary comment in the page and were cut out of
+ * it by index, which meant the test quietly measured whatever happened to be above that
+ * line. They have a file of their own now, and it has nothing of the browser in it, so
+ * running all of it is the honest thing to do.
+ */
+const toolbarSource = readFileSync(
+  new URL("../apps/linux/ui/toolbar-tools.js", import.meta.url),
+  "utf8",
+);
+assert.ok(toolbarSource.includes("function summaryFor"), "toolbar decisions file");
 
 type Point = { x: number; y: number };
 type Reserved = { top: number; right: number; bottom: number; left: number };
@@ -34,7 +44,7 @@ type ToolbarHelpers = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource.slice(0, browserBindingsStart)}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt };`,
   context,
 );
 const {

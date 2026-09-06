@@ -75,6 +75,14 @@
       hidden
     ></div>
 
+    <!--
+      Classic scripts sharing one global scope, ordered by what depends on what at load
+      rather than at call: only toolbar.js touches the page while it runs, so it goes
+      last and its `start` is what sets everything else going.
+    -->
+    <script src="toolbar-tools.js"></script>
+    <script src="toolbar-compose.js"></script>
+    <script src="toolbar-dock.js"></script>
     <script src="toolbar.js"></script>
   </body>
 </html>

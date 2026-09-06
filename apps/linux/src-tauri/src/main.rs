@@ -1,6 +1,7 @@
 mod cli;
 mod colai;
 mod colai_capture;
+mod colai_receivers;
 mod colai_send;
 mod discovery;
 mod gateway;
@@ -1438,9 +1439,9 @@ fn main() {
         colai::colai_frontmost,
         colai::colai_screens,
         colai::colai_take_keyboard,
-        colai::colai_agents,
-        colai::colai_sessions,
-        colai::colai_threads,
+        colai_receivers::colai_agents,
+        colai_receivers::colai_sessions,
+        colai_receivers::colai_threads,
         colai_capture::colai_capture_mark,
         colai_capture::colai_forget_marks,
         colai_send::colai_send,
