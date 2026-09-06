@@ -515,6 +515,30 @@ function automationFor(marks, mode, text, surface) {
 const FOLD_TIME = 220;
 
 /**
+ * Whether what an agent just said is a question waiting on somebody.
+ *
+ * Conservative on purpose, and this is the whole reason it is a rule with tests rather
+ * than a regex written inline. Agents ask rhetorical questions, quote questions, and
+ * write sentences containing question marks that are not addressed to anybody. Treating
+ * those as "this is waiting for you" would put a nagging pin on the screen for every
+ * reply, and a pin that cries wolf is a pin somebody stops reading.
+ *
+ * So: the *last* line has to be the question. Something that asks and then carries on
+ * explaining has answered itself.
+ */
+function asksSomething(said) {
+  const lines = (said || "").trim().split("\n").map((line) => line.trim()).filter(Boolean);
+  const last = lines[lines.length - 1];
+  if (!last) return false;
+  if (last.endsWith("?")) return true;
+  // The forms that ask without the mark. Anchored to the start of the last line, so a
+  // sentence merely containing one of them is not caught.
+  return /^(which|would you|do you want|shall i|should i|let me know|tell me whether)\b/i.test(
+    last,
+  );
+}
+
+/**
  * How long a run may go quiet before the toolbar stops claiming it is working.
  *
  * The net beneath `session.ended`. A terminal frame that never arrives — a gateway that

@@ -36,16 +36,23 @@ function drawAnswers() {
       const dot = document.createElement("button");
       dot.type = "button";
       dot.className = "answer-dot";
-      dot.dataset.waiting = String(!answer.said);
-      dot.title = answer.said ? `Reply from ${answer.who}` : `Waiting on ${answer.who}`;
-      dot.textContent = answer.said ? "" : "…";
+      const latest = lastTurn(answer);
+      const asking = Boolean(latest) && asksSomething(latest);
+      dot.dataset.waiting = String(!latest);
+      dot.dataset.asking = String(asking);
+      dot.title = !latest
+        ? `Waiting on ${answer.who}`
+        : asking
+          ? `${answer.who} asked you something`
+          : `Reply from ${answer.who}`;
+      dot.textContent = !latest ? "…" : asking ? "?" : "";
       dot.addEventListener("click", () => {
         answer.open = !answer.open;
         render();
       });
       at.append(dot);
 
-      if (answer.open && answer.said) {
+      if (answer.open && latest) {
         const panel = document.createElement("div");
         panel.className = "answer-said";
 
@@ -69,36 +76,73 @@ function drawAnswers() {
         });
         head.append(who, shut);
 
-        const said = document.createElement("p");
+        const said = document.createElement("div");
         said.className = "answer-text";
-        said.textContent = answer.said;
+        // Every turn, not the first. A run that talks three times is one answer with
+        // three turns; keeping only the first threw away the two that usually matter,
+        // because an agent says what it is doing before it says what it found.
+        for (const turn of answer.turns || []) {
+          const line = document.createElement("p");
+          line.className = "answer-turn";
+          line.dataset.mine = String(turn.mine === true);
+          line.textContent = turn.said;
+          said.append(line);
+        }
+
+        // A reply in words, because most of what an agent says back is not a proposal
+        // to accept or refuse. It asks which of two things you meant, or what a value
+        // should be, or whether it understood — and none of those have an answer that
+        // fits in two fixed buttons.
+        const box = document.createElement("textarea");
+        box.className = "popup-note answer-say";
+        box.rows = 2;
+        box.placeholder = asking ? "Answer them…" : "Say something back…";
+        box.value = answer.saying_text || "";
+        box.addEventListener("input", () => {
+          answer.saying_text = box.value;
+          const go = panel.querySelector(".popup-go");
+          if (go) go.disabled = Boolean(answer.saying) || !box.value.trim();
+        });
 
         const foot = document.createElement("div");
         foot.className = "popup-foot";
-        const no = document.createElement("button");
-        no.type = "button";
-        no.className = "popup-do";
-        no.disabled = Boolean(answer.saying);
-        no.textContent = "Decline";
-        no.title = "Tell them this is not it";
-        no.addEventListener("click", () => void verdict(answer, "Declined — that is not what I meant."));
-        const yes = document.createElement("button");
-        yes.type = "button";
-        yes.className = "popup-do popup-go";
-        yes.disabled = Boolean(answer.saying);
-        yes.textContent = answer.saying ? "Sending…" : "Accept";
-        yes.title = "Tell them to go ahead";
-        yes.addEventListener("click", () => void verdict(answer, "Accepted — go ahead."));
-        foot.append(no, yes);
+        // Still there, because "yes, go on" is the commonest answer in the world — but
+        // they fill the box rather than being the only two things sayable.
+        for (const [label, words, why] of [
+          ["No", "Declined — that is not what I meant.", "Tell them this is not it"],
+          ["Yes", "Accepted — go ahead.", "Tell them to go ahead"],
+        ]) {
+          const quick = document.createElement("button");
+          quick.type = "button";
+          quick.className = "popup-do answer-quick";
+          quick.disabled = Boolean(answer.saying);
+          quick.textContent = label;
+          quick.title = why;
+          quick.addEventListener("click", () => void verdict(answer, words));
+          foot.append(quick);
+        }
+        const go = document.createElement("button");
+        go.type = "button";
+        go.className = "popup-do popup-go";
+        go.disabled = Boolean(answer.saying) || !(answer.saying_text || "").trim();
+        go.textContent = answer.saying ? "Sending…" : "Reply";
+        go.addEventListener("click", () => void verdict(answer, answer.saying_text || ""));
+        foot.append(go);
 
-        panel.append(head, said, foot);
-        placing.push([panel, { x: answer.at.x * window.innerWidth, y: answer.at.y * window.innerHeight }]);
+        panel.append(head, said, box, foot);
+        // The newest turn is the one being answered, so that is the one to be looking
+        // at. Opened at the top, a conversation of four turns shows the first and cuts
+        // the question off mid-sentence — which is what it did.
+        placing.push([panel, { x: answer.at.x * window.innerWidth, y: answer.at.y * window.innerHeight }, said]);
         return [at, panel];
       }
       return [at];
     }),
   );
-  for (const [panel, at] of placing) placeAnswer(panel, at);
+  for (const [panel, at, said] of placing) {
+    placeAnswer(panel, at);
+    if (said) said.scrollTop = said.scrollHeight;
+  }
 }
 
 /** Put an opened answer where `answerAt` says it goes, and no taller than its screen. */
@@ -124,18 +168,40 @@ function placeAnswer(panel, at) {
  * the conversation. So this is a real message, and the agent may well say something
  * back — which is what agreeing or disagreeing with somebody looks like.
  */
+/** One turn of what the agent has said, or null while it is still thinking. */
+function lastTurn(answer) {
+  const turns = answer.turns || [];
+  const theirs = turns.filter((turn) => !turn.mine);
+  return theirs.length ? theirs[theirs.length - 1].said : null;
+}
+
+/**
+ * Say something back.
+ *
+ * The conversation continues rather than ending. It used to close the pin on the way
+ * out, which was right when the only two things sayable were "yes" and "no" and wrong
+ * the moment somebody could answer a question — an answer usually gets a reply, and a
+ * pin that vanished as you sent one would take the reply with it.
+ */
 async function verdict(answer, said) {
-  if (answer.saying) return;
+  const words = (said || "").trim();
+  if (answer.saying || !words) return;
   answer.saying = true;
   render();
   try {
     await invoke("colai_send", {
       receiver: { kind: "session", id: answer.sessionKey, locator: null },
-      message: said,
-      markIds: [],
+      message: words,
     });
     answer.saying = false;
-    await forgetAnswer(answer);
+    answer.saying_text = "";
+    answer.turns = [...(answer.turns || []), { said: words, mine: true }];
+    // And it is working again, on this.
+    state.runs = [
+      ...state.runs.filter((run) => run.sessionKey !== answer.sessionKey),
+      { sessionKey: answer.sessionKey, who: answer.who, heard: Date.now() },
+    ];
+    render();
   } catch (error) {
     answer.saying = false;
     state.trouble = `Could not reply — ${error && error.message ? error.message : String(error)}`;

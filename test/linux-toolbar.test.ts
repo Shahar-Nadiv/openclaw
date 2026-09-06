@@ -148,6 +148,7 @@ type ToolbarHelpers = {
   runningSaid: (runs: Run[] | undefined) => string | null;
   RUN_QUIET: number;
   sheeted: (mark: { tool: string; frames?: number }) => boolean;
+  asksSomething: (said: string) => boolean;
 };
 
 /** A run the toolbar believes is underway. */
@@ -185,7 +186,7 @@ type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething };`,
   context,
 );
 const {
@@ -242,6 +243,7 @@ const {
   runningSaid,
   RUN_QUIET,
   sheeted,
+  asksSomething,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -1789,5 +1791,40 @@ describe("which marks arrive as one picture", () => {
   test("a single picture is already one picture", () => {
     expect(sheeted({ tool: "record", frames: 1 })).toBe(false);
     expect(sheeted({ tool: "box", frames: 1 })).toBe(false);
+  });
+});
+
+describe("when an agent is asking rather than telling", () => {
+  test("a turn that ends in a question is one", () => {
+    expect(asksSomething("Two ways to do it. Which would you rather?")).toBe(true);
+    expect(asksSomething("Should I write it to docs/Design/ or somewhere else?")).toBe(true);
+  });
+
+  test("the forms that ask without the mark are caught", () => {
+    expect(asksSomething("Let me know which of those you want")).toBe(true);
+    expect(asksSomething("Tell me whether the second one is closer")).toBe(true);
+  });
+
+  test("a question that answers itself is not waiting on anybody", () => {
+    // Agents ask rhetorically and then carry on. A pin that cried wolf on every reply
+    // is a pin somebody stops reading, which costs more than never having had one.
+    expect(asksSomething("Why is the gap there? Because the margin collapses.")).toBe(false);
+    expect(
+      asksSomething("Which file? toolbar-rail.js.\nI have changed it and the tests pass."),
+    ).toBe(false);
+  });
+
+  test("a plain report is not a question", () => {
+    expect(asksSomething("Fixed. The margin is on the section now and the tests pass.")).toBe(
+      false,
+    );
+    expect(asksSomething("")).toBe(false);
+    expect(asksSomething("   ")).toBe(false);
+  });
+
+  test("a sentence merely containing one of the forms is not asking", () => {
+    // Anchored to the start of the last line, so prose about a decision is not mistaken
+    // for a request to make one.
+    expect(asksSomething("I could not tell which of them you meant so I did neither.")).toBe(false);
   });
 });

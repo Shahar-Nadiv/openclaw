@@ -222,7 +222,7 @@ async function sendMarks(ids, alone) {
         sessionKey: sent.sessionKey,
         at: middleOf(going),
         who: state.receiving.name || who.id,
-        said: null,
+        turns: [],
         open: false,
       });
     }

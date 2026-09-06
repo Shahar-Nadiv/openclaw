@@ -560,13 +560,18 @@ async function start() {
     // an agent that is working but slow.
     const run = state.runs.find((one) => one.sessionKey === payload.sessionKey);
     if (run) run.heard = Date.now();
-    const waiting = state.answers.find(
-      (answer) => answer.sessionKey === payload.sessionKey && !answer.said,
-    );
+    // The pin for that session, whether or not it has heard something already. It used
+    // to stop looking once anything had arrived, which threw away everything after the
+    // first turn — and an agent says what it is doing before it says what it found.
+    const waiting = state.answers.find((answer) => answer.sessionKey === payload.sessionKey);
     if (!waiting) return;
     const said = spokenBy(payload.message);
     if (!said) return;
-    waiting.said = said;
+    const turns = waiting.turns || [];
+    // The same turn can arrive twice on a reconnect, and a pin that repeats itself reads
+    // as an agent that repeated itself.
+    if (turns.some((turn) => !turn.mine && turn.said === said)) return;
+    waiting.turns = [...turns, { said, mine: false }];
     render();
   }).catch(() => {});
 

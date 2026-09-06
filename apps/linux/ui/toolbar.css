@@ -107,6 +107,12 @@ body {
   margin: 4px 0;
 }
 
+/* `all: unset` below throws away the browser's own `[hidden] { display: none }`, so a
+   key told to hide stays on the rail claiming to be hidden. Stated back — this has been
+   found twice now, once for the folded tools and once for the stop key. */
+.key[hidden] {
+  display: none;
+}
 .key {
   all: unset;
   box-sizing: border-box;
@@ -956,6 +962,29 @@ body {
   .answer-dot[data-waiting="true"] {
     animation: none;
   }
+}
+
+/* Every turn, and whose it was. What somebody typed back is indented and quieter, so a
+   panel with four turns in it reads as a conversation rather than as one long reply. */
+.answer-turn {
+  margin: 0 0 8px;
+}
+.answer-turn:last-child {
+  margin-bottom: 0;
+}
+.answer-turn[data-mine="true"] {
+  padding-left: 10px;
+  border-left: 2px solid rgb(255 255 255 / 14%);
+  color: #8e8e93;
+}
+.answer-say {
+  margin: 8px 0 0;
+  width: 100%;
+}
+/* The two shortcuts, beside the reply rather than instead of it. */
+.answer-quick {
+  padding-left: 10px;
+  padding-right: 10px;
 }
 
 .answer-said {
