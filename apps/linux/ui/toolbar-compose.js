@@ -107,6 +107,12 @@ async function sendMarks(ids) {
     state.text = "";
     state.popup = null;
     state.open = null;
+    // And put the tool away. A marking tool holds a sheet of glass over the whole desk
+    // that swallows every click on it, which is what marking needs and is the opposite
+    // of what somebody needs the moment they have finished. Sending is the end of the
+    // gesture: what was marked has gone, and leaving the desktop deaf until they
+    // thought to press Escape is not something anybody asked for.
+    state.tool = "pointer";
     // Where to put the answer when it comes. The marks are about to be cleared, so the
     // place they were asking about has to be kept now or the reply has nowhere to land
     // — which was the whole trouble with this surface: you sent, and nothing ever came

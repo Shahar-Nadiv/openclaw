@@ -671,8 +671,12 @@ body {
   left: 18px;
   width: 320px;
   max-height: 40vh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  /* The panel does not scroll; the reply inside it does. A long answer used to carry
+     Accept and Decline off the bottom of its own box, so deciding meant scrolling to
+     the end of something you had already read. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 11px 12px;
   border-radius: 12px;
   pointer-events: auto;
@@ -680,7 +684,16 @@ body {
   border: 1px solid rgb(255 255 255 / 12%);
   box-shadow: 0 24px 60px rgb(0 0 0 / 60%);
 }
+.answer-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.answer-head .popup-shut {
+  margin-left: auto;
+}
 .answer-who {
+  flex: 1;
   margin: 0 0 6px;
   font-size: 10.5px;
   letter-spacing: 0.04em;
@@ -688,7 +701,11 @@ body {
   color: #8e8e93;
 }
 .answer-text {
-  margin: 0 0 10px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0 0 4px;
   font-size: 12.5px;
   line-height: 1.55;
   color: #f7f7f8;

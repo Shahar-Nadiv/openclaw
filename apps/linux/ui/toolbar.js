@@ -829,23 +829,82 @@ function drawAnswers() {
       if (answer.open && answer.said) {
         const panel = document.createElement("div");
         panel.className = "answer-said";
+
+        const head = document.createElement("div");
+        head.className = "answer-head";
         const who = document.createElement("p");
         who.className = "answer-who";
         who.textContent = answer.who;
+        // Closing is not deciding. The answer stays where it is and the pin stays with
+        // it, because reading something and having an opinion about it are two moments
+        // and this surface should not insist they are one.
+        const shut = document.createElement("button");
+        shut.type = "button";
+        shut.className = "popup-shut";
+        shut.title = "Close · the answer stays";
+        shut.setAttribute("aria-label", "Close this answer");
+        shut.textContent = "\u00d7";
+        shut.addEventListener("click", () => {
+          answer.open = false;
+          render();
+        });
+        head.append(who, shut);
+
         const said = document.createElement("p");
         said.className = "answer-text";
         said.textContent = answer.said;
-        const done = document.createElement("button");
-        done.type = "button";
-        done.className = "popup-do";
-        done.textContent = "Done";
-        done.addEventListener("click", () => void forgetAnswer(answer));
-        panel.append(who, said, done);
+
+        const foot = document.createElement("div");
+        foot.className = "popup-foot";
+        const no = document.createElement("button");
+        no.type = "button";
+        no.className = "popup-do";
+        no.disabled = Boolean(answer.saying);
+        no.textContent = "Decline";
+        no.title = "Tell them this is not it";
+        no.addEventListener("click", () => void verdict(answer, "Declined — that is not what I meant."));
+        const yes = document.createElement("button");
+        yes.type = "button";
+        yes.className = "popup-do popup-go";
+        yes.disabled = Boolean(answer.saying);
+        yes.textContent = answer.saying ? "Sending…" : "Accept";
+        yes.title = "Tell them to go ahead";
+        yes.addEventListener("click", () => void verdict(answer, "Accepted — go ahead."));
+        foot.append(no, yes);
+
+        panel.append(head, said, foot);
         at.append(panel);
       }
       return at;
     }),
   );
+}
+
+/**
+ * Say yes or no to an answer, in the conversation it came from.
+ *
+ * A verdict that went nowhere would be theatre: the point of the answer coming back
+ * here is that the agent hears what you make of it, and the place it hears anything is
+ * the conversation. So this is a real message, and the agent may well say something
+ * back — which is what agreeing or disagreeing with somebody looks like.
+ */
+async function verdict(answer, said) {
+  if (answer.saying) return;
+  answer.saying = true;
+  render();
+  try {
+    await invoke("colai_send", {
+      receiver: { kind: "session", id: answer.sessionKey, locator: null },
+      message: said,
+      markIds: [],
+    });
+    answer.saying = false;
+    await forgetAnswer(answer);
+  } catch (error) {
+    answer.saying = false;
+    state.trouble = `Could not reply — ${error && error.message ? error.message : String(error)}`;
+    render();
+  }
 }
 
 /** Stop waiting on a conversation, and stop the Gateway talking to nobody. */
