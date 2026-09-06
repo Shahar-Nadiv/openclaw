@@ -60,20 +60,26 @@ pub(crate) async fn colai_send(
     shots: State<'_, MarkShots>,
     receiver: Receiver,
     message: String,
-    mark_ids: Vec<String>,
-    files: Vec<String>,
+    // What goes with the message. Optional because nothing is a real answer for both:
+    // a reply to something an agent said carries neither, and requiring them turned
+    // that into "invalid args: missing required key `files`" the first time somebody
+    // pressed Accept — a sentence about this function's shape, put in front of somebody
+    // who was agreeing with a suggestion.
+    mark_ids: Option<Vec<String>>,
+    files: Option<Vec<String>>,
 ) -> Result<Sent, String> {
     let message = message.trim().to_string();
     if message.is_empty() {
         return Err("There is nothing to send.".to_string());
     }
+    let mark_ids = mark_ids.unwrap_or_default();
     let target = resolve(&gateway, &receiver).await?;
     let mut attachments = attach(&shots, &mark_ids)?;
     let pictures = attachments.len();
     // After the pictures, in the order the message describes them. The message has
     // already decided which of these travel and which are only named; anything in this
     // list is one that travels.
-    attachments.extend(crate::colai_files::carry(&files));
+    attachments.extend(crate::colai_files::carry(&files.unwrap_or_default()));
     let carried = attachments.len() - pictures;
     let sent = gateway
         .chat_send_to(

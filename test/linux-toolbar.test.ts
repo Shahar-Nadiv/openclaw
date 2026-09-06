@@ -1,6 +1,6 @@
 // Exercises the pure decisions extracted from the Linux toolbar webview script.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import vm from "node:vm";
 import { describe, expect, it as test } from "vitest";
 
@@ -1649,5 +1649,86 @@ describe("the message an agent actually reads", () => {
     expect(said).toContain("In Code — /home/someone/colai");
     expect(said).not.toContain("340,128");
     expect(said).not.toContain("window 1920");
+  });
+});
+
+describe("the page and the commands it calls", () => {
+  /*
+   * The two halves of this toolbar meet at a string. A Rust signature gains an argument,
+   * a caller in the page does not, and nothing complains until somebody presses the
+   * button — which is what happened: `files` became required on `colai_send`, the reply
+   * on an answer pin never passed it, and pressing Accept produced "invalid args:
+   * missing required key `files`" in front of somebody who was agreeing with a
+   * suggestion.
+   *
+   * Neither language can see the other, so the check has to read both from source.
+   */
+  const dir = new URL("../apps/linux/", import.meta.url);
+  const page = [
+    "toolbar.js",
+    "toolbar-rail.js",
+    "toolbar-mark.js",
+    "toolbar-live.js",
+    "toolbar-answers.js",
+    "toolbar-compose.js",
+    "toolbar-send.js",
+    "toolbar-dock.js",
+  ]
+    .map((file) => readFileSync(new URL(`ui/${file}`, dir), "utf8"))
+    .join("\n");
+  const rust = readdirSync(new URL("src-tauri/src/", dir))
+    .filter((file) => file.endsWith(".rs"))
+    .map((file) => readFileSync(new URL(`src-tauri/src/${file}`, dir), "utf8"))
+    .join("\n");
+
+  /** Every command the back end declares, and which of its arguments it insists on. */
+  const commands = new Map<string, string[]>();
+  for (const found of rust.matchAll(
+    /#\[tauri::command\]\s*(?:pub\(crate\)\s*)?(?:async\s*)?fn (\w+)\(([\s\S]*?)\)\s*->/g,
+  )) {
+    const required = found[2]!
+      .replaceAll(/\/\/[^\n]*/g, "")
+      .split(/,\s*(?![^<>()]*[>)])/)
+      .map((one) => one.trim())
+      .filter((one) => one.includes(":"))
+      .map((one) => ({
+        name: one.slice(0, one.indexOf(":")).trim(),
+        type: one.slice(one.indexOf(":") + 1),
+      }))
+      // The runtime supplies these; nobody passes them from the page.
+      .filter((one) => /^[a-z_]+$/.test(one.name) && !/State<|AppHandle/.test(one.type))
+      .filter((one) => !/^\s*Option</.test(one.type))
+      .map((one) => one.name.replaceAll(/_(\w)/g, (_, letter: string) => letter.toUpperCase()));
+    commands.set(found[1]!, required);
+  }
+
+  /** Every call the page makes, and the keys it hands over. */
+  const calls: { name: string; keys: string[] }[] = [];
+  for (const found of page.matchAll(
+    /invoke\(\s*"(\w+)"\s*(?:,\s*(\{[\s\S]*?\n\s*\}|\{[^{}]*\}))?/g,
+  )) {
+    // Both `name: value` and the shorthand `name`.
+    const keys = found[2] ? [...found[2].matchAll(/[{,]\s*(\w+)\s*[:,}]/g)].map((k) => k[1]!) : [];
+    calls.push({ name: found[1]!, keys });
+  }
+
+  test("the check itself found something to check", () => {
+    // A regex that quietly matched nothing would pass every assertion below.
+    expect(commands.size).toBeGreaterThan(10);
+    expect(calls.length).toBeGreaterThan(10);
+  });
+
+  test("every command the page calls exists", () => {
+    for (const call of calls) {
+      expect(commands.has(call.name), `${call.name} is not a command`).toBe(true);
+    }
+  });
+
+  test("every call hands over everything its command insists on", () => {
+    for (const call of calls) {
+      for (const key of commands.get(call.name) ?? []) {
+        expect(call.keys, `${call.name} needs ${key}`).toContain(key);
+      }
+    }
   });
 });
