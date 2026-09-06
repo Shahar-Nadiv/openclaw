@@ -288,6 +288,31 @@ body {
   background: rgb(255 255 255 / 16%);
 }
 
+/* A folder that opens, and the conversations sitting inside it. */
+.twist {
+  flex-shrink: 0;
+  width: 26px;
+  text-align: center;
+  font-size: 9px;
+  color: #8e8e93;
+  transition: transform 160ms ease-out;
+}
+.twist[data-open="true"] {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .twist {
+    transition: none;
+  }
+}
+.row-project .agent-name {
+  font-weight: 500;
+}
+/* Indented by exactly the folder's own twist, so the names line up under it. */
+.row-nested {
+  padding-left: 26px;
+}
+
 /* A heading inside the list, telling the two kinds of receiver apart. */
 .row-group {
   margin: 6px 0 2px;

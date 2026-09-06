@@ -43,6 +43,13 @@ const AGENTS_CACHE_TTL: Duration = Duration::from_secs(60);
 /// find an old conversation, and an unbounded ask would make opening the menu cost more
 /// the longer the machine has been used.
 const SESSIONS_SHOWN: u32 = 12;
+/// How many conversations the toolbar asks each external agent for.
+///
+/// Larger than the Gateway's own, and deliberately: a coding agent accumulates a thread
+/// per task, so a person's day is two dozen of them, and a picker that showed half of
+/// what the window behind it lists is the bug this whole surface exists to fix. Still
+/// bounded — the menu scrolls, it does not grow forever.
+const THREADS_SHOWN: u32 = 25;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -232,6 +239,42 @@ pub(crate) struct GatewaySessionSummary {
     pub unread: Option<bool>,
 }
 
+/// A conversation held by an agent the Gateway knows about but does not own — a Claude
+/// Code thread, and whatever else registers a catalog later.
+///
+/// These are not Gateway sessions and the difference is not pedantic: the store can be
+/// empty while two dozen of these are open, which is exactly what a machine looks like
+/// when somebody works in a coding agent all day.
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CatalogThread {
+    pub thread_id: String,
+    pub name: Option<String>,
+    pub cwd: Option<String>,
+    pub git_branch: Option<String>,
+    pub archived: Option<bool>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CatalogHost {
+    #[serde(default)]
+    pub sessions: Vec<CatalogThread>,
+}
+
+#[derive(Clone, Deserialize)]
+pub(crate) struct SessionCatalog {
+    pub label: String,
+    #[serde(default)]
+    pub hosts: Vec<CatalogHost>,
+}
+
+#[derive(Clone, Deserialize)]
+pub(crate) struct SessionsCatalogListResult {
+    #[serde(default)]
+    pub catalogs: Vec<SessionCatalog>,
+}
+
 #[derive(Clone, Deserialize)]
 pub(crate) struct SessionsListResult {
     #[serde(default)]
@@ -315,6 +358,7 @@ struct SuspendResumeResponse {
 enum GatewayRequest {
     AgentsList,
     SessionsList,
+    SessionsCatalogList,
     ChatSend(ChatSendParams),
     RefreshCanvasSurface {
         observed_url: Option<String>,
@@ -332,6 +376,7 @@ enum GatewayRequest {
 enum GatewayResponse {
     AgentsList(AgentsListResult),
     SessionsList(SessionsListResult),
+    SessionsCatalogList(SessionsCatalogListResult),
     ChatSend(ChatSendAck),
     CanvasSurface(Option<String>),
     #[cfg(target_os = "linux")]
@@ -620,6 +665,20 @@ impl GatewayClient {
         let response = self.request(GatewayRequest::SessionsList).await?;
         let GatewayResponse::SessionsList(result) = response else {
             return Err("Gateway returned the wrong response for sessions.list.".to_string());
+        };
+        Ok(result)
+    }
+
+    /// The conversations somebody is holding in another agent altogether.
+    pub async fn sessions_catalog_list(&self) -> Result<SessionsCatalogListResult, String> {
+        if !self.is_connected() {
+            return Err("Gateway unreachable — retrying".to_string());
+        }
+        let response = self.request(GatewayRequest::SessionsCatalogList).await?;
+        let GatewayResponse::SessionsCatalogList(result) = response else {
+            return Err(
+                "Gateway returned the wrong response for sessions.catalog.list.".to_string(),
+            );
         };
         Ok(result)
     }
@@ -1532,6 +1591,23 @@ where
         GatewayRequest::SessionsList => request_sessions_list(socket, budget, dispatch)
             .await
             .map(GatewayResponse::SessionsList),
+        GatewayRequest::SessionsCatalogList => {
+            let payload = request_on_socket(
+                socket,
+                "sessions.catalog.list",
+                json!({ "limitPerHost": THREADS_SHOWN }),
+                budget,
+                dispatch,
+            )
+            .await?;
+            serde_json::from_value(payload)
+                .map(GatewayResponse::SessionsCatalogList)
+                .map_err(|error| {
+                    RequestFailure::transport(format!(
+                        "Invalid sessions.catalog.list response: {error}"
+                    ))
+                })
+        }
         GatewayRequest::ChatSend(params) => {
             let params = serde_json::to_value(params).map_err(|error| {
                 RequestFailure::transport(format!("Could not encode chat.send: {error}"))

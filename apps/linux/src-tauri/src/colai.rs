@@ -630,6 +630,190 @@ fn session_title(row: &crate::gateway_ws::GatewaySessionSummary) -> String {
     .unwrap_or_else(|| row.key.clone())
 }
 
+/// One conversation held in another agent, on the toolbar's menu.
+///
+/// `where_at` is the branch it sits on, which is what tells two threads of the same
+/// name apart — the same task picked up twice on different branches is ordinary.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ToolbarThread {
+    pub id: String,
+    pub title: String,
+    pub where_at: Option<String>,
+    pub receiving: bool,
+}
+
+/// The folder a set of those conversations belongs to.
+///
+/// `label` is `None` for threads with no project at all: they are listed loose rather
+/// than filed under an invented folder name, the same way the dashboard does it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ToolbarProject {
+    pub key: String,
+    pub holder: String,
+    pub label: Option<String>,
+    pub path: Option<String>,
+    pub threads: Vec<ToolbarThread>,
+}
+
+/// The conversations somebody has open somewhere other than the Gateway.
+///
+/// A machine can have an empty Gateway session store and two dozen of these — which is
+/// what the toolbar looked wrong about: it reported nothing while the window behind it
+/// listed a day's work. Archived threads are left out; they are history rather than
+/// somewhere to send a region.
+///
+/// Grouped by project here rather than in the page, and by the dashboard's own rule, so
+/// the two surfaces never disagree about which folder a conversation belongs to.
+#[tauri::command]
+pub(crate) async fn colai_threads(
+    gateway: tauri::State<'_, crate::gateway_ws::GatewayClient>,
+    receiving: Option<String>,
+) -> Result<Vec<ToolbarProject>, String> {
+    let listed = gateway.sessions_catalog_list().await?;
+    let chosen = receiving.as_deref();
+    let mut projects: Vec<ToolbarProject> = Vec::new();
+    for catalog in &listed.catalogs {
+        for host in &catalog.hosts {
+            for thread in &host.sessions {
+                if thread.archived.unwrap_or(false) {
+                    continue;
+                }
+                let path = thread.cwd.as_deref().and_then(project_root);
+                let key = format!("{}\u{1f}{}", catalog.label, path.as_deref().unwrap_or(""));
+                let into = match projects.iter().position(|project| project.key == key) {
+                    Some(at) => at,
+                    None => {
+                        projects.push(ToolbarProject {
+                            key,
+                            holder: catalog.label.clone(),
+                            label: path.as_deref().map(checkout_name),
+                            path: path.clone(),
+                            threads: Vec::new(),
+                        });
+                        projects.len() - 1
+                    }
+                };
+                projects[into].threads.push(ToolbarThread {
+                    receiving: chosen == Some(thread.thread_id.as_str()),
+                    id: thread.thread_id.clone(),
+                    title: thread_title(thread),
+                    where_at: named(thread.git_branch.as_deref()),
+                });
+            }
+        }
+    }
+    name_projects(&mut projects);
+    Ok(projects)
+}
+
+/// Give every folder a name that tells it apart from the others on the menu.
+///
+/// Two checkouts of the same repository, or two unrelated folders ending in the same
+/// word, are ordinary — and two rows both reading "colai" make the menu useless. Each
+/// duplicate takes one more parent segment until it stands alone, which is the least
+/// path that answers "which one".
+fn name_projects(projects: &mut [ToolbarProject]) {
+    let mut depth: Vec<usize> = vec![1; projects.len()];
+    loop {
+        let labels: Vec<Option<String>> = projects
+            .iter()
+            .enumerate()
+            .map(|(at, project)| project.path.as_deref().map(|path| tail_of(path, depth[at])))
+            .collect();
+        let mut clashing = false;
+        for at in 0..projects.len() {
+            let Some(mine) = labels[at].as_deref() else {
+                continue;
+            };
+            let shared = labels
+                .iter()
+                .enumerate()
+                .any(|(other, label)| other != at && label.as_deref() == Some(mine));
+            // Only grow while there is more path to grow into. Two identical paths
+            // cannot be told apart, and looping over them would hang the menu.
+            if shared && segments(projects[at].path.as_deref().unwrap_or("")) > depth[at] {
+                depth[at] += 1;
+                clashing = true;
+            }
+        }
+        if !clashing {
+            for (at, project) in projects.iter_mut().enumerate() {
+                project.label = labels[at].clone();
+            }
+            return;
+        }
+    }
+}
+
+/// The last `many` segments of a path, as somebody would say them.
+fn tail_of(path: &str, many: usize) -> String {
+    let parts: Vec<&str> = path
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty())
+        .collect();
+    let from = parts.len().saturating_sub(many.max(1));
+    let tail = parts[from..].join("/");
+    if tail.is_empty() {
+        path.to_string()
+    } else {
+        tail
+    }
+}
+
+fn segments(path: &str) -> usize {
+    path.split(['/', '\\'])
+        .filter(|part| !part.is_empty())
+        .count()
+}
+
+/// What to call a thread: its own name, then the folder it runs in, then its id.
+fn thread_title(thread: &crate::gateway_ws::CatalogThread) -> String {
+    named(thread.name.as_deref())
+        .or_else(|| thread.cwd.as_deref().map(checkout_name))
+        .unwrap_or_else(|| thread.thread_id.clone())
+}
+
+/// The checkout a working directory belongs to, or `None` when it names no project.
+///
+/// A worktree under `.claude/worktrees/<name>` folds into the repository it came from,
+/// because a person thinks of those as one project and the dashboard already groups them
+/// that way. The first marker wins, which is the outermost repository.
+fn project_root(cwd: &str) -> Option<String> {
+    let trimmed = named(Some(cwd))?;
+    let trimmed = trimmed.trim_end_matches(['/', '\\']);
+    for marker in ["/.claude/worktrees/", "\\.claude\\worktrees\\"] {
+        let Some(at) = trimmed.find(marker) else {
+            continue;
+        };
+        // A worktree needs a name after the marker; the folder itself is not one.
+        if trimmed[at + marker.len()..]
+            .starts_with(|character| character == '/' || character == '\\')
+        {
+            continue;
+        }
+        let origin = &trimmed[..at];
+        return (!origin.is_empty()).then(|| origin.to_string());
+    }
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+/// The name a checkout goes by: its last path segment.
+fn checkout_name(path: &str) -> String {
+    path.rsplit(['/', '\\'])
+        .find(|segment| !segment.is_empty())
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn named(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -646,6 +830,85 @@ mod tests {
             status: None,
             unread: None,
         }
+    }
+
+    fn thread(id: &str) -> crate::gateway_ws::CatalogThread {
+        crate::gateway_ws::CatalogThread {
+            thread_id: id.to_string(),
+            name: None,
+            cwd: None,
+            git_branch: None,
+            archived: None,
+        }
+    }
+
+    #[test]
+    fn a_thread_falls_back_to_the_folder_it_runs_in() {
+        let mut unnamed = thread("c94530b7");
+        unnamed.cwd = Some("/home/someone/Desktop/colai/".to_string());
+        assert_eq!(thread_title(&unnamed), "colai");
+        // Nothing at all leaves the id, which at least identifies the row.
+        assert_eq!(thread_title(&thread("c94530b7")), "c94530b7");
+    }
+
+    #[test]
+    fn a_worktree_belongs_to_the_repository_it_came_from() {
+        // Otherwise a week of worktrees becomes a week of one-conversation projects.
+        assert_eq!(
+            project_root("/home/someone/colai/.claude/worktrees/fix-the-rail").as_deref(),
+            Some("/home/someone/colai"),
+        );
+        assert_eq!(
+            project_root("/home/someone/colai/").as_deref(),
+            Some("/home/someone/colai"),
+        );
+        assert_eq!(checkout_name("/home/someone/colai"), "colai");
+    }
+
+    fn project(path: &str) -> ToolbarProject {
+        ToolbarProject {
+            key: path.to_string(),
+            holder: "Claude Code".to_string(),
+            label: Some(checkout_name(path)),
+            path: Some(path.to_string()),
+            threads: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn folders_that_share_a_name_take_enough_path_to_tell_them_apart() {
+        let mut projects = [
+            project("/home/someone/Desktop/colai"),
+            project("/home/someone/code/colai"),
+            project("/home/someone/code/arc"),
+        ];
+        name_projects(&mut projects);
+        assert_eq!(projects[0].label.as_deref(), Some("Desktop/colai"));
+        assert_eq!(projects[1].label.as_deref(), Some("code/colai"));
+        // The one that was already unique keeps its short name.
+        assert_eq!(projects[2].label.as_deref(), Some("arc"));
+    }
+
+    #[test]
+    fn folders_that_cannot_be_told_apart_stop_growing() {
+        // Identical paths have no distinguishing segment left; growing forever would
+        // hang the menu rather than admit that.
+        let mut same = [
+            project("/home/someone/colai"),
+            project("/home/someone/colai"),
+        ];
+        name_projects(&mut same);
+        assert_eq!(same[0].label.as_deref(), Some("home/someone/colai"));
+        assert_eq!(same[1].label.as_deref(), Some("home/someone/colai"));
+    }
+
+    #[test]
+    fn a_directory_that_names_no_project_is_left_ungrouped() {
+        // A worktree with no origin above it, and a path that is only separators: both
+        // are filed loose rather than under an invented folder.
+        assert_eq!(project_root("/.claude/worktrees/orphan"), None);
+        assert_eq!(project_root("///"), None);
+        assert_eq!(project_root("   "), None);
     }
 
     #[test]

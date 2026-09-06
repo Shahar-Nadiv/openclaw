@@ -183,6 +183,12 @@ const state = {
   reserved: NOTHING_RESERVED,
   agents: [],
   sessions: [],
+  // Conversations held elsewhere, already grouped by the folder they belong to.
+  projects: [],
+  // Which of those folders are open. A menu of two dozen threads is unreadable flat,
+  // and a menu of only folders shows nothing, so what is open is the thing being
+  // remembered rather than a default applied to everybody.
+  opened: new Set(),
   // Null while the lists are good, a message while the Gateway could not be asked. The
   // two are different facts and the rail says which.
   whoTrouble: null,
@@ -290,7 +296,10 @@ function use(tool) {
  */
 function receiver() {
   if (state.receiving.id === null) return null;
-  if (state.receiving.kind === "session") {
+  if (state.receiving.kind === "thread") {
+    const thread = everyThread().find((row) => row.id === state.receiving.id);
+    if (thread) return { name: thread.title, emoji: null };
+  } else if (state.receiving.kind === "session") {
     const session = state.sessions.find((row) => row.key === state.receiving.id);
     if (session) return { name: session.title, emoji: emojiFor(session) };
   } else {
@@ -300,6 +309,47 @@ function receiver() {
   // Off the list rather than gone. The remembered name is what was true when it was
   // picked, which is a better answer than pretending nobody is receiving.
   return state.receiving.name ? { name: state.receiving.name, emoji: state.receiving.emoji } : null;
+}
+
+/**
+ * How many conversations there are to hand something to.
+ *
+ * Gateway sessions and threads held elsewhere counted as one number, because that is
+ * how somebody counts them: they are all conversations, and which process is holding
+ * one is the sort of distinction a rail with room for four words should not spend.
+ */
+function talking() {
+  return state.sessions.length + everyThread().length;
+}
+
+/** Every conversation held elsewhere, folders flattened away. */
+function everyThread() {
+  return state.projects.flatMap((project) => project.threads);
+}
+
+/**
+ * Which folders are open, counting the ones that have no choice about it.
+ *
+ * A folder holding the conversation currently receiving stays open, because a menu that
+ * hides the row it is describing is a menu you cannot check. And a lone folder is opened
+ * too: one collapsed row is a list of nothing.
+ */
+function openedProjects() {
+  const open = new Set(state.opened);
+  if (state.projects.length === 1) open.add(state.projects[0].key);
+  if (state.receiving.kind === "thread") {
+    const holding = state.projects.find((project) =>
+      project.threads.some((thread) => thread.id === state.receiving.id),
+    );
+    if (holding) open.add(holding.key);
+  }
+  return open;
+}
+
+function toggleProject(key) {
+  if (state.opened.has(key)) state.opened.delete(key);
+  else state.opened.add(key);
+  render();
 }
 
 /** A session wears its agent's face, so the two lists read as one set of people. */
@@ -330,12 +380,14 @@ async function loadWho() {
   try {
     // Asked together, because the menu shows them together: two answers a second apart
     // would let the rail claim a receiver that the list below it does not offer.
-    const [agents, sessions] = await Promise.all([
+    const [agents, sessions, projects] = await Promise.all([
       invoke("colai_agents", { receiving: pick("agent") }),
       invoke("colai_sessions", { receiving: pick("session") }),
+      invoke("colai_threads", { receiving: pick("thread") }),
     ]);
     state.agents = agents || [];
     state.sessions = sessions || [];
+    state.projects = projects || [];
     // Nobody picked yet, so the Gateway's own default stands in — the first thing
     // somebody marks still has somewhere to go.
     if (state.receiving.id === null) {
@@ -634,13 +686,13 @@ function render() {
   mark.textContent = who && who.emoji ? who.emoji : "";
   buttons.agents.querySelector(".agents-who").textContent = who
     ? who.name
-    : state.agents.length || state.sessions.length
+    : state.agents.length || talking()
       ? "Choose who receives"
       : "Agents";
   buttons.agents.querySelector(".agents-running").textContent = state.whoTrouble
     ? "unavailable"
     : counted(state.agents.length, "agent") +
-      (state.sessions.length ? ` · ${counted(state.sessions.length, "session")}` : "");
+      (talking() ? ` · ${counted(talking(), "conversation")}` : "");
 
   for (const button of document.querySelectorAll(".row[data-tool]")) {
     button.setAttribute("aria-pressed", String(button.dataset.tool === state.tool));
@@ -693,7 +745,7 @@ function drawWho() {
     el.agentRows.replaceChildren(said);
     return;
   }
-  if (state.agents.length === 0 && state.sessions.length === 0) {
+  if (state.agents.length === 0 && talking() === 0) {
     const empty = document.createElement("p");
     empty.className = "agent-empty";
     empty.textContent = "Nobody yet. Start a conversation in the OpenClaw window and it appears here.";
@@ -732,7 +784,65 @@ function drawWho() {
       );
     }
   }
+  // Grouped under whoever holds them, then under the folder each belongs to, because
+  // "Claude Code" and "which project" are the two things you need before a thread's own
+  // name means anything.
+  const open = openedProjects();
+  let holder = null;
+  for (const project of state.projects) {
+    if (project.holder !== holder) {
+      holder = project.holder;
+      rows.push(group(holder));
+    }
+    // A folder with no name holds threads that belong to no project; they are listed
+    // where they are rather than filed under something invented.
+    if (project.label === null) {
+      rows.push(...project.threads.map(threadRow));
+      continue;
+    }
+    rows.push(projectRow(project, open.has(project.key)));
+    if (open.has(project.key)) rows.push(...project.threads.map(threadRow));
+  }
   el.agentRows.replaceChildren(...rows);
+}
+
+/** A folder, as a row that opens. */
+function projectRow(project, open) {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "row row-project";
+  row.setAttribute("aria-expanded", String(open));
+  if (project.path) row.title = project.path;
+
+  const twist = document.createElement("span");
+  twist.className = "twist";
+  twist.textContent = "▸";
+  twist.dataset.open = String(open);
+
+  const label = document.createElement("span");
+  label.className = "agent-name";
+  label.textContent = project.label;
+
+  const many = document.createElement("span");
+  many.className = "row-key";
+  many.textContent = String(project.threads.length);
+
+  row.append(twist, label, many);
+  row.addEventListener("click", () => toggleProject(project.key));
+  return row;
+}
+
+/** A conversation inside a folder, indented under it. */
+function threadRow(thread) {
+  const row = whoRow({
+    face: thread.title.slice(0, 1).toUpperCase(),
+    name: thread.title,
+    note: thread.whereAt,
+    receiving: state.receiving.kind === "thread" && state.receiving.id === thread.id,
+    onPick: () => receive("thread", thread.id, thread.title, null),
+  });
+  row.classList.add("row-nested");
+  return row;
 }
 
 function group(label) {
