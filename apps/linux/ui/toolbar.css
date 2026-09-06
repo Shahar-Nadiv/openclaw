@@ -126,6 +126,83 @@ body {
     background 160ms ease-out,
     color 160ms ease-out;
 }
+/*
+ * Folding the exact tools shut, and opening them out again — on the rail, in place.
+ *
+ * They close rather than disappear: width to nothing, padding to nothing, and a small
+ * shrink on the way out, so the six read as one motion instead of six things blinking
+ * off. The negative margin cancels the gap that sits before each of them — without it,
+ * six collapsed keys leave a twenty-four pixel hole where they used to be.
+ *
+ * The two directions are not mirror images, because they do not look the same. Opening,
+ * the glyphs come in with the space they are taking, or the rail spends half the
+ * animation as a wide empty gap. Closing, they fade out first and the gap shuts after
+ * them, so nothing is dragged sideways while it is still legible.
+ *
+ * `visibility` is what keeps this honest for anything not looking at pixels. It does
+ * not animate, but it obeys a delay: held until the width has finished closing on the
+ * way out, dropped at once on the way in. So a folded key leaves the tab order and the
+ * screen reader exactly when it leaves the screen, and never before it.
+ */
+.key[data-folded="false"] {
+  max-width: 140px;
+  max-height: 34px;
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition:
+    max-width 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    max-height 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    min-width 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    padding 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    margin 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 200ms ease-out,
+    background 160ms ease-out,
+    color 160ms ease-out,
+    visibility 0s;
+}
+.key[data-folded="true"] {
+  max-width: 0;
+  max-height: 0;
+  min-width: 0;
+  padding: 0;
+  opacity: 0;
+  visibility: hidden;
+  overflow: hidden;
+  transform: scale(0.7);
+  transition:
+    max-width 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    max-height 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    min-width 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    padding 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    margin 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 110ms ease-in,
+    visibility 0s linear 220ms;
+}
+/* The gap runs along the rail, so which margin cancels it depends on which way the
+   rail is lying. */
+.rail-wrap[data-vertical="false"] .key[data-folded="true"] {
+  margin-left: -4px;
+}
+.rail-wrap[data-vertical="true"] .key[data-folded="true"] {
+  margin-top: -4px;
+}
+/* The caret turns with them, so the key says which way the next click goes. */
+.caret {
+  transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.key[data-turn="true"] .caret {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .key[data-folded],
+  .caret {
+    transition: none;
+  }
+}
+
 .key:hover:not([disabled]):not([aria-pressed="true"]) {
   background: rgb(255 255 255 / 8%);
   color: #f7f7f8;

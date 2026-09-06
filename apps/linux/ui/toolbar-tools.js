@@ -307,6 +307,16 @@ function automationFor(marks, mode, text, surface) {
   return said.join("\n");
 }
 
+/**
+ * How long the exact tools take to fold — the stylesheet's number, restated.
+ *
+ * The page has to know when the rail has stopped changing size so it can stop
+ * re-measuring the clickable region, and CSS cannot tell it. Restated rather than
+ * guessed, and the toolbar's test suite reads the duration back out of the stylesheet
+ * to keep the two from drifting.
+ */
+const FOLD_TIME = 220;
+
 /** How far an opened answer sits from the pin it belongs to, on whichever side it fits. */
 const ANSWER_AWAY = 18;
 

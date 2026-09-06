@@ -34,6 +34,8 @@ const GLYPHS = {
     '<path d="M3 3.5h7M3 3.5v7M21 3.5h-7M21 3.5v7M3 20.5h7M3 20.5v-7M21 20.5h-7M21 20.5v-7"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
   colour:
     '<path d="M12 3.5s6 6.4 6 10.1a6 6 0 0 1-12 0C6 9.9 12 3.5 12 3.5z"/><path d="M8.6 14.4a3.4 3.4 0 0 0 3.4 3.2"/>',
+  more:
+    '<circle cx="6" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="18" r="1.7" fill="currentColor" stroke="none"/>',
   watch:
     '<path d="M2 12s3.8-6.5 10-6.5S22 12 22 12s-3.8 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/>',
 };
@@ -121,8 +123,15 @@ function buildRail() {
   );
   dividers[1].after(edits);
 
+  // The exact tools, and the key that folds them out of the way.
+  //
+  // Folding happens on the rail itself: the six close up where they stand and the rail
+  // gets shorter, rather than moving into a menu. A menu would be a second place to go
+  // looking for a tool, and the whole reason to fold anything is that a rail is easier
+  // to read when it is shorter — not that somewhere else is a better home for them.
   const exact = document.createDocumentFragment();
   exact.append(
+    key("exact", "Measure, colour, record…", "more", toggleTucked, true),
     key("measure", "Measure · M", "measure", () => use("measure")),
     key("colour", "Colour · C", "colour", () => use("colour")),
     key("record", "Record · R · right-click for how long", "record", () => use("record")),
@@ -202,6 +211,40 @@ function length(into, seconds) {
     use("record");
   });
   into.append(button);
+}
+
+/** The tools that fold away together, in the order they sit on the rail. */
+const EXACT = ["measure", "colour", "record", "compare", "watch", "inspect"];
+
+/** Fold them shut, or open them out, and remember which. */
+function toggleTucked() {
+  state.tucked = !state.tucked;
+  state.open = null;
+  remember();
+  render();
+  followTheFold();
+}
+
+/**
+ * Keep the clickable region on the rail while the rail is still changing size.
+ *
+ * The shape is measured from the drawn rectangle, and for the fifth of a second the
+ * keys are opening or closing the drawn rectangle is a different size every frame.
+ * Measured once at the start, the toolbar spends that fifth of a second answering the
+ * pointer where it used to be — which is silent, and indistinguishable from a dead
+ * button.
+ */
+let following = 0;
+function followTheFold() {
+  cancelAnimationFrame(following);
+  // A few frames past the end: six keys finish six transitions at slightly different
+  // moments, and the last one is not reliably the one that settles the width.
+  const until = Date.now() + FOLD_TIME + 60;
+  const again = () => {
+    clamp();
+    if (Date.now() < until) following = requestAnimationFrame(again);
+  };
+  again();
 }
 
 function row(into, tool, label, glyph, press) {

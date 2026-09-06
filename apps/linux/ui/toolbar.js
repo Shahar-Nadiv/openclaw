@@ -85,6 +85,10 @@ const state = {
   // defaults each time rather than kept: a schedule is about one piece of work, and
   // yesterday's interval sitting in the box is a job somebody creates by accident.
   cron: { ...AUTOMATION_FIRST },
+  // Whether the exact tools are folded shut. Open to begin with — the rail is what
+  // this toolbar is, and a first look at it should be the whole thing. Remembered with
+  // the dock, because it is the same kind of fact: how somebody wants this to sit.
+  tucked: false,
   // The regions being watched. Each one is a mark that has had its "before" taken and
   // is waiting for the world to move.
   watching: [],
@@ -143,6 +147,18 @@ function render() {
       button.title = state.comparing
         ? "Capture the after · A"
         : "Before and after · A";
+    } else if (id === "exact") {
+      // Lit while the tool in your hand is one of the folded ones, because a folded
+      // rail has no other way of saying which tool is out.
+      button.setAttribute(
+        "aria-pressed",
+        String(state.tucked && EXACT.includes(state.tool)),
+      );
+      button.title = state.tucked ? "Show measure, colour, record…" : "Fold these away";
+      button.setAttribute("aria-expanded", String(!state.tucked));
+      // One mark that turns says "this opens and closes". Two different marks would say
+      // "these are two different buttons".
+      button.dataset.turn = String(!state.tucked);
     } else if (id === "watch") {
       // Pressed means "this is the tool in your hand", the same as every other key —
       // a running watch is not a held tool, and lighting it the same way made the rail
@@ -193,6 +209,12 @@ function render() {
   el.flyShape.hidden = state.open !== "shape";
   el.flyDesign.hidden = state.open !== "design";
   el.flyAutomate.hidden = state.open !== "automate";
+  // Folded, the six close up where they stand rather than vanishing — the stylesheet
+  // animates it and `data-folded` is what it animates between. Not `hidden`: a key that
+  // disappears takes two hundred pixels of rail with it in one frame, and a toolbar
+  // that changes length between two blinks reads as a glitch, not as a thing that
+  // folded.
+  for (const tool of EXACT) buttons[tool].dataset.folded = String(state.tucked);
   if (state.open === "automate") drawAutomation();
   el.flyRecord.hidden = state.open !== "record";
   for (const button of el.flyRecord.children) {

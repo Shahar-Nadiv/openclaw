@@ -119,6 +119,7 @@ type ToolbarHelpers = {
   AUTOMATION_FIRST: Cron;
   UNITS: Record<string, { label: string; ms: number }>;
   REPEATS: Record<string, { label: string }>;
+  FOLD_TIME: number;
 };
 
 /** The automation being written, as the panel holds it. */
@@ -138,7 +139,7 @@ type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME };`,
   context,
 );
 const {
@@ -176,6 +177,7 @@ const {
   AUTOMATION_FIRST,
   UNITS,
   REPEATS,
+  FOLD_TIME,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -1108,5 +1110,50 @@ describe("scheduling what was marked", () => {
     const said = automationFor([{ tool: "box" }, { tool: "box" }], "ask", "Look here.", null);
     expect(said).not.toContain("About:");
     expect(said).toContain("Look here.");
+  });
+});
+
+describe("folding the exact tools on the rail", () => {
+  const sheet = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+
+  test("the page and the stylesheet agree on how long it takes", () => {
+    // The page re-measures the clickable region every frame while the rail is changing
+    // size, and stops when it believes the motion has. Believe it too early and the
+    // toolbar spends the rest of the animation answering the pointer where it used to
+    // be — silent, and indistinguishable from a dead button. CSS cannot tell it the
+    // number, so this checks the restatement against the source.
+    const folding = /\.key\[data-folded="true"\][\s\S]*?transition:([\s\S]*?);/.exec(sheet)?.[1];
+    assert.ok(folding, "the folded key's transition");
+    expect(Math.max(...[...folding.matchAll(/(\d+)ms/g)].map((f) => Number(f[1])))).toBe(FOLD_TIME);
+  });
+
+  test("a folded key leaves the tab order exactly when it leaves the screen", () => {
+    // Dropped at the start of the close it vanishes before it has finished closing;
+    // never dropped at all, it stays focusable while invisible — a button somebody can
+    // tab to and cannot see, which is the worse of the two.
+    const closing = /\.key\[data-folded="true"\][\s\S]*?\}/.exec(sheet);
+    assert.ok(closing, "the folded key's rules");
+    expect(closing[0]).toContain("visibility: hidden");
+    expect(closing[0]).toContain(`visibility 0s linear ${FOLD_TIME}ms`);
+
+    const opening = /\.key\[data-folded="false"\][\s\S]*?\}/.exec(sheet);
+    assert.ok(opening, "the unfolded key's rules");
+    expect(opening[0]).toContain("visibility: visible");
+    expect(opening[0]).not.toContain("visibility 0s linear");
+  });
+
+  test("the gap before a folded key is cancelled on whichever way the rail lies", () => {
+    // Six keys of zero width still sit in six gaps. Without the negative margin they
+    // leave a twenty-four pixel hole exactly where they used to be, which is the one
+    // outcome folding was meant to avoid.
+    expect(sheet).toContain('.rail-wrap[data-vertical="false"] .key[data-folded="true"]');
+    expect(sheet).toContain('.rail-wrap[data-vertical="true"] .key[data-folded="true"]');
+  });
+
+  test("nothing about this lives in a menu", () => {
+    // Folding is a thing the rail does to itself. A menu would be a second place to go
+    // looking for a tool, which is worse than the long rail it was meant to fix.
+    const page = readFileSync(new URL("../apps/linux/ui/toolbar.html", import.meta.url), "utf8");
+    expect(page).not.toContain("fly-exact");
   });
 });
