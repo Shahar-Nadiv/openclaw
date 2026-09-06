@@ -166,8 +166,8 @@ function addMark(mark) {
   // change both in the popup; starting empty would mean typing a path they had no
   // reason to know before they could ask for the commonest thing on the menu.
   if (mark.tool === "design") {
-    mark.design = DESIGN_FIRST;
-    mark.dest = DESIGNS[DESIGN_FIRST].home;
+    mark.design = state.designKind;
+    mark.dest = (DESIGNS[state.designKind] || DESIGNS[DESIGN_FIRST]).home;
   }
   state.marks.push(mark);
   // A new mark ends the redo trail: what was undone is no longer what comes next.

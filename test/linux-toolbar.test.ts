@@ -99,6 +99,7 @@ type ToolbarHelpers = {
     {
       label: string;
       chip?: string;
+      glyph?: string;
       home: string | null;
       says: (file: string, home: string) => string;
     }
@@ -939,6 +940,24 @@ describe("the design family", () => {
         expect(kind.chip).toBeUndefined();
       }
     }
+  });
+
+  test("every kind is on the menu under its own mark", () => {
+    // The whole family used to hide behind one row called "Design", with the choice in
+    // the popup that opened after you had already marked something — so somebody
+    // looking for a design system opened the menu, did not see one, and concluded the
+    // toolbar could not do it. Each kind names itself now, and needs an icon to do so.
+    const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+    const drawn = new Set(
+      [...rail.matchAll(/^ {2}(\w+):$|^ {2}(\w+):\s*'/gm)].map((found) => found[1] ?? found[2]),
+    );
+    for (const [id, kind] of Object.entries(DESIGNS)) {
+      expect(kind.glyph, id).toBeTruthy();
+      expect(drawn.has(kind.glyph!), `${id} wears ${kind.glyph}`).toBe(true);
+    }
+    // And no two of them wear the same one, or the menu is five rows saying one thing.
+    const marks = Object.values(DESIGNS).map((kind) => kind.glyph);
+    expect(new Set(marks).size).toBe(marks.length);
   });
 
   test("a component has no home, because only the repository knows where they live", () => {

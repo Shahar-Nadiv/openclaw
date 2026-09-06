@@ -85,6 +85,9 @@ const state = {
   // defaults each time rather than kept: a schedule is about one piece of work, and
   // yesterday's interval sitting in the box is a job somebody creates by accident.
   cron: { ...AUTOMATION_FIRST },
+  // Which kind of design the next design mark asks for. Chosen on the menu, and
+  // changeable on the mark itself afterwards.
+  designKind: DESIGN_FIRST,
   // Whether the exact tools are folded shut. Open to begin with — the rail is what
   // this toolbar is, and a first look at it should be the whole thing. Remembered with
   // the dock, because it is the same kind of fact: how somebody wants this to sit.
@@ -136,6 +139,10 @@ function render() {
           state.tool === "design" || state.tool === "screenshot" || state.open === "design",
         ),
       );
+      button.title =
+        state.tool === "design"
+          ? `Design · ${(DESIGNS[state.designKind] || DESIGNS[DESIGN_FIRST]).label}`
+          : "Design";
     } else if (id === "agents") {
       button.setAttribute("aria-pressed", String(state.open === "agents"));
     } else if (id === "send") {
@@ -199,7 +206,12 @@ function render() {
       (talking() ? ` · ${counted(talking(), "conversation")}` : "");
 
   for (const button of document.querySelectorAll(".row[data-tool]")) {
-    button.setAttribute("aria-pressed", String(button.dataset.tool === state.tool));
+    // Five of these rows are the same tool and differ only in what they ask it for, so
+    // "is this the current tool" would light all five at once.
+    const chosen =
+      button.dataset.tool === state.tool &&
+      (!button.dataset.design || button.dataset.design === state.designKind);
+    button.setAttribute("aria-pressed", String(chosen));
   }
 
   const waiting = chosenMarks().length;

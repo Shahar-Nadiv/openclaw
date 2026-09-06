@@ -79,6 +79,7 @@ const MODES = {
 const DESIGNS = {
   wireframe: {
     label: "Wireframe",
+    glyph: "wireframe",
     home: "docs/Design/",
     says: (file, home) =>
       `Turn ${file} into a wireframe and write it to ${home}, matching the .dc.html ` +
@@ -87,6 +88,7 @@ const DESIGNS = {
   },
   redline: {
     label: "Redline",
+    glyph: "redline",
     home: "docs/Design/",
     says: (file, home) =>
       `Measure ${file} and write the spec to ${home}: spacing between elements, type ` +
@@ -96,6 +98,7 @@ const DESIGNS = {
   },
   component: {
     label: "Component",
+    glyph: "component",
     home: null,
     says: (file) =>
       `Build ${file} as a component in the framework this project already uses. Read ` +
@@ -108,6 +111,7 @@ const DESIGNS = {
     // The one label too long for a chip beside four others. Said in full wherever
     // there is room for it, which is everywhere except the chip itself.
     chip: "System",
+    glyph: "system",
     home: "docs/Design/",
     says: (file, home) =>
       `Build a design system out of ${file} and write it to ${home}. Cover the ` +
@@ -120,6 +124,7 @@ const DESIGNS = {
   },
   tokens: {
     label: "Tokens",
+    glyph: "tokens",
     home: "docs/Design/",
     says: (file, home) =>
       `Pull the design tokens out of ${file} — colours, spacing steps, type scale, ` +
