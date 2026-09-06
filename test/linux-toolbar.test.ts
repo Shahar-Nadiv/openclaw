@@ -705,3 +705,66 @@ describe("what a recording shows while it runs", () => {
     expect(secondsLeft(10_000, 12_500)).toBe(0);
   });
 });
+
+describe("watching a region", () => {
+  test("a watch reads as a mark that only marks, like everything else here", () => {
+    // It runs on its own for twenty minutes, which is exactly why it must not be the
+    // one tool that quietly gained the right to change something.
+    expect(TOOLS.watch!.writes).toBe(false);
+    expect(gateFor("watch", { app: "Terminal", connector: null }).blocked).toBe(false);
+  });
+
+  test("a watch is dragged out as a region, because it has to have an area to look at", () => {
+    expect(DRAWS.watch).toBe("box");
+  });
+
+  test("the pair says what happened to it, because nobody was there when it did", () => {
+    // Two pictures of the same region with no account of why they arrived is a puzzle.
+    // The line is what makes them a before and an after.
+    expect(detailOf({ tool: "watch", frames: 2 })).toContain("changed");
+    expect(detailOf({ tool: "watch", frames: 2 })).toContain("before");
+  });
+
+  test("a watch still waiting has nothing to say about itself", () => {
+    // One picture is a region somebody marked, not a change. Describing it as one
+    // before anything has happened would be the toolbar reporting its own hopes.
+    expect(detailOf({ tool: "watch", frames: 1 })).toBeNull();
+  });
+
+  test("the message names both pictures in order", () => {
+    const said = summaryFor([{ tool: "watch", frames: 2 }], "ask", "", {
+      app: "Terminal",
+      connector: null,
+    });
+    expect(said).toContain("1. Watch (mark-1-1.png … mark-1-2.png)");
+  });
+
+  test("neither picture in the pair wears a mark", () => {
+    // Whatever is drawn on the "before" and not on the "after" is the one difference an
+    // agent can be certain of, and it would be ours. The crop is the statement, the way
+    // it is for a before-and-after. This is the page's half of a rule whose other half
+    // is `drawn_as` in colai_capture.rs, which leaves both bare.
+    const bare = readFileSync(
+      new URL("../apps/linux/src-tauri/src/colai_capture.rs", import.meta.url),
+      "utf8",
+    );
+    const list = /fn drawn_as[\s\S]*?matches!\([\s\S]*?mark\.tool\.as_str\(\),([\s\S]*?)\)/.exec(
+      bare,
+    );
+    assert.ok(list, "the tools drawn_as leaves bare");
+    expect(list[1]).toContain('"watch"');
+    expect(list[1]).toContain('"compare"');
+  });
+
+  test("the marker clears the pixels the pair is taken from", () => {
+    // The same rule as a recording's frame, and the reason is sharper here: a watch
+    // marker sits on screen for twenty minutes, so a marker inside the crop would be in
+    // the "after" and not in the "before", and the only change an agent could be sure
+    // of would be ours.
+    const screen = { width: 1920, height: 1080 };
+    const box = { x: 0.4, y: 0.4, w: 0.2, h: 0.2 };
+    const frame = recordFrame(box, screen);
+    expect((box.x - frame.x) * screen.width).toBeGreaterThan(12);
+    expect((box.y - frame.y) * screen.height).toBeGreaterThan(12);
+  });
+});

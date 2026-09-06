@@ -492,6 +492,12 @@ pub(crate) fn colai_release(app: AppHandle) -> Result<(), String> {
             *held = None;
         }
     }
+    // Nothing keeps watching a screen the toolbar has been sent away from. A watch is
+    // the one thing here that runs while nobody is looking at it, and a marker it can
+    // no longer draw is a watch nobody can see, stop, or remember arming.
+    if let Some(watches) = app.try_state::<crate::colai_watch::Watches>() {
+        watches.disarm_all();
+    }
     Ok(())
 }
 

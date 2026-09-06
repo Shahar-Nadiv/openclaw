@@ -108,8 +108,25 @@ function needsAgreeing() {
  * a decision about the marks somebody made and belongs beside them. The shell resolves
  * the receiver, attaches the pictures and reports what happened.
  */
-async function sendMarks(ids) {
-  if (state.sending) return;
+/**
+ * Send marks to whoever is receiving.
+ *
+ * `alone` is for a send nobody asked for at that moment — a watch firing while somebody
+ * is in another window. It carries the mark and nothing else, and leaves the composer
+ * exactly as it was found: clearing a half-written note and putting somebody's tool
+ * away because a build finished is the toolbar taking their turn.
+ */
+async function sendMarks(ids, alone) {
+  if (state.sending) {
+    // A send nobody pressed a button for cannot just evaporate because one was already
+    // in the air. The pair is in the tray with both its pictures; this says so, and it
+    // can go by hand.
+    if (alone) {
+      state.trouble = "A watched region changed while another send was going out. It is waiting in the tray.";
+      render();
+    }
+    return;
+  }
   const who = receiverNow();
   if (!who) {
     state.trouble = "Nobody is receiving. Choose an agent or a conversation first.";
@@ -133,29 +150,42 @@ async function sendMarks(ids) {
   try {
     const sent = await invoke("colai_send", {
       receiver: who,
-      message: summaryFor(going, state.mode, state.text, state.surface, state.files),
+      message: summaryFor(
+        going,
+        state.mode,
+        alone ? "" : state.text,
+        state.surface,
+        alone ? [] : state.files,
+      ),
       markIds: ids,
       // Only the ones that travel. What is named rather than carried is already in the
       // message as a path, and sending it twice would mean encoding a gigabyte to say
       // something the sentence above it already said.
-      files: carrying(state.files)
-        .filter((file) => file.carried)
-        .map((file) => file.path),
+      files: alone
+        ? []
+        : carrying(state.files)
+            .filter((file) => file.carried)
+            .map((file) => file.path),
     });
     if (who.kind === "thread") state.adopted = [...state.adopted, who.id];
     // What went is gone; what was left unticked is still there, which is the whole
     // point of being able to untick it.
     state.marks = state.marks.filter((mark) => !ids.includes(mark.id));
-    state.files = [];
-    state.text = "";
-    state.popup = null;
-    state.open = null;
+    if (!alone) {
+      state.files = [];
+      state.text = "";
+      state.popup = null;
+      state.open = null;
+    }
     // And put the tool away. A marking tool holds a sheet of glass over the whole desk
     // that swallows every click on it, which is what marking needs and is the opposite
     // of what somebody needs the moment they have finished. Sending is the end of the
     // gesture: what was marked has gone, and leaving the desktop deaf until they
     // thought to press Escape is not something anybody asked for.
-    state.tool = "pointer";
+    //
+    // Not when nobody asked, though: a watch that fires while somebody is drawing a
+    // box would take the tool out of their hand mid-drag.
+    if (!alone) state.tool = "pointer";
     // Where to put the answer when it comes. The marks are about to be cleared, so the
     // place they were asking about has to be kept now or the reply has nowhere to land
     // — which was the whole trouble with this surface: you sent, and nothing ever came
@@ -278,8 +308,17 @@ function drawPopup() {
   now.type = "button";
   now.className = "popup-do popup-go";
   now.disabled = state.sending;
-  now.textContent = state.sending ? "Sending…" : needsAgreeing() ? "Send and adopt" : "Send now";
-  now.addEventListener("click", () => void sendMarks([mark.id]));
+  // A watch is not sent now — that is the whole point of it. The note above travels
+  // with the pair when it fires, so this is where somebody says what they are waiting
+  // for and then agrees to be told about it.
+  if (mark.tool === "watch") {
+    now.textContent = "Watch this";
+    now.title = `Tell ${state.receiving.name || "whoever receives"} when this changes`;
+    now.addEventListener("click", () => void startWatching(mark));
+  } else {
+    now.textContent = state.sending ? "Sending…" : needsAgreeing() ? "Send and adopt" : "Send now";
+    now.addEventListener("click", () => void sendMarks([mark.id]));
+  }
   foot.append(to, keep, now);
   rows.push(foot);
 

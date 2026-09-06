@@ -392,6 +392,36 @@ body {
   display: none;
 }
 
+/*
+ * How many regions are being watched right now.
+ *
+ * Shaped like the send key's count and coloured differently: that one is work waiting
+ * for somebody to press a button, and this one is work already running with nobody
+ * watching it. The outline rather than the fill is what says "still going" without
+ * claiming to be the tool in your hand.
+ */
+.watch-many {
+  min-width: 15px;
+  height: 15px;
+  margin-left: 1px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 13px;
+  text-align: center;
+  color: var(--accent, #ff6b6b);
+  border: 1px solid var(--accent, #ff6b6b);
+}
+.watch-many:empty {
+  display: none;
+}
+/* The eye keeps its colour while anything is being watched, even with another tool
+   out — this is the one thing on the rail that is happening when nobody is looking. */
+.key[data-live="true"] svg {
+  color: var(--accent, #ff6b6b);
+}
+
 .flyout-send {
   width: 320px;
   padding: 0 0 6px;
@@ -828,6 +858,66 @@ body {
   height: 100%;
   pointer-events: none;
   overflow: visible;
+}
+
+/*
+ * The regions being watched, while they are watched.
+ *
+ * Dashed where a recording is solid: one of these is not happening now, it is a thing
+ * left running, and it should not read like a capture in progress. The frame itself
+ * takes no pointer — it is drawn around somebody's work and clicking their work should
+ * reach their work — but the badge does, because pressing it is how a watch is stopped
+ * and a watch you cannot stop is not one anybody should have armed.
+ */
+.watching {
+  position: absolute;
+  inset: 0;
+  z-index: 55;
+  pointer-events: none;
+}
+.watching-area {
+  position: absolute;
+  outline: 2px dashed color-mix(in srgb, var(--accent, #ff6b6b) 70%, transparent);
+  border-radius: 3px;
+}
+.watching-badge {
+  all: unset;
+  position: absolute;
+  left: -2px;
+  bottom: calc(100% + 8px);
+  padding: 4px 9px 4px 8px;
+  border-radius: 999px;
+  background: rgb(28 28 30 / 97%);
+  border: 1px solid color-mix(in srgb, var(--accent, #ff6b6b) 55%, transparent);
+  color: #f7f7f8;
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 45%);
+}
+.watching-badge:hover {
+  border-color: var(--accent, #ff6b6b);
+}
+.watching-area[data-under="true"] .watching-badge {
+  bottom: auto;
+  top: calc(100% + 8px);
+}
+.watching-badge::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent, #ff6b6b);
+  /* Slower than a recording's. This one has been running for a while and says so. */
+  animation: watching-pulse 2.4s ease-in-out infinite;
+}
+@keyframes watching-pulse {
+  50% {
+    opacity: 0.2;
+  }
 }
 
 /*

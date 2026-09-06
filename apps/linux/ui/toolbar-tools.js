@@ -33,6 +33,7 @@ const TOOLS = {
   record: { label: "Recording", press: "R", glyph: "record", writes: false },
   compare: { label: "Before and after", press: "A", glyph: "compare", writes: false },
   inspect: { label: "Inspect", press: "I", glyph: "inspect", writes: false },
+  watch: { label: "Watch", press: "W", glyph: "watch", writes: false },
   wireframe: { label: "Create wireframe", glyph: "wireframe", writes: false },
   screenshot: { label: "Screenshot", glyph: "screenshot", writes: false },
 };
@@ -170,6 +171,7 @@ const DRAWS = {
   measure: "span",
   record: "box",
   compare: "box",
+  watch: "box",
 };
 
 /** The tools for which a click that selected nothing means the whole display. */
@@ -187,6 +189,7 @@ const KEYS = {
   r: "record",
   a: "compare",
   i: "inspect",
+  w: "watch",
 };
 
 /**
@@ -524,6 +527,12 @@ function detailOf(mark) {
   // same eight pictures, spread further apart.
   if (mark.tool === "record" && mark.frames > 1 && typeof mark.seconds === "number") {
     return `${mark.frames} frames over ${Math.round(mark.seconds * 10) / 10}s`;
+  }
+  // A watch says what happened to it, because nobody was there when it did. Its two
+  // pictures are the same region before and after, and without this line they are a
+  // pair of screenshots with no account of why they arrived.
+  if (mark.tool === "watch" && mark.frames > 1) {
+    return "this changed while it was being watched — the first picture is before";
   }
   return null;
 }

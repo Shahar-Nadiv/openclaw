@@ -35,6 +35,8 @@ const GLYPHS = {
     '<path d="M3 3.5h7M3 3.5v7M21 3.5h-7M21 3.5v7M3 20.5h7M3 20.5v-7M21 20.5h-7M21 20.5v-7"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
   colour:
     '<path d="M12 3.5s6 6.4 6 10.1a6 6 0 0 1-12 0C6 9.9 12 3.5 12 3.5z"/><path d="M8.6 14.4a3.4 3.4 0 0 0 3.4 3.2"/>',
+  watch:
+    '<path d="M2 12s3.8-6.5 10-6.5S22 12 22 12s-3.8 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/>',
 };
 
 function icon(name, size) {
@@ -94,6 +96,7 @@ const el = {
   trouble: document.getElementById("trouble"),
   marks: document.getElementById("marks"),
   pins: document.getElementById("pins"),
+  watching: document.getElementById("watching"),
   recording: document.getElementById("recording"),
   recordingArea: document.getElementById("recording-area"),
   recordingLeft: document.getElementById("recording-left"),
@@ -150,6 +153,9 @@ const state = {
   // The recording underway, while it is underway: the region it covers and when it
   // ends. Null the rest of the time.
   recording: null,
+  // The regions being watched. Each one is a mark that has had its "before" taken and
+  // is waiting for the world to move.
+  watching: [],
   // Whether the receiver was chosen rather than worked out. A guess may fill an empty
   // seat; it may never take one somebody has sat in.
   picked: false,
@@ -183,7 +189,12 @@ function key(id, title, glyph, onClick, caret) {
   button.className = "key";
   button.title = title;
   button.setAttribute("aria-label", title);
-  button.innerHTML = icon(glyph) + (caret ? '<span class="caret">▾</span>' : "");
+  button.innerHTML =
+    icon(glyph) +
+    // Only the keys that count something get somewhere to put it; the rest would carry
+    // an empty span for the life of the rail.
+    (id === "watch" ? '<span class="watch-many"></span>' : "") +
+    (caret ? '<span class="caret">▾</span>' : "");
   button.addEventListener("click", onClick);
   buttons[id] = button;
   return button;
@@ -214,6 +225,7 @@ function buildRail() {
     key("colour", "Colour · C", "colour", () => use("colour")),
     key("record", "Record · R · right-click for how long", "record", () => use("record")),
     key("compare", "Before and after · A", "compare", () => compareStep()),
+    key("watch", "Watch for a change · W", "watch", () => use("watch")),
     key("inspect", "Inspect what is there · I", "inspect", () => use("inspect")),
   );
   // How long it records is a setting on the tool, so it lives on the tool: a right
@@ -620,6 +632,32 @@ function addMark(mark) {
  * drawn, not that anybody has seen it.
  */
 async function shoot(mark, again) {
+  await photograph(mark, again);
+  // A before-and-after is not finished by its first picture. It waits, visibly, for
+  // whatever is about to happen to happen.
+  if (mark.tool === "compare" && !again) {
+    state.comparing = mark.id;
+    render();
+    return;
+  }
+  state.comparing = null;
+  state.popup = mark.id;
+  render();
+  // The note is a text field and one way out is a key, and neither works while the
+  // window manager treats this window as scenery.
+  void invoke("colai_take_keyboard").catch(() => {});
+}
+
+/**
+ * Take the picture, and nothing else.
+ *
+ * Split from `shoot` because a watch takes its second picture with nobody there. The
+ * popup and the keyboard grab are what a person wants when they have just marked
+ * something, and are exactly wrong when the toolbar is answering a change that happened
+ * while somebody was in another window: an overlay that seizes the keyboard because a
+ * build finished is an overlay that eats the sentence they were typing.
+ */
+async function photograph(mark, again) {
   // What is in front *now*. A mark is about the window somebody is looking at, and
   // reading that once when the app started answered a question about a different
   // afternoon.
@@ -659,19 +697,6 @@ async function shoot(mark, again) {
     stopRecording();
     document.body.style.visibility = "";
   }
-  // A before-and-after is not finished by its first picture. It waits, visibly, for
-  // whatever is about to happen to happen.
-  if (mark.tool === "compare" && !again) {
-    state.comparing = mark.id;
-    render();
-    return;
-  }
-  state.comparing = null;
-  state.popup = mark.id;
-  render();
-  // The note is a text field and one way out is a key, and neither works while the
-  // window manager treats this window as scenery.
-  void invoke("colai_take_keyboard").catch(() => {});
 }
 
 /**
@@ -749,6 +774,19 @@ function render() {
       button.title = state.comparing
         ? "Capture the after · A"
         : "Before and after · A";
+    } else if (id === "watch") {
+      // Pressed means "this is the tool in your hand", the same as every other key —
+      // a running watch is not a held tool, and lighting it the same way made the rail
+      // look like two tools were selected at once. What is running gets a count, the
+      // way the send key counts what is waiting to go.
+      button.setAttribute("aria-pressed", String(state.tool === "watch"));
+      button.querySelector(".watch-many").textContent = state.watching.length
+        ? String(state.watching.length)
+        : "";
+      button.dataset.live = String(state.watching.length > 0);
+      button.title = state.watching.length
+        ? `${counted(state.watching.length, "region")} being watched · W`
+        : "Watch for a change · W";
     } else if (id === "record") {
       button.setAttribute("aria-pressed", String(state.tool === "record" || state.open === "record"));
       button.title = `Record ${state.recordFor} seconds · R · right-click for how long`;
@@ -812,6 +850,7 @@ function render() {
   }
 
   drawMarks();
+  drawWatching();
   drawAnswers();
   drawPopup();
   drawTrouble();
@@ -856,6 +895,62 @@ function within(node, axis, at) {
   let shift = Math.min(0, far - tail);
   if (head + shift < near) shift = near - head;
   return Math.round(at + shift);
+}
+
+/* ── watching a region, and saying so ────────────────────────────────────── */
+
+/**
+ * Arm a watch on a mark that has already had its "before" taken.
+ *
+ * Deliberate rather than automatic: dragging a box out with this tool photographs the
+ * region like any other, and the popup is where somebody says what they are waiting for
+ * before agreeing to be told about it. A toolbar that started watching the moment a box
+ * was drawn would be one that had begun observing a screen without being asked.
+ */
+async function startWatching(mark) {
+  // Every watch is dragged out as a region, so this is a guard rather than a case: a
+  // watch with no area has nothing to look at and would sit on the rail forever.
+  if (!mark.region) return;
+  try {
+    await invoke("colai_watch_start", { mark });
+    state.watching = [
+      ...state.watching.filter((held) => held.id !== mark.id),
+      { id: mark.id, box: mark.region.box },
+    ];
+    state.popup = null;
+    // And put the tool away. A watch is something you set and walk away from, and the
+    // sheet of glass a marking tool holds over the desk is the opposite of walking
+    // away.
+    state.tool = "pointer";
+    state.trouble = null;
+  } catch (error) {
+    state.trouble = `Could not watch that — ${error && error.message ? error.message : String(error)}`;
+  }
+  render();
+}
+
+/** Stop watching, and forget the marker, whoever decided it was over. */
+async function stopWatching(id, alsoTellRust) {
+  state.watching = state.watching.filter((held) => held.id !== id);
+  if (alsoTellRust) await invoke("colai_watch_stop", { markId: id }).catch(() => {});
+  render();
+}
+
+/**
+ * Something the toolbar was watching moved.
+ *
+ * The picture is taken here rather than where the change was noticed, because taking it
+ * means hiding the toolbar first — otherwise the "after" has a toolbar in it and the
+ * "before" does not, and the only difference an agent can be sure of is ours.
+ */
+async function watchFired(id) {
+  await stopWatching(id, false);
+  const mark = state.marks.find((held) => held.id === id);
+  // The mark can be gone: sent by hand, undone, or aged out of the store while the
+  // watch ran. There is nothing to compare it against, so there is nothing to send.
+  if (!mark) return;
+  await photograph(mark, true);
+  await sendMarks([mark.id], true);
 }
 
 /* ── what a recording shows while it runs ────────────────────────────────── */
@@ -915,6 +1010,43 @@ function drawRecording() {
   // half off the top of the screen is the one place it cannot be read.
   el.recordingArea.dataset.under = String(frame.y * screen.height < 34);
   el.recordingLeft.textContent = `${secondsLeft(now.until, Date.now())}s`;
+}
+
+/**
+ * Every watched region, drawn where it is.
+ *
+ * Outside the pixels the pictures come from, on the same clearance the recording frame
+ * uses and for the same reason. Dashed rather than solid, because this one is not
+ * happening now — it is a thing left running, and it should not read like a recording
+ * in progress.
+ */
+function drawWatching() {
+  const screen = { width: window.innerWidth, height: window.innerHeight };
+  const who = receiver();
+  el.watching.replaceChildren(
+    ...state.watching.map((held) => {
+      const frame = recordFrame(held.box, screen);
+      const area = document.createElement("div");
+      area.className = "watching-area";
+      area.style.left = `${frame.x * 100}%`;
+      area.style.top = `${frame.y * 100}%`;
+      area.style.width = `${frame.w * 100}%`;
+      area.style.height = `${frame.h * 100}%`;
+      area.dataset.under = String(frame.y * screen.height < 34);
+      // The badge says where the answer is going, not just that something is running.
+      // "Watching" alone leaves somebody to remember which agent they had selected
+      // twenty minutes ago, which is the thing nobody remembers.
+      const badge = document.createElement("button");
+      badge.type = "button";
+      badge.className = "watching-badge";
+      badge.textContent = who ? `watching \u2192 ${who.name}` : "watching";
+      badge.title = "Stop watching this region";
+      badge.setAttribute("aria-label", "Stop watching this region");
+      badge.addEventListener("click", () => void stopWatching(held.id, true));
+      area.append(badge);
+      return area;
+    }),
+  );
 }
 
 function drawMarks() {
@@ -1153,6 +1285,9 @@ function shape() {
       ? [{ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }]
       : [boxAround(el.wrap)];
   if (state.popup !== null && !el.popup.hidden) rects.push(boxAround(el.popup));
+  // One at a time, not as a union: a watch on each screen would otherwise claim the
+  // whole desk between them, which is the mistake the answer pins below already avoid.
+  for (const area of el.watching.children) rects.push(boxAround(area.firstChild));
   for (const answer of el.answers.children) rects.push(boxAround(answer));
   const key = JSON.stringify(rects);
   if (key === shaped) return;
@@ -1263,6 +1398,28 @@ function sayFailed(message) {
  * rail, or the composer when it is open. Everywhere else the drag goes through to the
  * desktop, which is right — the transparent part of this window is not a window.
  */
+/*
+ * A watched region moved, or stopped being watched without moving.
+ *
+ * Two events rather than one with a flag, because they are two different things to a
+ * person: one produces a message and the other produces a marker quietly disappearing,
+ * and the second has to say why or it looks like the toolbar forgot.
+ */
+listen("colai:watch-changed", (event) => {
+  void watchFired(event.payload.markId);
+});
+listen("colai:watch-ended", (event) => {
+  const { markId, why, says } = event.payload;
+  void stopWatching(markId, false);
+  // "stopped" is somebody pressing the badge; they know. The rest is the toolbar
+  // giving up, which nobody asked for and everybody should be told about.
+  if (why === "stopped") return;
+  state.trouble = says
+    ? `Stopped watching that region — ${says}.`
+    : "Stopped watching that region.";
+  render();
+});
+
 listen("tauri://drag-enter", (event) => {
   state.catching = onTheToolbar(event);
   render();

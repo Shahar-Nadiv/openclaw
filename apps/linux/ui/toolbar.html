@@ -71,6 +71,16 @@
       It is also the one thing that stays visible while the page hides itself to be
       photographed, which is what the stylesheet's `visibility` is for.
     -->
+    <!--
+      The regions being watched, while they are watched.
+
+      Same rule as the recording frame and for the same reason: drawn outside the pixels
+      the pictures are taken from, so a watch never photographs the marker that says it
+      is watching. Unlike the recording frame these take the pointer — each one is how
+      you stop it — so their badges join the input shape.
+    -->
+    <div id="watching" class="watching"></div>
+
     <div id="recording" class="recording" hidden>
       <div id="recording-area" class="recording-area">
         <p id="recording-left" class="recording-left" role="status"></p>
