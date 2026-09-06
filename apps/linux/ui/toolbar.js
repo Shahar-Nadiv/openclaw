@@ -589,16 +589,18 @@ el.grip.addEventListener("pointerdown", (event) => {
     const y = Math.max(room.top, Math.min(room.bottom - size.height, moved.clientY - grabY));
     const now = dockFor({ x: moved.clientX, y: moved.clientY }, screen, state.reserved, edge);
     if (now !== edge) {
+      const turned = isVertical(now) !== isVertical(edge);
       // A rail that was 420 wide and becomes 44 wide has no sensible relationship to
       // where the hand was on it; re-grabbing near the corner is what keeps it on screen.
-      if (isVertical(now) !== isVertical(edge)) {
+      if (turned) {
         grabX = 20;
         grabY = 20;
       }
       edge = now;
       state.dock = now;
       state.open = null;
-      render();
+      if (turned) turn(render);
+      else render();
     }
     last = { x, y };
     state.at = last;
@@ -623,6 +625,97 @@ el.grip.addEventListener("pointerdown", (event) => {
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
 });
+
+/* ── turning between flat and upright ────────────────────────────────────── */
+
+/** How long the rail takes to settle into a new orientation. */
+const TURN = 240;
+const TURN_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+
+let turning = null;
+
+/**
+ * Change the rail's orientation and let it dissolve into the new one.
+ *
+ * A row of tools and a column of them are two layouts with nothing in between, so this
+ * is not a morph: animating the pill's size would squeeze the flex children underneath,
+ * and animating the children alone would float them outside a pill that had already
+ * snapped. What happens instead is a still picture of the old rail fading out over the
+ * new one fading in, which is the one thing that genuinely reads as turning.
+ *
+ * The state changes at once and only the appearance lags. A drag reads the dock on
+ * every pointer move and must never be handed a stale one — that was the flicker.
+ *
+ * The input shape is re-measured on every frame, because a rail drawn at 94% covers a
+ * different part of the screen than a settled one, and a control that is drawn but not
+ * clickable is the one thing an overlay must never have. The ghost is measured with it
+ * rather than excluded: it is inert, but it is on screen, and the shape should say so.
+ */
+function turn(change) {
+  if (still() || typeof el.rail.animate !== "function") {
+    change();
+    shape();
+    return;
+  }
+  const ghost = ghostOf(el.rail);
+  change();
+  if (turning) {
+    for (const running of turning) running.cancel();
+  }
+  const leaving = ghost.animate(
+    [
+      { opacity: 1, transform: "scale(1)" },
+      { opacity: 0, transform: "scale(0.9)" },
+    ],
+    { duration: TURN * 0.6, easing: "ease-in" },
+  );
+  const arriving = el.rail.animate(
+    [
+      { opacity: 0, transform: "scale(0.9)" },
+      { opacity: 1, transform: "scale(1)" },
+    ],
+    { duration: TURN, easing: TURN_EASE },
+  );
+  turning = [leaving, arriving];
+  const drop = () => ghost.remove();
+  leaving.finished.then(drop, drop);
+  const follow = () => {
+    shape();
+    if (arriving.playState === "running") requestAnimationFrame(follow);
+  };
+  requestAnimationFrame(follow);
+  // A cancelled animation rejects; the turn that cancelled it is already drawing, so
+  // there is nothing left to say about this one.
+  arriving.finished.then(shape, () => {});
+}
+
+/**
+ * A still picture of the rail, parked where the rail was.
+ *
+ * Inside the wrap so the shape measurement finds it, inert so it cannot be clicked, and
+ * stripped of its ids so the real toolbar's elements stay the only ones with those
+ * names while it is on screen.
+ */
+function ghostOf(rail) {
+  const ghost = rail.cloneNode(true);
+  const box = rail.getBoundingClientRect();
+  const wrap = el.wrap.getBoundingClientRect();
+  ghost.removeAttribute("id");
+  for (const named of ghost.querySelectorAll("[id]")) named.removeAttribute("id");
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.classList.add("ghost");
+  ghost.style.left = `${box.left - wrap.left}px`;
+  ghost.style.top = `${box.top - wrap.top}px`;
+  ghost.style.width = `${box.width}px`;
+  ghost.style.height = `${box.height}px`;
+  el.wrap.append(ghost);
+  return ghost;
+}
+
+/** Whether the desktop has asked for as little movement as possible. */
+function still() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
 
 function place() {
   if (!state.at) return;

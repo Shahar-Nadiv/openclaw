@@ -91,7 +91,14 @@ body {
   font-size: 13px;
   letter-spacing: -1px;
   touch-action: none;
-  transition: transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* The same curve and length the rail settles on, so the handle turns with it rather
+     than arriving after it. */
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .grip {
+    transition: none;
+  }
 }
 .rail-wrap[data-vertical="true"] .grip {
   width: 34px;
@@ -210,6 +217,13 @@ body {
   .agent-avatar-dot[data-busy="true"] {
     animation: none;
   }
+}
+
+/* A still picture of the rail as it was, dissolving while the new one arrives. It is
+   drawn and never touched: the pointer belongs to the rail underneath it. */
+.ghost {
+  position: absolute;
+  pointer-events: none;
 }
 
 /* ── flyouts ──────────────────────────────────────────────────────────────── */
