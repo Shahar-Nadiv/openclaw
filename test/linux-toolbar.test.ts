@@ -21,11 +21,7 @@ type ToolbarHelpers = {
   screenAt: (screens: Screen[], at: Point) => Screen | null;
   boxOf: (points: Point[]) => { x: number; y: number; w: number; h: number };
   pathFor: (shape: { kind: string; points: Point[] } | null) => string;
-  receiptFor: (
-    tool: string,
-    surface: Surface,
-    agent: string | null,
-  ) => { did: string; through: string; agent: string | null; blocked: boolean };
+  gateFor: (tool: string, surface: Surface) => { blocked: boolean; says: string | null };
   counted: (many: number, noun: string) => string;
   MODES: Record<string, { label: string; says: string }>;
   summaryFor: (
@@ -38,7 +34,7 @@ type ToolbarHelpers = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource.slice(0, browserBindingsStart)}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, receiptFor, counted, MODES, summaryFor, screenAt };`,
+  `${toolbarSource.slice(0, browserBindingsStart)}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt };`,
   context,
 );
 const {
@@ -48,7 +44,7 @@ const {
   usable,
   boxOf,
   pathFor,
-  receiptFor,
+  gateFor,
   counted,
   MODES,
   summaryFor,
@@ -76,12 +72,6 @@ describe("what a tool is allowed to do", () => {
     }
   });
 
-  test("creating a wireframe is not refused, because it changes no surface", () => {
-    // It asks an agent for a document. Refusing it on an unconnected window would be
-    // the gate answering a question nobody asked.
-    expect(receiptFor("wireframe", { app: "Notes", connector: null }, "Ada").blocked).toBe(false);
-  });
-
   test("every drawing tool has a shape, and the pointer has none", () => {
     expect(DRAWS.box).toBe("box");
     expect(DRAWS.circle).toBe("ellipse");
@@ -93,31 +83,38 @@ describe("what a tool is allowed to do", () => {
   });
 });
 
-describe("the receipt", () => {
+describe("the gate", () => {
   const connected: Surface = { app: "Figma", connector: "canvas-bridge" };
   const bare: Surface = { app: "Notes", connector: null };
 
   test("a write on an unconnected surface is refused and says so", () => {
-    const said = receiptFor("surfaceWrite", bare, "Ada");
+    const said = gateFor("surfaceWrite", bare);
     expect(said.blocked).toBe(true);
-    expect(said.did).toContain("Notes isn't connected");
+    expect(said.says).toContain("Notes isn't connected");
     // The sentence the product turns on: the region was noticed, and nothing changed.
-    expect(said.through).toBe("Region noted, nothing changed");
+    expect(said.says).toContain("Region noted, nothing changed");
   });
 
   test("not knowing what is in front is not permission", () => {
-    expect(receiptFor("surfaceWrite", null, null).blocked).toBe(true);
+    expect(gateFor("surfaceWrite", null).blocked).toBe(true);
   });
 
   test("marking works everywhere, connector or not", () => {
-    expect(receiptFor("pointAt", bare, "Ada").blocked).toBe(false);
-    expect(receiptFor("box", null, null).blocked).toBe(false);
+    expect(gateFor("pointAt", bare).blocked).toBe(false);
+    expect(gateFor("box", null).blocked).toBe(false);
   });
 
-  test("a write through a connector names the connector", () => {
-    const said = receiptFor("surfaceWrite", connected, "Ada");
+  test("a write through a connector is allowed, and says nothing about it", () => {
+    const said = gateFor("surfaceWrite", connected);
     expect(said.blocked).toBe(false);
-    expect(said.through).toBe("canvas-bridge");
+    // An allowed action needs no narration. The thing happening is the feedback.
+    expect(said.says).toBeNull();
+  });
+
+  test("creating a wireframe is not refused, because it changes no surface", () => {
+    // It asks an agent for a document. Refusing it on an unconnected window would be
+    // the gate answering a question nobody asked.
+    expect(gateFor("wireframe", bare).blocked).toBe(false);
   });
 });
 

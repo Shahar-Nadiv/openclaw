@@ -263,27 +263,25 @@ function pathFor(shape) {
 }
 
 /**
- * What a receipt says about what just happened.
+ * Whether a tool may do what it is about to do.
  *
- * One sentence naming the action, where it landed and who has it. `blocked` is not a
- * failure to report politely — it is the product working: the region was noticed and
- * nothing was changed.
+ * Reading is universal — the toolbar can mark and describe anything on screen — and
+ * changing something is only possible where a connector owns that surface. Refusing is
+ * not a failure reported politely: it is the product working, and the sentence says so,
+ * because "nothing happened" and "the region was noticed and deliberately left alone"
+ * are different things to be told.
+ *
+ * It answers only when the answer is no. An allowed action needs no narration; it just
+ * happens, and the thing that happens is the feedback.
  */
-function receiptFor(tool, surface, agent) {
-  const label = TOOLS[tool].label;
-  if (TOOLS[tool].writes && !(surface && surface.connector)) {
-    return {
-      did: `${label} — ${(surface && surface.app) || "That app"} isn't connected`,
-      through: "Region noted, nothing changed",
-      agent,
-      blocked: true,
-    };
+function gateFor(tool, surface) {
+  const known = TOOLS[tool];
+  if (!known || !known.writes || (surface && surface.connector)) {
+    return { blocked: false, says: null };
   }
   return {
-    did: label,
-    through: (surface && (surface.connector || surface.app)) || "nothing in front",
-    agent,
-    blocked: false,
+    blocked: true,
+    says: `${(surface && surface.app) || "That app"} isn't connected. Region noted, nothing changed.`,
   };
 }
 
@@ -332,7 +330,7 @@ const el = {
   flyDesign: document.getElementById("fly-design"),
   flyAgents: document.getElementById("fly-agents"),
   agentRows: document.getElementById("agent-rows"),
-  receipt: document.getElementById("receipt"),
+  trouble: document.getElementById("trouble"),
   marks: document.getElementById("marks"),
   pins: document.getElementById("pins"),
   capture: document.getElementById("capture"),
@@ -362,7 +360,7 @@ const state = {
   whoTrouble: null,
   // Who gets what you point at. An agent is somebody who could answer; a session is a
   // conversation already underway. Which of the two it is has to be carried, because
-  // the same name can belong to both and the receipt has to be able to say.
+  // the same name can belong to both and a send has to know which it is addressing.
   //
   // The name is kept beside the id on purpose. The menu shows recent conversations, so
   // a session picked an hour ago can fall off it; forgetting who was receiving because
@@ -382,6 +380,9 @@ const state = {
   adopted: [],
   // Set while a send is in the air, so a second click cannot post it twice.
   sending: false,
+  // What went wrong, when something did. Null the rest of the time, which is the rest
+  // of the time.
+  trouble: null,
 };
 
 /* ── the rail ───────────────────────────────────────────────────────────── */
@@ -472,15 +473,13 @@ function row(into, tool, label, glyph, press) {
 function use(tool) {
   state.tool = tool;
   state.open = null;
-  const who = receiver();
-  state.receipt = receiptFor(tool, state.surface, who ? who.name : null);
   render();
 }
 
 /**
  * The agent or session currently marked as receiving, whichever it is.
  *
- * Returned as one shape so everything downstream — the rail's label, the receipt, the
+ * Returned as one shape so everything downstream — the rail's label, the popup, the
  * mark beside a row — can name the receiver without first asking which kind it is.
  */
 function receiver() {
@@ -841,11 +840,22 @@ async function sendMarks(ids) {
   if (state.sending) return;
   const who = receiverNow();
   if (!who) {
-    state.receipt = { did: "Nobody is receiving", through: "Choose an agent or a conversation first", agent: null, blocked: true };
+    state.trouble = "Nobody is receiving. Choose an agent or a conversation first.";
     render();
     return;
   }
   const going = state.marks.filter((mark) => ids.includes(mark.id));
+  // The gate, at the moment it means something. Reading is universal and changing a
+  // surface is not, so a tool that writes is refused unless a connector owns what it
+  // was pointed at — refused here, before anything is dispatched, so there is no path
+  // where a write is attempted and then apologised for. Nothing writes yet; this is
+  // what will stop the first one that does.
+  const refused = going.map((mark) => gateFor(mark.tool, state.surface)).find((said) => said.blocked);
+  if (refused) {
+    state.trouble = refused.says;
+    render();
+    return;
+  }
   state.sending = true;
   render();
   try {
@@ -861,19 +871,12 @@ async function sendMarks(ids) {
     state.text = "";
     state.popup = null;
     state.open = null;
-    state.receipt = {
-      did: `Sent ${counted(going.length, "mark")}`,
-      through: state.receiving.name || who.id,
-      agent: sent.pictures ? counted(sent.pictures, "picture") : "no pictures",
-      blocked: false,
-    };
+    // Nothing is said about it. What was sent leaves the tray and the count on the rail
+    // drops, which is the outcome — a line announcing what just visibly happened is the
+    // sort of thing somebody reads once and then reads past forever.
+    state.trouble = null;
   } catch (error) {
-    state.receipt = {
-      did: "Could not send",
-      through: error && error.message ? error.message : String(error),
-      agent: null,
-      blocked: true,
-    };
+    state.trouble = `Could not send — ${error && error.message ? error.message : String(error)}`;
   } finally {
     state.sending = false;
     render();
@@ -1402,7 +1405,7 @@ function render() {
 
   drawMarks();
   drawPopup();
-  drawReceipt();
+  drawTrouble();
   // Left mounted while a popup is open, which is how a click off the popup is heard at
   // all — the popup is stacked above it, so its own controls still get their clicks.
   el.capture.hidden = state.tool === "pointer";
@@ -1640,21 +1643,17 @@ function drawMarks() {
   );
 }
 
-function drawReceipt() {
-  const said = state.receipt;
-  el.receipt.hidden = !said;
-  if (!said) return;
-  el.receipt.dataset.blocked = String(said.blocked);
-  el.receipt.innerHTML =
-    '<span class="receipt-dot">●</span>' +
-    `<span class="receipt-did"></span><span>→</span><span class="receipt-through"></span>` +
-    // Named, not just appended: a receiver used to be one word and read as part of the
-    // surface beside it. A conversation's title is a sentence, and "Openclaw Desktop
-    // Kitchen rebuild quotes" is not a sentence about anything.
-    (said.agent ? '<span class="receipt-to">· to</span><span class="receipt-agent"></span>' : "");
-  el.receipt.querySelector(".receipt-did").textContent = said.did;
-  el.receipt.querySelector(".receipt-through").textContent = said.through;
-  if (said.agent) el.receipt.querySelector(".receipt-agent").textContent = said.agent;
+/**
+ * The only thing the rail says on its own, and it only says it when something is wrong.
+ *
+ * There used to be a line here after every action, naming the tool, the window in front
+ * and who was receiving. All three are already on the rail, so it was the toolbar
+ * reading its own state back — the kind of thing somebody notices once and then never
+ * reads again, while it sits over their work.
+ */
+function drawTrouble() {
+  el.trouble.hidden = !state.trouble;
+  el.trouble.textContent = state.trouble || "";
 }
 
 /**
@@ -1746,21 +1745,17 @@ window.addEventListener("keydown", (event) => {
  * A failure the person can see.
  *
  * An overlay that throws on startup looks exactly like one that is working and has
- * nothing to say: the rail is drawn, and nothing responds. The receipt line is already
- * the place this surface tells the truth about itself, so it says this too.
+ * nothing to say: the rail is drawn, and nothing responds. This is the same strip a
+ * failed send uses, which is the whole reason it survived the line that used to sit
+ * there narrating the current tool.
  */
 function sayFailed(message) {
   // Also the window title, which survives a page that cannot draw and is readable from
   // outside the app while this is being worked on.
   document.title = `toolbar error: ${message}`;
-  state.receipt = {
-    did: "The toolbar hit an error",
-    through: message,
-    agent: null,
-    blocked: true,
-  };
+  state.trouble = `The toolbar hit an error — ${message}`;
   try {
-    drawReceipt();
+    drawTrouble();
   } catch {
     // Nothing left to do: if drawing the message also throws, saying so louder will not
     // help, and throwing from an error handler loses the original.

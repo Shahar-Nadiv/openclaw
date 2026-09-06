@@ -3,7 +3,7 @@
  *
  * Same palette and the same `--accent` hook Quick Chat uses, so the two overlays look
  * like one application and both follow the app when its accent changes. The layout is
- * the toolbar's own — a pill of tools, flyouts beside it, a receipt underneath.
+ * the toolbar's own — a pill of tools, with flyouts and popups beside it.
  */
 
 :root {
@@ -602,80 +602,45 @@ body {
   cursor: default;
 }
 
-/* ── the receipt ──────────────────────────────────────────────────────────── */
+/* ── when something has gone wrong ────────────────────────────────────────── */
 
 /*
- * Anchored to the rail, not laid out beside it.
+ * The rail's only unprompted line, and it is only ever a problem.
  *
- * The wrap is pinned by its top-left and sizes to its contents, so a receipt that was a
- * flex sibling grew the wrap — and on the right dock, where the rail sat at the wrap's
- * far edge, every receipt shoved the toolbar further off the screen. Hanging it off the
- * rail the way the flyouts do means nothing it ever says can move the toolbar.
+ * What used to sit here named the tool, the window in front and who was receiving —
+ * all three of which are on the rail already, so it was the toolbar reading its own
+ * state back to somebody over the top of their work. A failure is different: it is
+ * something they do not otherwise know, and a send that fails silently is the worst
+ * thing this surface could do.
  */
-.receipt {
+.trouble {
   position: absolute;
-  display: flex;
-  align-items: center;
-  gap: 8px;
   margin: 0;
-  padding: 6px 11px;
+  padding: 7px 11px;
   border-radius: 8px;
-  max-width: 760px;
-  white-space: nowrap;
+  max-width: 420px;
   background: rgb(20 20 22 / 98%);
-  border: 1px solid rgb(255 255 255 / 10%);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10.5px;
-  color: #8e8e93;
+  border: 1px solid rgb(255 123 123 / 55%);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #f7f7f8;
 }
-.receipt[data-blocked="true"] {
-  border-color: rgb(255 123 123 / 55%);
-}
-/* Below the rail when it is flat, beside it when upright, and always on the side that
-   has the room: against an edge, the receipt turns inward. */
-.rail-wrap[data-vertical="false"] .receipt {
+.rail-wrap[data-vertical="false"] .trouble {
   top: calc(100% + 8px);
   left: 0;
 }
-.rail-wrap[data-dock="bottom"] .receipt {
+.rail-wrap[data-dock="bottom"] .trouble {
   top: auto;
   bottom: calc(100% + 8px);
 }
-.rail-wrap[data-vertical="true"] .receipt {
+.rail-wrap[data-vertical="true"] .trouble {
   top: 0;
   left: calc(100% + 10px);
   max-width: 220px;
-  white-space: normal;
 }
-.rail-wrap[data-dock="right"] .receipt {
+.rail-wrap[data-dock="right"] .trouble {
   left: auto;
   right: calc(100% + 10px);
-}
-.receipt-dot {
-  font-size: 8px;
-  color: var(--accent, #ff6b6b);
-}
-.receipt[data-blocked="true"] .receipt-dot {
-  color: #ff7b7b;
-}
-.receipt-did {
-  color: #f7f7f8;
-  flex-shrink: 0;
-}
-.receipt-through {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.receipt-to {
-  flex-shrink: 0;
-  opacity: 0.55;
-}
-/* The receiver takes the squeeze before the surface does: which agent or conversation
-   has it is the part somebody is checking. */
-.receipt-agent {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: #f7f7f8;
 }
 
 /* ── what the tools draw ──────────────────────────────────────────────────── */
