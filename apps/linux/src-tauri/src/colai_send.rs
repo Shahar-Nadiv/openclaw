@@ -60,6 +60,9 @@ pub(crate) async fn colai_send(
     shots: State<'_, MarkShots>,
     receiver: Receiver,
     message: String,
+    // Which marks would rather arrive as one contact sheet than as a run of frames.
+    sheets: Option<Vec<String>>,
+    accent: Option<String>,
     // What goes with the message. Optional because nothing is a real answer for both:
     // a reply to something an agent said carries neither, and requiring them turned
     // that into "invalid args: missing required key `files`" the first time somebody
@@ -74,7 +77,12 @@ pub(crate) async fn colai_send(
     }
     let mark_ids = mark_ids.unwrap_or_default();
     let target = resolve(&gateway, &receiver).await?;
-    let mut attachments = attach(&shots, &mark_ids)?;
+    let mut attachments = attach(
+        &shots,
+        &mark_ids,
+        &sheets.unwrap_or_default(),
+        &accent.unwrap_or_else(|| "#ff6b6b".to_string()),
+    )?;
     let pictures = attachments.len();
     // After the pictures, in the order the message describes them. The message has
     // already decided which of these travel and which are only named; anything in this
@@ -148,23 +156,45 @@ async fn resolve(
 /// which picture that is. A mark that photographed once keeps the plain name it always
 /// had; a recording numbers its frames after it, so a set of six is a sequence rather
 /// than six unrelated pictures of the same corner of a screen.
-fn attach(shots: &MarkShots, mark_ids: &[String]) -> Result<Vec<ChatAttachment>, String> {
+fn attach(
+    shots: &MarkShots,
+    mark_ids: &[String],
+    sheets: &[String],
+    accent: &str,
+) -> Result<Vec<ChatAttachment>, String> {
     let mut carried = Vec::new();
-    for (at, (_, frames, width, height)) in shots.pick(mark_ids)?.into_iter().enumerate() {
+    for (at, (id, frames, width, height)) in shots.pick(mark_ids)?.into_iter().enumerate() {
+        let one = |png: Vec<u8>, name: String, size: (i32, i32)| ChatAttachment {
+            kind: "image".to_string(),
+            mime_type: "image/png".to_string(),
+            file_name: name,
+            content: base64::engine::general_purpose::STANDARD.encode(png),
+            width: size.0,
+            height: size.1,
+        };
+        // A run that would rather arrive as one picture. Eight frames of a screen cost
+        // about fifteen thousand image tokens sent separately and under a thousand laid
+        // out in a grid — and the grid reads better, because the sequence is visible
+        // instead of having to be reassembled from eight unrelated pictures.
+        //
+        // Which marks want it is the page's call, not this function's: a before-and-after
+        // is two frames whose whole point is comparing detail, and shrinking them into
+        // cells would spend the thing somebody made the mark for.
+        if frames.len() > 1 && sheets.contains(&id) {
+            #[cfg(target_os = "linux")]
+            if let Ok(sheet) = crate::colai_capture::contact_sheet(&frames, accent) {
+                carried.push(one(sheet, format!("mark-{}.png", at + 1), (0, 0)));
+                continue;
+            }
+        }
         let many = frames.len() > 1;
         for (frame, png) in frames.into_iter().enumerate() {
-            carried.push(ChatAttachment {
-                kind: "image".to_string(),
-                mime_type: "image/png".to_string(),
-                file_name: if many {
-                    format!("mark-{}-{}.png", at + 1, frame + 1)
-                } else {
-                    format!("mark-{}.png", at + 1)
-                },
-                content: base64::engine::general_purpose::STANDARD.encode(png),
-                width,
-                height,
-            });
+            let name = if many {
+                format!("mark-{}-{}.png", at + 1, frame + 1)
+            } else {
+                format!("mark-{}.png", at + 1)
+            };
+            carried.push(one(png, name, (width, height)));
         }
     }
     Ok(carried)

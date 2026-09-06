@@ -169,6 +169,11 @@ async function sendMarks(ids, alone) {
         alone ? [] : state.files,
       ),
       markIds: ids,
+      // Which of them would rather be one picture than several. Decided here rather than
+      // in the capture, because it is the same decision the message states — and the two
+      // must agree or the message names files that were never sent.
+      sheets: going.filter(sheeted).map((mark) => mark.id),
+      accent: accentNow(),
       // Only the ones that travel. What is named rather than carried is already in the
       // message as a path, and sending it twice would mean encoding a gigabyte to say
       // something the sentence above it already said.

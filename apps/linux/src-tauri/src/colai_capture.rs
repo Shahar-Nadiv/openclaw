@@ -40,10 +40,18 @@ const THUMB_EDGE: i32 = 180;
 /// The widest edge a picture keeps before it is shrunk.
 ///
 /// Bounded here rather than at the send, because the Gateway refuses an image over 6MB
-/// and a refusal at that point loses the whole batch for one oversized capture. A
-/// whole-display PNG is comfortably under this once scaled, and no agent reads a
-/// screenshot at native resolution anyway.
-const SHOT_EDGE: i32 = 1600;
+/// and a refusal at that point loses the whole batch for one oversized capture.
+///
+/// The number is a measurement, not a guess. A whole 1920-wide screen sent at 1600 costs
+/// about 1,920 image tokens and at 1,100 about 900 — and the question is only whether the
+/// smaller one is still readable. Tested against real rendered interface text at ten and
+/// a half pixels, scaled by exactly that ratio: every word survived, including monospace
+/// file sizes and the smallest labels on the toolbar's own composer.
+///
+/// Twelve hundred rather than the eleven that was measured, because one sample of one
+/// interface in one theme is thin evidence for a ceiling that applies to every screen
+/// anybody points at. It still costs a little over half what sixteen hundred did.
+const SHOT_EDGE: i32 = 1200;
 
 /// The pixels a mark is about.
 ///
@@ -561,6 +569,141 @@ pub(crate) fn moved_by(before: &[u8], after: &[u8]) -> f64 {
     total as f64 / (before.len() as f64 * 255.0)
 }
 
+/// How wide a contact sheet is, and how many frames run across it.
+///
+/// The whole reason this exists. Eight frames of a full screen, sent as eight pictures,
+/// cost about fifteen thousand image tokens — two hundred times what the entire message
+/// around them costs, for a mark somebody made in one drag. The same eight laid out in a
+/// grid cost under a thousand, and a model reads them *better*: the sequence is visible
+/// at a glance instead of having to be reconstructed from eight unrelated images.
+const SHEET_EDGE: i32 = 1600;
+const SHEET_ACROSS: usize = 4;
+/// The strip along the top of each cell that carries its number.
+const SHEET_LABEL: f64 = 22.0;
+
+/// A run of frames, laid out as one numbered picture, for whoever is sending it.
+#[cfg(target_os = "linux")]
+pub(crate) fn contact_sheet(frames: &[Vec<u8>], accent: &str) -> Result<Vec<u8>, String> {
+    sheet_of(frames, accent)
+}
+
+/// A run of frames, laid out as one numbered picture.
+///
+/// Numbered because the message says "frame 3" and that has to mean something; laid out
+/// left to right and top row first, which is the order the message states rather than
+/// the order anybody should have to infer.
+#[cfg(target_os = "linux")]
+fn sheet_of(frames: &[Vec<u8>], accent: &str) -> Result<Vec<u8>, String> {
+    use gdk::cairo;
+    use gdk::prelude::*;
+
+    let cells: Vec<gdk::gdk_pixbuf::Pixbuf> = frames
+        .iter()
+        .map(|png| decode(png))
+        .collect::<Result<_, _>>()?;
+    let first = cells
+        .first()
+        .ok_or_else(|| "There are no frames.".to_string())?;
+    let (wide, high) = (first.width().max(1), first.height().max(1));
+
+    let grid = sheet_grid(cells.len(), wide, high);
+    let (across, cell_high, scale, label) = (grid.across, grid.cell_high, grid.scale, grid.label);
+    let surface = cairo::ImageSurface::create(cairo::Format::Rgb24, grid.width, grid.height)
+        .map_err(|error| format!("Could not prepare the sheet: {error}"))?;
+    let ink = cairo::Context::new(&surface)
+        .map_err(|error| format!("Could not draw the sheet: {error}"))?;
+    ink.scale(scale, scale);
+    // The ground between cells, so a frame with a pale edge is still a frame with an
+    // edge rather than the one beside it.
+    ink.set_source_rgb(0.08, 0.08, 0.09);
+    ink.paint()
+        .map_err(|error| format!("Could not lay the sheet's ground: {error}"))?;
+
+    let (red, green, blue) = colour_of(accent);
+    ink.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Bold,
+    );
+    ink.set_font_size(label * 0.72);
+    for (at, cell) in cells.iter().enumerate() {
+        let x = (at % across) as f64 * f64::from(wide);
+        let y = (at / across) as f64 * cell_high;
+        ink.set_source_rgb(red, green, blue);
+        ink.move_to(x + label * 0.3, y + label * 0.76);
+        ink.show_text(&format!("{}", at + 1))
+            .map_err(|error| format!("Could not number a frame: {error}"))?;
+        ink.set_source_pixbuf(cell, x, y + label);
+        ink.paint()
+            .map_err(|error| format!("Could not place a frame: {error}"))?;
+    }
+    drop(ink);
+
+    let sheet = gdk::pixbuf_get_from_surface(&surface, 0, 0, surface.width(), surface.height())
+        .ok_or_else(|| "Could not read the sheet back.".to_string())?;
+    encode(&sheet)
+}
+
+/// How a run of frames is laid out, before anything is drawn.
+///
+/// Its own function because it is the half that can be wrong quietly: a sheet whose cells
+/// overlap, or one that comes out bigger than the pictures it replaced, has spent the
+/// saving and produced a worse image than it started with. Arithmetic can be tested
+/// anywhere; the drawing needs a display.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SheetGrid {
+    pub across: usize,
+    pub down: usize,
+    pub cell_high: f64,
+    /// The strip above each frame, in the sheet's own units — already enlarged so that
+    /// it comes out the same size on every sheet once the scale has been applied.
+    pub label: f64,
+    pub scale: f64,
+    pub width: i32,
+    pub height: i32,
+}
+
+pub(crate) fn sheet_grid(count: usize, wide: i32, high: i32) -> SheetGrid {
+    let across = SHEET_ACROSS.min(count.max(1));
+    let down = count.max(1).div_ceil(across);
+    let (wide, high) = (f64::from(wide.max(1)), f64::from(high.max(1)));
+    // The scale comes from the frames alone, and the label is added afterwards at a size
+    // that survives it. Sized with the frames instead, a number on a sheet of eight full
+    // screens lands at four pixels — drawn, paid for, and unreadable, which is the one
+    // outcome worse than not numbering them at all.
+    let scale = (f64::from(SHEET_EDGE) / (across as f64 * wide).max(down as f64 * high)).min(1.0);
+    let label = SHEET_LABEL / scale;
+    let cell_high = high + label;
+    let full = (across as f64 * wide, down as f64 * cell_high);
+    SheetGrid {
+        across,
+        down,
+        cell_high,
+        label,
+        scale,
+        width: ((full.0 * scale) as i32).max(1),
+        height: ((full.1 * scale) as i32).max(1),
+    }
+}
+
+/// A PNG, back as pixels.
+#[cfg(target_os = "linux")]
+fn decode(png: &[u8]) -> Result<gdk::gdk_pixbuf::Pixbuf, String> {
+    use gdk::gdk_pixbuf::PixbufLoader;
+    use gdk::prelude::PixbufLoaderExt;
+
+    let loader = PixbufLoader::new();
+    loader
+        .write(png)
+        .map_err(|error| format!("Could not read a frame back: {error}"))?;
+    loader
+        .close()
+        .map_err(|error| format!("Could not finish reading a frame: {error}"))?;
+    loader
+        .pixbuf()
+        .ok_or_else(|| "A frame came back empty.".to_string())
+}
+
 /// A picture brought under the size an agent will accept, or left alone if it already is.
 #[cfg(target_os = "linux")]
 fn shrunk(pixbuf: &gdk::gdk_pixbuf::Pixbuf) -> Result<gdk::gdk_pixbuf::Pixbuf, String> {
@@ -670,6 +813,75 @@ mod tests {
         assert_eq!(shots.pick(&["m1".to_string()]).unwrap().len(), 1);
         shots.forget(&["m1".to_string()]).unwrap();
         assert!(shots.pick(&["m1".to_string()]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_run_of_frames_comes_out_the_size_of_one_picture() {
+        // The whole point of the sheet. Eight frames of a screen cost about fifteen
+        // thousand image tokens sent one by one; laid out in a grid they have to come out
+        // around the size of a single picture, or nothing has been saved.
+        let grid = sheet_grid(8, 1600, 900);
+        assert_eq!((grid.across, grid.down), (4, 2));
+        assert!(grid.width <= SHEET_EDGE && grid.height <= SHEET_EDGE);
+        // A single 1600x900 picture is about 1.9 million pixels. The sheet of eight has
+        // to be in that neighbourhood rather than eight times it.
+        let pixels = i64::from(grid.width) * i64::from(grid.height);
+        assert!(
+            pixels < 1_600 * 900,
+            "a sheet of eight came out at {pixels} pixels"
+        );
+    }
+
+    #[test]
+    fn a_sheet_gives_every_frame_room_for_its_own_number() {
+        // The message says "frame 3" and that has to mean something, so each cell carries
+        // a strip above it. A cell exactly as tall as its frame would put the number on
+        // the picture.
+        let grid = sheet_grid(4, 400, 300);
+        assert!(grid.cell_high > 300.0);
+        assert_eq!(grid.cell_high, 300.0 + grid.label);
+    }
+
+    #[test]
+    fn a_frame_number_is_the_same_size_however_much_the_sheet_shrank() {
+        // Sized with the frames, a number on a sheet of eight full screens lands at four
+        // pixels: drawn, paid for, and unreadable. It is enlarged by exactly as much as
+        // the sheet is about to be reduced.
+        for (count, wide, high) in [(8, 1600, 900), (2, 300, 200), (5, 900, 600)] {
+            let grid = sheet_grid(count, wide, high);
+            let on_screen = grid.label * grid.scale;
+            assert!(
+                (on_screen - SHEET_LABEL).abs() < 0.001,
+                "{count} frames of {wide}x{high} numbered at {on_screen}px"
+            );
+        }
+    }
+
+    #[test]
+    fn a_short_run_does_not_leave_a_row_of_nothing() {
+        // Two frames are two cells side by side, not two in a row of four with two holes.
+        assert_eq!(
+            (sheet_grid(2, 400, 300).across, sheet_grid(2, 400, 300).down),
+            (2, 1)
+        );
+        assert_eq!(
+            (sheet_grid(1, 400, 300).across, sheet_grid(1, 400, 300).down),
+            (1, 1)
+        );
+        // And five wrap onto a second row rather than running off the first.
+        assert_eq!(
+            (sheet_grid(5, 400, 300).across, sheet_grid(5, 400, 300).down),
+            (4, 2)
+        );
+    }
+
+    #[test]
+    fn a_sheet_never_grows_a_small_run() {
+        // Scaling is a ceiling, not a target: two small frames stay their own size rather
+        // than being blown up to fill a sheet nobody asked for.
+        let grid = sheet_grid(2, 200, 150);
+        assert_eq!(grid.scale, 1.0);
+        assert_eq!(grid.width, 400);
     }
 
     #[test]

@@ -595,14 +595,16 @@ describe("marks that are more than one picture", () => {
     expect(detailOf({ tool: "box", frames: 1 })).toBeNull();
   });
 
-  test("the message names a run as a range so the agent reads it in order", () => {
+  test("the message names a run as one sheet and says how to read it", () => {
     const said = summaryFor(
       [{ tool: "record", frames: 6, seconds: 2 }, { tool: "box" }],
       "debug",
       "",
       { app: "Figma", connector: null },
     );
-    expect(said).toContain("1. Recording (mark-1-1.png … mark-1-6.png) — 6 frames over 2s");
+    expect(said).toContain(
+      "1. Recording (mark-1.png, 6 frames in order, left to right and top row first)",
+    );
     // A mark that photographed once keeps the plain name it always had.
     expect(said).toContain("2. Box (mark-2.png)");
   });

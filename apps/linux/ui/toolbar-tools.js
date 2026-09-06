@@ -309,6 +309,22 @@ function samePlace(one, two) {
   return one.id === two.id && one.title === two.title && one.url === two.url;
 }
 
+/**
+ * Whether a mark's frames would rather arrive as one sheet than as a run of pictures.
+ *
+ * A recording, and only a recording. Eight frames of a screen cost about fifteen thousand
+ * image tokens sent separately and under a thousand laid out in a grid — and the grid is
+ * the better picture, because the sequence is visible at a glance instead of having to be
+ * reassembled from eight unrelated images.
+ *
+ * A before-and-after is not on this list on purpose. It is two frames whose whole point is
+ * comparing detail between them, and halving each one to fit a grid would spend exactly
+ * the thing somebody made the mark for. Two pictures is also not a bill.
+ */
+function sheeted(mark) {
+  return mark.tool === "record" && mark.frames > 1;
+}
+
 /** What a mark is called in the message: for a design mark, which kind it is. */
 function labelOf(mark) {
   if (mark.tool === "design") return kindOf(mark).label;
@@ -740,8 +756,9 @@ function summaryFor(marks, mode, text, surface, files) {
   const said_of = (mark, at) => {
     const note = (mark.note || "").trim();
     const detail = detailOf(mark);
-    const files =
-      mark.frames > 1
+    const files = sheeted(mark)
+      ? `mark-${at + 1}.png, ${mark.frames} frames in order, left to right and top row first`
+      : mark.frames > 1
         ? `mark-${at + 1}-1.png … mark-${at + 1}-${mark.frames}.png`
         : `mark-${at + 1}.png`;
     const spot = spotSaid(mark.spot);
