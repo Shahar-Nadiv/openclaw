@@ -18,6 +18,20 @@ const toolbarSource = readFileSync(
 );
 assert.ok(toolbarSource.includes("function summaryFor"), "toolbar decisions file");
 
+/*
+ * The Rust half of two rules this file also owns.
+ *
+ * What a mark is about — which pixels get cropped, and whether the shape is drawn back
+ * onto them — is decided in `colai_marks.rs`, and the page has to agree with it. Neither
+ * language can check the other at compile time, so the numbers and the list are read out
+ * of the source that enforces them rather than restated here.
+ */
+const marksSource = readFileSync(
+  new URL("../apps/linux/src-tauri/src/colai_marks.rs", import.meta.url),
+  "utf8",
+);
+assert.ok(marksSource.includes("fn crop_for"), "the mark geometry file");
+
 type Point = { x: number; y: number };
 type Reserved = { top: number; right: number; bottom: number; left: number };
 type Screen = { x: number; y: number; width: number; height: number; reserved?: Reserved };
@@ -655,18 +669,14 @@ describe("what a recording shows while it runs", () => {
   /*
    * What the capture adds around a region, read out of the capture itself.
    *
-   * The overlay draws the recording frame in the page and the pictures are cropped in
-   * Rust, so the two halves of "do not photograph your own outline" live in different
+   * The overlay draws the recording frame in the page and the crop is decided in Rust,
+   * so the two halves of "do not photograph your own outline" live in different
    * languages and cannot check each other at compile time. Reading the number from its
    * own source is what stops a change on one side from silently putting a red rectangle
    * into every frame of every recording on the other.
    */
-  const capture = readFileSync(
-    new URL("../apps/linux/src-tauri/src/colai_capture.rs", import.meta.url),
-    "utf8",
-  );
-  const room = /const OUTLINE_ROOM: f64 = ([\d.]+);/.exec(capture);
-  assert.ok(room, "OUTLINE_ROOM in colai_capture.rs");
+  const room = /const OUTLINE_ROOM: f64 = ([\d.]+);/.exec(marksSource);
+  assert.ok(room, "OUTLINE_ROOM in colai_marks.rs");
   const OUTLINE_ROOM = Number(room[1]);
 
   test("the frame clears the pixels the pictures are taken from", () => {
@@ -752,12 +762,8 @@ describe("watching a region", () => {
     // agent can be certain of, and it would be ours. The crop is the statement, the way
     // it is for a before-and-after. This is the page's half of a rule whose other half
     // is `drawn_as` in colai_capture.rs, which leaves both bare.
-    const bare = readFileSync(
-      new URL("../apps/linux/src-tauri/src/colai_capture.rs", import.meta.url),
-      "utf8",
-    );
     const list = /fn drawn_as[\s\S]*?matches!\([\s\S]*?mark\.tool\.as_str\(\),([\s\S]*?)\)/.exec(
-      bare,
+      marksSource,
     );
     assert.ok(list, "the tools drawn_as leaves bare");
     expect(list[1]).toContain('"watch"');

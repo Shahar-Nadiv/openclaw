@@ -29,7 +29,8 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::colai_capture::{crop_for, glance_at, moved_by, Mark};
+use crate::colai_capture::{glance_at, moved_by};
+use crate::colai_marks::{crop_for, Mark};
 
 /// How often a watch looks.
 ///
@@ -181,7 +182,7 @@ pub(crate) fn colai_watch_stop(app: AppHandle, mark_id: String) -> Result<(), St
 fn region_of(
     app: &AppHandle,
     mark: &Mark,
-) -> Result<((i32, i32), crate::colai_capture::Crop), String> {
+) -> Result<((i32, i32), crate::colai_marks::Crop), String> {
     let window = app
         .get_webview_window(crate::colai::OVERLAY_LABEL)
         .ok_or_else(|| "The toolbar is not open.".to_string())?;
@@ -202,7 +203,7 @@ async fn keep_looking(
     app: &AppHandle,
     id: &str,
     at: (i32, i32),
-    crop: crate::colai_capture::Crop,
+    crop: crate::colai_marks::Crop,
     stop: &Arc<AtomicBool>,
 ) -> Ended {
     let where_ = (at.0 + crop.x, at.1 + crop.y, crop.width, crop.height);

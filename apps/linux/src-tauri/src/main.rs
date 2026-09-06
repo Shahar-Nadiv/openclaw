@@ -4,6 +4,7 @@ mod colai_capture;
 mod colai_files;
 #[cfg(target_os = "linux")]
 mod colai_inspect;
+mod colai_marks;
 mod colai_receivers;
 mod colai_send;
 mod colai_watch;
