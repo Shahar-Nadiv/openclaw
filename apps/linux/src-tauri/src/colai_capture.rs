@@ -351,6 +351,10 @@ pub(crate) async fn colai_capture_mark(
     };
     let mut frames: Vec<Vec<u8>> = Vec::with_capacity(wanted);
     let mut hex = None;
+    // The size of the picture that actually goes, which is not the size of the region
+    // asked for: a capture wider than an agent will take is shrunk on the way out, and
+    // telling the Gateway the region's size would describe an image nobody has.
+    let mut sent = (crop.width, crop.height);
     for taken in 0..wanted {
         if taken > 0 {
             tokio::time::sleep(RECORD_EVERY).await;
@@ -367,9 +371,10 @@ pub(crate) async fn colai_capture_mark(
             ));
         })
         .map_err(|error| format!("Could not reach the display: {error}"))?;
-        let (png, sampled_hex) = wait
+        let (png, sampled_hex, size) = wait
             .recv()
             .map_err(|_| "The display did not answer.".to_string())??;
+        sent = size;
         // The colour is whatever was there when the first frame was taken. Asking again
         // on every frame would answer with whichever one happened to be last.
         if taken == 0 {
@@ -392,16 +397,16 @@ pub(crate) async fn colai_capture_mark(
         shots.keep(Shot {
             id: mark.id.clone(),
             frames,
-            width: crop.width,
-            height: crop.height,
+            width: sent.0,
+            height: sent.1,
         })?;
         count
     };
     Ok(Taken {
         id: mark.id,
         thumb,
-        width: crop.width,
-        height: crop.height,
+        width: sent.0,
+        height: sent.1,
         hex,
         frames: held,
     })
@@ -423,7 +428,7 @@ fn picture_of(
     drawn: Option<&str>,
     accent: &str,
     sampled: Option<(f64, f64)>,
-) -> Result<(Vec<u8>, Option<String>), String> {
+) -> Result<(Vec<u8>, Option<String>, (i32, i32)), String> {
     use gdk::cairo;
     use gdk::prelude::*;
 
@@ -440,7 +445,8 @@ fn picture_of(
     let hex = sampled.and_then(|(x, y)| pixel_at(&taken, x, y));
 
     let Some(drawn) = drawn else {
-        return Ok((encode(&shrunk(&taken)?)?, hex));
+        let small = shrunk(&taken)?;
+        return Ok((encode(&small)?, hex, (small.width(), small.height())));
     };
 
     let surface = cairo::ImageSurface::create(cairo::Format::Rgb24, width, height)
@@ -455,7 +461,8 @@ fn picture_of(
 
     let marked = gdk::pixbuf_get_from_surface(&surface, 0, 0, width, height)
         .ok_or_else(|| "Could not read the marked picture back.".to_string())?;
-    Ok((encode(&shrunk(&marked)?)?, hex))
+    let small = shrunk(&marked)?;
+    Ok((encode(&small)?, hex, (small.width(), small.height())))
 }
 
 /// The colour of one pixel, as the six digits somebody would paste into a stylesheet.
@@ -634,7 +641,7 @@ fn picture_of(
     _drawn: Option<&str>,
     _accent: &str,
     _sampled: Option<(f64, f64)>,
-) -> Result<(Vec<u8>, Option<String>), String> {
+) -> Result<(Vec<u8>, Option<String>, (i32, i32)), String> {
     Err("Marking the screen is only built for Linux so far.".to_string())
 }
 
