@@ -182,7 +182,13 @@ async function sendMarks(ids, alone) {
             .filter((file) => file.carried)
             .map((file) => file.path),
     });
-    if (who.kind === "thread") state.adopted = [...state.adopted, who.id];
+    if (who.kind === "thread") {
+      state.adopted = [...state.adopted, who.id];
+      // Adopting a thread is what gives it a Gateway session, and a session is the only
+      // thing that can be taken back to an earlier point. Remembered here because this
+      // is the moment it becomes true.
+      state.adoptedKeys = { ...state.adoptedKeys, [who.id]: sent.sessionKey };
+    }
     // Something is now working. Kept from here rather than waiting for the first frame
     // back: an agent that thinks for a minute before saying anything is working the
     // whole time, and a rail that only lights up once it starts talking is a rail that

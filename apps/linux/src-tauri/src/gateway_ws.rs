@@ -310,6 +310,97 @@ pub(crate) struct CatalogContinueResult {
     pub session_key: String,
 }
 
+/// A place in a conversation somebody could go back to.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Point {
+    pub id: String,
+    pub said: String,
+    pub at: Option<i64>,
+}
+
+/// What comes back from a rewind: the words that were in the composer at that point.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Rewound {
+    #[serde(default)]
+    pub editor_text: Option<String>,
+    /// Only a fork makes one; a rewind repoints the conversation it was given.
+    #[serde(default)]
+    pub session_key: Option<String>,
+}
+
+/// The user messages in a transcript, read without insisting on a shape.
+///
+/// Deliberately forgiving. `chat.history` is a large, evolving surface and this needs
+/// exactly three fields out of it — which message was somebody's, what it said, and the
+/// id that names it. Written against a schema rather than an observed response, because
+/// there was no session on the machine to observe one from; so it looks for each field
+/// under the handful of names it could plausibly carry, and finding nothing produces
+/// nothing rather than a guess.
+///
+/// The failure mode is the point: a conversation whose entries carry no id it recognises
+/// comes back empty, and the toolbar says there is nowhere to go back to. That is a
+/// useless answer but a true one, which is the right way round for something that
+/// discards work.
+fn points_in(payload: &Value) -> Vec<Point> {
+    let rows = ["messages", "entries", "history", "items", "log"]
+        .iter()
+        .find_map(|key| payload.get(key).and_then(Value::as_array))
+        .or_else(|| payload.as_array());
+    let Some(rows) = rows else {
+        return Vec::new();
+    };
+    rows.iter()
+        .filter_map(|row| {
+            // A message may be the row, or may be nested under one.
+            let inner = row.get("message").unwrap_or(row);
+            let role = ["role", "author", "from"]
+                .iter()
+                .find_map(|key| inner.get(key).or_else(|| row.get(key)))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if !role.eq_ignore_ascii_case("user") {
+                return None;
+            }
+            let id = ["entryId", "entry_id", "eventId", "event_id", "id"]
+                .iter()
+                .find_map(|key| row.get(key).or_else(|| inner.get(key)))
+                .and_then(Value::as_str)
+                .map(str::to_string)?;
+            Some(Point {
+                said: said_in(inner).or_else(|| said_in(row)).unwrap_or_default(),
+                at: ["ts", "at", "createdAt", "createdAtMs", "timestamp"]
+                    .iter()
+                    .find_map(|key| row.get(key).or_else(|| inner.get(key)))
+                    .and_then(Value::as_i64),
+                id,
+            })
+        })
+        .collect()
+}
+
+/// What a message says, whether it is a string or the usual list of parts.
+fn said_in(message: &Value) -> Option<String> {
+    for key in ["text", "content", "body"] {
+        match message.get(key) {
+            Some(Value::String(text)) => return Some(text.trim().to_string()),
+            Some(Value::Array(parts)) => {
+                let joined = parts
+                    .iter()
+                    .filter_map(|part| part.get("text").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if !joined.trim().is_empty() {
+                    return Some(joined.trim().to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// An automation, as the toolbar asks for one.
 ///
 /// The Gateway's own `cron.add` shape, narrowed to what a panel on an overlay offers:
@@ -461,6 +552,15 @@ enum GatewayRequest {
     ChatAbort {
         key: String,
     },
+    ChatHistory {
+        key: String,
+        limit: u32,
+    },
+    SessionsRewind {
+        key: String,
+        entry_id: String,
+        fork: bool,
+    },
     ChatSend(ChatSendParams),
     RefreshCanvasSurface {
         observed_url: Option<String>,
@@ -481,6 +581,8 @@ enum GatewayResponse {
     SessionsCatalogList(SessionsCatalogListResult),
     SessionsCatalogContinue(CatalogContinueResult),
     CronAdd(CronAdded),
+    History(Vec<Point>),
+    Rewound(Rewound),
     ChatSend(ChatSendAck),
     CanvasSurface(Option<String>),
     #[cfg(target_os = "linux")]
@@ -795,6 +897,40 @@ impl GatewayClient {
     /// The other half of routing: when what is in front has no conversation worth
     /// joining, the answer is a new one where the work is, rather than an agent that
     /// has to be told where the work is.
+    /// The points in a conversation somebody could go back to.
+    pub async fn chat_history(&self, key: &str, limit: u32) -> Result<Vec<Point>, String> {
+        match self
+            .request(GatewayRequest::ChatHistory {
+                key: key.to_string(),
+                limit,
+            })
+            .await?
+        {
+            GatewayResponse::History(points) => Ok(points),
+            _ => Err("The Gateway answered something else.".to_string()),
+        }
+    }
+
+    /// Cut a conversation back to a point, or start a new one from it.
+    pub async fn sessions_rewind(
+        &self,
+        key: &str,
+        entry_id: &str,
+        fork: bool,
+    ) -> Result<Rewound, String> {
+        match self
+            .request(GatewayRequest::SessionsRewind {
+                key: key.to_string(),
+                entry_id: entry_id.to_string(),
+                fork,
+            })
+            .await?
+        {
+            GatewayResponse::Rewound(back) => Ok(back),
+            _ => Err("The Gateway answered something else.".to_string()),
+        }
+    }
+
     /// Stop a run that is underway.
     ///
     /// The one thing this toolbar does that destroys work rather than describing it, so
@@ -1888,6 +2024,38 @@ where
         )
         .await
         .map(|_| GatewayResponse::CanvasSurface(None)),
+        GatewayRequest::ChatHistory { key, limit } => {
+            let payload = request_on_socket(
+                socket,
+                "chat.history",
+                serde_json::json!({ "sessionKey": key, "limit": limit }),
+                budget,
+                dispatch,
+            )
+            .await?;
+            Ok(GatewayResponse::History(points_in(&payload)))
+        }
+        GatewayRequest::SessionsRewind {
+            key,
+            entry_id,
+            fork,
+        } => {
+            let payload = request_on_socket(
+                socket,
+                if fork {
+                    "sessions.fork"
+                } else {
+                    "sessions.rewind"
+                },
+                serde_json::json!({ "sessionKey": key, "entryId": entry_id }),
+                budget,
+                dispatch,
+            )
+            .await?;
+            Ok(GatewayResponse::Rewound(
+                serde_json::from_value(payload).unwrap_or_default(),
+            ))
+        }
         GatewayRequest::CronAdd(asked) => {
             let params = serde_json::to_value(asked).map_err(|error| {
                 RequestFailure::transport(format!("Could not encode cron.add: {error}"))
@@ -2702,6 +2870,68 @@ esac
         assert_eq!(reconnect_backoff(5), Duration::from_secs(16));
         assert_eq!(reconnect_backoff(6), MAX_RECONNECT_DELAY);
         assert_eq!(reconnect_backoff(100), MAX_RECONNECT_DELAY);
+    }
+
+    #[test]
+    fn a_transcript_gives_up_its_user_messages_whatever_it_calls_them() {
+        // Written against a schema rather than an observed response, because there was
+        // no session on the machine to observe one from. So each shape it could
+        // plausibly arrive in is a row here, and the ones it must refuse are too.
+        for (what, payload) in [
+            (
+                "entries under `messages`, ids under `entryId`",
+                json!({"messages": [
+                    {"entryId": "e1", "role": "user", "text": "fix the header gap", "ts": 111},
+                    {"entryId": "e2", "role": "assistant", "text": "done"}
+                ]}),
+            ),
+            (
+                "entries under `entries`, ids under `id`, message nested",
+                json!({"entries": [
+                    {"id": "e1", "message": {"role": "user", "content": "fix the header gap"}, "at": 111}
+                ]}),
+            ),
+            (
+                "a bare array with content parts",
+                json!([
+                    {"eventId": "e1", "role": "user",
+                     "content": [{"type": "text", "text": "fix the header"}, {"type": "text", "text": "gap"}]}
+                ]),
+            ),
+        ] {
+            let points = points_in(&payload);
+            assert_eq!(points.len(), 1, "{what}");
+            assert_eq!(points[0].id, "e1", "{what}");
+            assert!(
+                points[0].said.contains("header"),
+                "{what}: {}",
+                points[0].said
+            );
+        }
+    }
+
+    #[test]
+    fn a_transcript_it_cannot_read_produces_nothing_rather_than_a_guess() {
+        // The failure mode is the point. A useless answer that is true beats a plausible
+        // one that is not, for something whose next step discards work.
+        assert!(points_in(&json!({})).is_empty());
+        assert!(points_in(&json!({"messages": []})).is_empty());
+        // An entry with no id it recognises cannot be rewound to, so it is not offered.
+        assert!(points_in(&json!({"messages": [{"role": "user", "text": "hello"}]})).is_empty());
+        // And only the operator's own messages are places to go back to.
+        assert!(
+            points_in(&json!({"messages": [{"id": "e1", "role": "assistant", "text": "hi"}]}))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_point_with_no_words_is_still_a_point() {
+        // An attachment-only message has an id and a place in the transcript, and being
+        // unable to summarise it is no reason to make it unreachable.
+        let points = points_in(&json!({"messages": [{"id": "e1", "role": "user"}]}));
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].said, "");
     }
 
     #[test]

@@ -17,7 +17,8 @@ use tauri::State;
 
 use crate::colai_capture::MarkShots;
 use crate::gateway_ws::{
-    ChatAttachment, ChatRoutingTarget, CronAdd, CronAdded, GatewayClient, StartHere, ThreadLocator,
+    ChatAttachment, ChatRoutingTarget, CronAdd, CronAdded, GatewayClient, Point, Rewound,
+    StartHere, ThreadLocator,
 };
 
 /// Who is getting this, as the page knows them.
@@ -232,6 +233,44 @@ pub(crate) async fn colai_automate(
             session_key: target.agent_id.is_none().then_some(target.session_key),
             ..asked
         })
+        .await
+}
+
+/// Where a conversation could be taken back to.
+#[tauri::command]
+pub(crate) async fn colai_points(
+    gateway: State<'_, GatewayClient>,
+    session_key: String,
+) -> Result<Vec<Point>, String> {
+    gateway.chat_history(&session_key, POINTS_AT_MOST).await
+}
+
+/// How far back a conversation offers to go.
+///
+/// Not the whole transcript. What somebody is looking for is a message they remember
+/// sending in the last few minutes, and a list long enough to scroll is a list nobody
+/// reads to the end of — while the answer itself is a transcript coming down a socket.
+const POINTS_AT_MOST: u32 = 40;
+
+/// Take a conversation back to one of its own points, or start a new one from there.
+///
+/// Two verbs behind one door because they differ in a single decision — whether the
+/// conversation somebody is looking at survives — and putting them side by side is what
+/// makes that decision visible rather than implied.
+///
+/// This is the first thing on this surface that discards work. It says what it did.
+#[tauri::command]
+pub(crate) async fn colai_rewind(
+    gateway: State<'_, GatewayClient>,
+    session_key: String,
+    entry_id: String,
+    fork: Option<bool>,
+) -> Result<Rewound, String> {
+    if entry_id.trim().is_empty() {
+        return Err("There is no point to go back to.".to_string());
+    }
+    gateway
+        .sessions_rewind(&session_key, &entry_id, fork.unwrap_or(false))
         .await
 }
 

@@ -19,6 +19,8 @@ const el = {
   flyDesign: document.getElementById("fly-design"),
   flyRecord: document.getElementById("fly-record"),
   flyDraw: document.getElementById("fly-draw"),
+  flyRow: document.getElementById("fly-row"),
+  flyPoints: document.getElementById("fly-points"),
   flyAutomate: document.getElementById("fly-automate"),
   flyAgents: document.getElementById("fly-agents"),
   agentRows: document.getElementById("agent-rows"),
@@ -84,6 +86,14 @@ const state = {
   // defaults each time rather than kept: a schedule is about one piece of work, and
   // yesterday's interval sitting in the box is a job somebody creates by accident.
   cron: { ...AUTOMATION_FIRST },
+  // Which conversation the row menu is about, and what it found to go back to.
+  rowMenu: null,
+  points: null,
+  // What this connection is allowed to do, as the Gateway itself reported it. Empty
+  // until the handshake, and empty is not "everything".
+  allowed: [],
+  // The session key a thread got when it was adopted, so it can be gone back through.
+  adoptedKeys: {},
   // The runs the toolbar believes are underway: one per session it has sent to and not
   // yet heard the end of. Kept as a list rather than a flag, because "one agent is
   // working" and "four are" are different things to be told.
@@ -242,6 +252,10 @@ function render() {
   // folded.
   for (const tool of EXACT) buttons[tool].dataset.folded = String(state.tucked);
   if (state.open === "automate") drawAutomation();
+  el.flyRow.hidden = state.open !== "row";
+  el.flyPoints.hidden = state.open !== "points";
+  if (state.open === "row") drawRowMenu();
+  if (state.open === "points") drawPoints();
   el.flyDraw.hidden = state.open !== "draw";
   for (const button of el.flyDraw.children) {
     button.setAttribute("aria-pressed", String(button.dataset.pen === state.pen));
@@ -267,6 +281,8 @@ function render() {
     [el.flyDesign, buttons.design],
     [el.flyRecord, buttons.record],
     [el.flyDraw, buttons.draw],
+    [el.flyRow, buttons.agents],
+    [el.flyPoints, buttons.agents],
     [el.flyAutomate, buttons.send],
     [el.flySend, buttons.send],
     [el.flyAgents, buttons.agents],
@@ -559,6 +575,14 @@ async function start() {
     waiting.turns = [...turns, { said, mine: false }];
     render();
   }).catch(() => {});
+
+  // What this connection may do, so a menu can offer only what will work.
+  void invoke("colai_allowed")
+    .then((allowed) => {
+      state.allowed = allowed || [];
+      render();
+    })
+    .catch(() => {});
 
   void loadWho();
   // The Gateway connects a moment after the app does, so the first ask usually lands

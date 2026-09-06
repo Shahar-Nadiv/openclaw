@@ -149,6 +149,16 @@ type ToolbarHelpers = {
   RUN_QUIET: number;
   sheeted: (mark: { tool: string; frames?: number }) => boolean;
   asksSomething: (said: string) => boolean;
+  canGoBack: (
+    row: { kind: string; id?: string; sessionKey?: string } | null,
+    allowed: string[],
+  ) => { can: boolean; why: string | null };
+  pointSaid: (
+    point: { said?: string; at?: number | null },
+    now: number,
+  ) => { words: string; when: string | null };
+  agoSaid: (at: number, now: number) => string;
+  GOING_BACK: Record<string, { label: string; says: string; fork: boolean }>;
 };
 
 /** A run the toolbar believes is underway. */
@@ -186,7 +196,7 @@ type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, pointSaid, agoSaid, GOING_BACK };`,
   context,
 );
 const {
@@ -244,6 +254,10 @@ const {
   RUN_QUIET,
   sheeted,
   asksSomething,
+  canGoBack,
+  pointSaid,
+  agoSaid,
+  GOING_BACK,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -1813,5 +1827,74 @@ describe("when an agent is asking rather than telling", () => {
     // Anchored to the start of the last line, so prose about a decision is not mistaken
     // for a request to make one.
     expect(asksSomething("I could not tell which of them you meant so I did neither.")).toBe(false);
+  });
+});
+
+describe("taking a conversation back", () => {
+  const admin = ["operator.read", "operator.admin"];
+
+  test("a Gateway session can be gone back through", () => {
+    expect(canGoBack({ kind: "session", id: "s1", sessionKey: "s1" }, admin).can).toBe(true);
+  });
+
+  test("a thread cannot, until it has been sent to once", () => {
+    // Rewinding is a Gateway session's operation, and most of what this list shows is a
+    // thread the Gateway knows about but does not own. Offering it and then refusing
+    // teaches somebody the toolbar is broken.
+    const cold = canGoBack({ kind: "thread", id: "t1" }, admin);
+    expect(cold.can).toBe(false);
+    expect(cold.why).toContain("Send to this conversation once");
+    expect(canGoBack({ kind: "thread", id: "t1", sessionKey: "s9" }, admin).can).toBe(true);
+  });
+
+  test("an agent is not a conversation", () => {
+    expect(canGoBack({ kind: "agent", id: "main" }, admin).can).toBe(false);
+  });
+
+  test("without the scope it is not offered, and says why", () => {
+    // Read off the handshake rather than assumed. A button that always fails is worse
+    // than one that is not there.
+    const no = canGoBack({ kind: "session", id: "s1", sessionKey: "s1" }, ["operator.read"]);
+    expect(no.can).toBe(false);
+    expect(no.why).toContain("not allowed");
+    expect(canGoBack({ kind: "session", id: "s1", sessionKey: "s1" }, []).can).toBe(false);
+  });
+
+  test("the two verbs differ in exactly one decision, and say so", () => {
+    // Whether the conversation somebody is looking at survives it. Side by side, so the
+    // difference is visible rather than implied.
+    expect(GOING_BACK.rewind!.fork).toBe(false);
+    expect(GOING_BACK.branch!.fork).toBe(true);
+    expect(GOING_BACK.rewind!.says).not.toBe(GOING_BACK.branch!.says);
+  });
+
+  test("a point is words and a time, kept apart", () => {
+    // They compete for the same room and the wrong one loses. The words are what
+    // somebody remembers; the time is what tells two similar messages apart.
+    const now = 1_000_000_000_000;
+    expect(pointSaid({ said: "fix  the header\n gap", at: now - 600_000 }, now)).toEqual({
+      words: "fix the header gap",
+      when: "10 minutes ago",
+    });
+    expect(pointSaid({ said: "no clock on this one", at: null }, now).when).toBeNull();
+  });
+
+  test("a message with no words is still a place, and says what it is", () => {
+    // An attachment-only message has a place in the transcript. Being unable to
+    // summarise it is no reason to make it unreachable or to show an empty row.
+    expect(pointSaid({ said: "", at: null }, 0).words).toContain("attachment");
+  });
+
+  test("how long ago is read in whichever unit the Gateway sent", () => {
+    const now = 1_000_000_000_000;
+    // Milliseconds, and the same instant in seconds, must not be four decades apart.
+    expect(agoSaid(now - 600_000, now)).toBe("10 minutes ago");
+    expect(agoSaid((now - 600_000) / 1000, now)).toBe("10 minutes ago");
+    expect(agoSaid(now - 30_000, now)).toBe("just now");
+    expect(agoSaid(now - 7_200_000, now)).toBe("2 hours ago");
+    // One of anything is one of it, not one of them.
+    expect(agoSaid(now - 3_600_000, now)).toBe("1 hour ago");
+    expect(agoSaid(now - 100_000, now)).toBe("2 minutes ago");
+    expect(agoSaid(now - 86_400_000, now)).toBe("1 day ago");
   });
 });

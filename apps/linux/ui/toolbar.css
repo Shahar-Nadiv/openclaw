@@ -657,6 +657,53 @@ body {
   color: #f7f7f8;
 }
 
+/* A row with something else on the end of it. The row keeps the whole width it had; the
+   dots sit beside it rather than inside, because a row is a button and a button cannot
+   hold another one. */
+.row-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.row-line > .row {
+  flex: 1;
+  min-width: 0;
+}
+.row-more {
+  all: unset;
+  flex: 0 0 auto;
+  padding: 0 7px;
+  height: 30px;
+  line-height: 30px;
+  border-radius: 7px;
+  color: #6d6d72;
+  cursor: pointer;
+}
+.row-more:hover {
+  color: #f7f7f8;
+  background: rgb(255 255 255 / 8%);
+}
+/* A row that says what it does under what it is called. Two lines, because a verb and
+   its consequence are not the same size of thing and squeezing them side by side wraps
+   the half somebody reads first. */
+.row-stacked {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  height: auto;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.row-under {
+  color: #8e8e93;
+  font-size: 11px;
+}
+
+.row[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .mode-row {
   display: flex;
   gap: 4px;

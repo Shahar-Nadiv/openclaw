@@ -509,6 +509,81 @@ function automationFor(marks, mode, text, surface) {
  */
 const FOLD_TIME = 220;
 
+/*
+ * ── going back ───────────────────────────────────────────────────────────────
+ *
+ * A conversation can be taken back to one of its own messages. Two verbs behind one
+ * door, because they differ in a single decision — whether the conversation somebody is
+ * looking at survives it — and putting them side by side is what makes that decision
+ * visible instead of implied.
+ *
+ * The thing this must never let somebody believe: **it takes the conversation back, not
+ * the code.** The Gateway's rewind repoints a transcript and touches no files. Somebody
+ * who thinks their work reverted and finds out later is the worst outcome this surface
+ * could produce, so the panel says it where they read it before choosing.
+ */
+const GOING_BACK = {
+  rewind: {
+    label: "Rewind to here",
+    says: "cuts this conversation back",
+    fork: false,
+  },
+  branch: {
+    label: "Branch from here",
+    says: "keeps this one, starts another",
+    fork: true,
+  },
+};
+
+/**
+ * Whether a row in the conversations list can be taken back at all, and why not.
+ *
+ * Rewinding is a Gateway session's operation. Most of what this list shows is a thread —
+ * a conversation the Gateway knows about but does not own — and one of those has no
+ * session until it has been sent to. Saying which is which is the whole job: an action
+ * offered and then refused teaches somebody the toolbar is broken.
+ */
+function canGoBack(row, allowed) {
+  if (!row) return { can: false, why: "There is nothing selected." };
+  if (!(allowed || []).includes("operator.admin")) {
+    return { can: false, why: "This machine is not allowed to rewind conversations." };
+  }
+  if (row.kind === "session" && row.id) return { can: true, why: null };
+  if (row.kind === "thread") {
+    return row.sessionKey
+      ? { can: true, why: null }
+      : { can: false, why: "Send to this conversation once and it can be rewound after that." };
+  }
+  return { can: false, why: "An agent is not a conversation — pick one of its conversations." };
+}
+
+/**
+ * A point in a conversation, as a row somebody can recognise.
+ *
+ * Two halves rather than one sentence, because they compete for the same room and the
+ * wrong one loses. The words are what somebody remembers; the time is what tells two
+ * similar messages apart — so the words ellipsize and the time never does.
+ */
+function pointSaid(point, now) {
+  const words = (point.said || "").trim().replace(/\s+/g, " ");
+  return {
+    words: words || "(no words — an attachment)",
+    when: point.at ? agoSaid(point.at, now) : null,
+  };
+}
+
+/** How long ago something was, in the roundest true words. */
+function agoSaid(at, now) {
+  // Milliseconds or seconds, whichever the Gateway happened to send.
+  const then = at > 1e11 ? at : at * 1000;
+  const apart = Math.max(0, (now - then) / 1000);
+  const many = (count, unit) => `${count} ${unit}${count === 1 ? "" : "s"} ago`;
+  if (apart < 90) return "just now";
+  if (apart < 3600) return many(Math.round(apart / 60), "minute");
+  if (apart < 86400) return many(Math.round(apart / 3600), "hour");
+  return many(Math.round(apart / 86400), "day");
+}
+
 /**
  * Whether what an agent just said is a question waiting on somebody.
  *
