@@ -35,9 +35,16 @@ type ToolbarHelpers = {
   counted: (many: number, noun: string) => string;
   MODES: Record<string, { label: string; says: string }>;
   spanOf: (points: Point[], screen: { width: number; height: number }) => number;
-  detailOf: (mark: { tool: string; px?: number; hex?: string }) => string | null;
+  detailOf: (mark: { tool: string; px?: number; hex?: string; frames?: number }) => string | null;
   summaryFor: (
-    marks: { tool: string; note?: string; dest?: string; px?: number; hex?: string }[],
+    marks: {
+      tool: string;
+      note?: string;
+      dest?: string;
+      px?: number;
+      hex?: string;
+      frames?: number;
+    }[],
     mode: string,
     text: string,
     surface: Surface,
@@ -386,5 +393,33 @@ describe("the two tools that know a number", () => {
     );
     expect(said).toContain("1. Measure (mark-1.png) — 13px apart — should be on the 8px grid");
     expect(said).toContain("2. Colour (mark-2.png) — #3b82f6");
+  });
+});
+
+describe("marks that are more than one picture", () => {
+  test("a recording says how many frames and how long they cover", () => {
+    // The duration is what makes it a recording rather than a pile of screenshots.
+    expect(detailOf({ tool: "record", frames: 6 })).toBe("6 frames over 1.8s");
+  });
+
+  test("a comparison adds nothing, because its name already said it", () => {
+    // The tool is called "Before and after" and its two files are in order. Repeating
+    // that under the title is the toolbar talking to itself.
+    expect(detailOf({ tool: "compare", frames: 2 })).toBeNull();
+  });
+
+  test("one frame is not a sequence", () => {
+    expect(detailOf({ tool: "record", frames: 1 })).toBeNull();
+    expect(detailOf({ tool: "box", frames: 1 })).toBeNull();
+  });
+
+  test("the message names a run as a range so the agent reads it in order", () => {
+    const said = summaryFor([{ tool: "record", frames: 6 }, { tool: "box" }], "debug", "", {
+      app: "Figma",
+      connector: null,
+    });
+    expect(said).toContain("1. Recording (mark-1-1.png … mark-1-6.png) — 6 frames over 1.8s");
+    // A mark that photographed once keeps the plain name it always had.
+    expect(said).toContain("2. Box (mark-2.png)");
   });
 });

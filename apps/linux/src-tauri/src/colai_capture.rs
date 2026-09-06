@@ -172,7 +172,10 @@ pub(crate) fn points_within(mark: &Mark, crop: Crop, width: i32, height: i32) ->
 /// The screenshot tools mark nothing: the crop is the whole statement, and an outline
 /// around the edge of a picture is noise.
 pub(crate) fn drawn_as(mark: &Mark) -> Option<&'static str> {
-    if matches!(mark.tool.as_str(), "screenshot" | "wireframe") {
+    if matches!(
+        mark.tool.as_str(),
+        "screenshot" | "wireframe" | "record" | "compare"
+    ) {
         return None;
     }
     if mark.tool == "measure" {
@@ -186,12 +189,30 @@ pub(crate) fn drawn_as(mark: &Mark) -> Option<&'static str> {
     }
 }
 
-/// A picture taken for a mark, waiting to be sent.
+/// The pictures taken for a mark, waiting to be sent.
+///
+/// A run rather than one image, because a still cannot show a bug that is about
+/// movement — a panel that flickers, a layout that settles wrong, a spinner that never
+/// stops. Most marks are a run of one, which is the same thing said shortly.
 pub(crate) struct Shot {
     pub id: String,
-    pub png: Vec<u8>,
+    pub frames: Vec<Vec<u8>>,
     pub width: i32,
     pub height: i32,
+}
+
+/// How many frames a recording takes, and how far apart.
+///
+/// Short and few on purpose: every frame is an image an agent has to be sent, and six
+/// of them a third of a second apart shows something moving without turning one mark
+/// into a photo album.
+const RECORD_FRAMES: usize = 6;
+const RECORD_EVERY: std::time::Duration = std::time::Duration::from_millis(300);
+
+impl Shot {
+    fn weighs(&self) -> usize {
+        self.frames.iter().map(Vec::len).sum()
+    }
 }
 
 /// The pictures taken for marks nobody has sent yet.
@@ -212,8 +233,7 @@ impl MarkShots {
         held.retain(|kept| kept.id != shot.id);
         held.push(shot);
         while held.len() > SHOTS_KEPT
-            || (held.len() > 1
-                && held.iter().map(|shot| shot.png.len()).sum::<usize>() > SHOTS_WEIGH)
+            || (held.len() > 1 && held.iter().map(Shot::weighs).sum::<usize>() > SHOTS_WEIGH)
         {
             held.remove(0);
         }
@@ -221,13 +241,38 @@ impl MarkShots {
     }
 
     /// The pictures for these marks, in the order asked for, skipping any already gone.
-    pub(crate) fn pick(&self, ids: &[String]) -> Result<Vec<(String, Vec<u8>, i32, i32)>, String> {
+    pub(crate) fn pick(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<(String, Vec<Vec<u8>>, i32, i32)>, String> {
         let held = self.held()?;
         Ok(ids
             .iter()
             .filter_map(|id| held.iter().find(|shot| &shot.id == id))
-            .map(|shot| (shot.id.clone(), shot.png.clone(), shot.width, shot.height))
+            .map(|shot| {
+                (
+                    shot.id.clone(),
+                    shot.frames.clone(),
+                    shot.width,
+                    shot.height,
+                )
+            })
             .collect())
+    }
+
+    /// Add a frame to a mark already photographed, keeping the run in order.
+    ///
+    /// What "before and after" needs: the same region, twice, some work in between.
+    /// Kept as one mark rather than two because the pair is the point — two separate
+    /// marks would be two pictures nobody had said were of the same thing.
+    pub(crate) fn add_frame(&self, id: &str, png: Vec<u8>) -> Result<usize, String> {
+        let mut held = self.held()?;
+        let shot = held
+            .iter_mut()
+            .find(|shot| shot.id == id)
+            .ok_or_else(|| "That mark's first picture is no longer here.".to_string())?;
+        shot.frames.push(png);
+        Ok(shot.frames.len())
     }
 
     pub(crate) fn forget(&self, ids: &[String]) -> Result<(), String> {
@@ -253,6 +298,8 @@ pub(crate) struct Taken {
     pub height: i32,
     /// What colour was under the point, for the one tool that asks.
     pub hex: Option<String>,
+    /// How many pictures were taken. One for everything but a recording.
+    pub frames: usize,
 }
 
 /// Photograph what a mark is about.
@@ -267,6 +314,9 @@ pub(crate) async fn colai_capture_mark(
     app: AppHandle,
     mark: Mark,
     accent: Option<String>,
+    // `again` adds to what this mark already has rather than replacing it: the second
+    // half of a before-and-after.
+    again: Option<bool>,
 ) -> Result<Taken, String> {
     let window = app
         .get_webview_window(crate::colai::OVERLAY_LABEL)
@@ -292,34 +342,68 @@ pub(crate) async fn colai_capture_mark(
     let sampled = (mark.tool == "colour")
         .then(|| within.first().copied())
         .flatten();
-    let (done, wait) = std::sync::mpsc::channel();
-    app.run_on_main_thread(move || {
-        let _ = done.send(picture_of(
-            (crop.x + at.x, crop.y + at.y, crop.width, crop.height),
-            &within,
-            drawn.as_deref(),
-            &accent,
-            sampled,
-        ));
-    })
-    .map_err(|error| format!("Could not reach the display: {error}"))?;
-    let (png, hex) = wait
-        .recv()
-        .map_err(|_| "The display did not answer.".to_string())??;
+    // A recording is the same photograph taken several times. Nothing else about it is
+    // special, which is why it costs a loop rather than a second way of taking pictures.
+    let wanted = if mark.tool == "record" {
+        RECORD_FRAMES
+    } else {
+        1
+    };
+    let mut frames: Vec<Vec<u8>> = Vec::with_capacity(wanted);
+    let mut hex = None;
+    for taken in 0..wanted {
+        if taken > 0 {
+            tokio::time::sleep(RECORD_EVERY).await;
+        }
+        let (done, wait) = std::sync::mpsc::channel();
+        let (within, drawn, accent) = (within.clone(), drawn.clone(), accent.clone());
+        app.run_on_main_thread(move || {
+            let _ = done.send(picture_of(
+                (crop.x + at.x, crop.y + at.y, crop.width, crop.height),
+                &within,
+                drawn.as_deref(),
+                &accent,
+                sampled,
+            ));
+        })
+        .map_err(|error| format!("Could not reach the display: {error}"))?;
+        let (png, sampled_hex) = wait
+            .recv()
+            .map_err(|_| "The display did not answer.".to_string())??;
+        // The colour is whatever was there when the first frame was taken. Asking again
+        // on every frame would answer with whichever one happened to be last.
+        if taken == 0 {
+            hex = sampled_hex;
+        }
+        frames.push(png);
+    }
 
-    let thumb = thumbnail(&png)?;
-    app.state::<MarkShots>().keep(Shot {
-        id: mark.id.clone(),
-        png,
-        width: crop.width,
-        height: crop.height,
-    })?;
+    let first = frames
+        .first()
+        .ok_or_else(|| "Nothing was photographed.".to_string())?;
+    let thumb = thumbnail(first)?;
+    let shots = app.state::<MarkShots>();
+    let held = if again.unwrap_or(false) {
+        // The second half of a before-and-after. The thumbnail stays the first frame:
+        // a pair is best recognised by what it started as.
+        shots.add_frame(&mark.id, frames.remove(0))?
+    } else {
+        let count = frames.len();
+        shots.keep(Shot {
+            id: mark.id.clone(),
+            frames,
+            width: crop.width,
+            height: crop.height,
+        })?;
+        count
+    };
     Ok(Taken {
         id: mark.id,
         thumb,
         width: crop.width,
         height: crop.height,
         hex,
+        frames: held,
     })
 }
 
@@ -701,7 +785,7 @@ mod tests {
             shots
                 .keep(Shot {
                     id: format!("m{at}"),
-                    png: vec![0; 16],
+                    frames: vec![vec![0; 16]],
                     width: 10,
                     height: 10,
                 })
@@ -719,7 +803,7 @@ mod tests {
             shots
                 .keep(Shot {
                     id: "m1".to_string(),
-                    png: vec![7; 4],
+                    frames: vec![vec![7; 4]],
                     width: 1,
                     height: 1,
                 })
@@ -729,6 +813,29 @@ mod tests {
         assert_eq!(shots.pick(&["m1".to_string()]).unwrap().len(), 1);
         shots.forget(&["m1".to_string()]).unwrap();
         assert!(shots.pick(&["m1".to_string()]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_run_of_frames_is_weighed_by_all_of_it() {
+        // The budget is about memory, and a recording is six images under one name. A
+        // store that counted the first frame would hold six times what it thinks.
+        let run = Shot {
+            id: "m1".to_string(),
+            frames: vec![vec![0; 100]; RECORD_FRAMES],
+            width: 10,
+            height: 10,
+        };
+        assert_eq!(run.weighs(), 100 * RECORD_FRAMES);
+    }
+
+    #[test]
+    fn a_recording_draws_nothing_over_itself() {
+        // What changed between the frames is the subject. An outline on every one of
+        // them is the only thing in the picture that does not move.
+        let mut recorded = mark("record", boxed(0.1, 0.1, 0.3, 0.3), vec![]);
+        assert_eq!(drawn_as(&recorded), None);
+        recorded.tool = "compare".to_string();
+        assert_eq!(drawn_as(&recorded), None);
     }
 
     #[test]

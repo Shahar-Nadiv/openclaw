@@ -27,6 +27,10 @@ const GLYPHS = {
     '<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/>',
   send: '<path d="M21 3L10.5 13.5"/><path d="M21 3l-6.8 18-3.7-7.5L3 9.8z"/>',
   measure: '<path d="M4 6v12M20 6v12M4 12h16"/><path d="M8.5 9l-3 3 3 3M15.5 9l3 3-3 3"/>',
+  record:
+    '<rect x="2.5" y="5" width="14" height="14" rx="2.5"/><path d="M16.5 10.2l5-2.7v9l-5-2.7z"/>',
+  compare:
+    '<rect x="2.5" y="5.5" width="8" height="13" rx="1.5"/><rect x="13.5" y="5.5" width="8" height="13" rx="1.5" stroke-dasharray="2.6 2.2"/>',
   colour:
     '<path d="M12 3.5s6 6.4 6 10.1a6 6 0 0 1-12 0C6 9.9 12 3.5 12 3.5z"/><path d="M8.6 14.4a3.4 3.4 0 0 0 3.4 3.2"/>',
 };
@@ -126,6 +130,8 @@ const state = {
   // The mark whose popup is open, if any. One at a time: two dialogs about two regions
   // is a conversation nobody can follow.
   popup: null,
+  // A before-and-after that has its before and is waiting for the world to change.
+  comparing: null,
   // What the next send is for, and anything else somebody wants to say with it.
   mode: "plan",
   text: "",
@@ -183,6 +189,8 @@ function buildRail() {
   exact.append(
     key("measure", "Measure · M", "measure", () => use("measure")),
     key("colour", "Colour · C", "colour", () => use("colour")),
+    key("record", "Record a few seconds · R", "record", () => use("record")),
+    key("compare", "Before and after · A", "compare", () => compareStep()),
   );
   dividers[1].after(exact);
 
@@ -556,14 +564,15 @@ function addMark(mark) {
  * before the pixels underneath it are read, and a frame callback only says the page has
  * drawn, not that anybody has seen it.
  */
-async function shoot(mark) {
+async function shoot(mark, again) {
   document.body.style.visibility = "hidden";
   try {
     await new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn)));
     await new Promise((waited) => setTimeout(waited, 40));
-    const taken = await invoke("colai_capture_mark", { mark, accent: accentNow() });
+    const taken = await invoke("colai_capture_mark", { mark, accent: accentNow(), again });
     if (taken.hex) mark.hex = taken.hex;
-    mark.thumb = taken.thumb;
+    mark.frames = taken.frames;
+    if (!again) mark.thumb = taken.thumb;
     mark.shot = `${taken.width}\u00d7${taken.height}`;
   } catch (error) {
     // The mark still exists and can still be described; it simply arrives without a
@@ -572,11 +581,36 @@ async function shoot(mark) {
   } finally {
     document.body.style.visibility = "";
   }
+  // A before-and-after is not finished by its first picture. It waits, visibly, for
+  // whatever is about to happen to happen.
+  if (mark.tool === "compare" && !again) {
+    state.comparing = mark.id;
+    render();
+    return;
+  }
+  state.comparing = null;
   state.popup = mark.id;
   render();
   // The note is a text field and one way out is a key, and neither works while the
   // window manager treats this window as scenery.
   void invoke("colai_take_keyboard").catch(() => {});
+}
+
+/**
+ * The second half of a before-and-after, or the start of one.
+ *
+ * The same key does both, because they are one gesture with a pause in the middle:
+ * mark the thing, go and change it, press again. A separate button for the second half
+ * would be a button that does nothing most of the time.
+ */
+function compareStep() {
+  const waiting = state.marks.find((mark) => mark.id === state.comparing);
+  if (!waiting) {
+    use("compare");
+    return;
+  }
+  state.comparing = null;
+  void shoot(waiting, true);
 }
 
 /** The colour the app is themed in, if it has told us one. */
@@ -609,6 +643,13 @@ function render() {
       button.setAttribute("aria-pressed", String(state.open === "agents"));
     } else if (id === "send") {
       button.setAttribute("aria-pressed", String(state.open === "send"));
+    } else if (id === "compare") {
+      // Lit while it is holding a "before", because a toolbar quietly waiting on you is
+      // a toolbar you have forgotten about.
+      button.setAttribute("aria-pressed", String(state.comparing !== null || state.tool === "compare"));
+      button.title = state.comparing
+        ? "Capture the after · A"
+        : "Before and after · A";
     } else if (TOOLS[id]) {
       button.setAttribute("aria-pressed", String(state.tool === id));
     }
@@ -984,6 +1025,12 @@ function boxAround(node) {
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.popup !== null) {
     cancelMark(state.popup);
+    return;
+  }
+  if (event.key === "Escape" && state.comparing !== null) {
+    // A before with no after is half a thought. Escape drops it the way it drops a
+    // popup: onto the redo trail, not into nothing.
+    cancelMark(state.comparing);
     return;
   }
   if (event.key === "Escape") {

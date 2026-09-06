@@ -407,7 +407,10 @@ enum GatewayRequest {
     SessionsList,
     SessionsCatalogList,
     SessionsCatalogContinue(ThreadLocator),
-    WatchSession { key: String, watching: bool },
+    WatchSession {
+        key: String,
+        watching: bool,
+    },
     ChatSend(ChatSendParams),
     RefreshCanvasSurface {
         observed_url: Option<String>,

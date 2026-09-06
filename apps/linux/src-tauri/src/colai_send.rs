@@ -128,21 +128,29 @@ async fn resolve(
 /// The pictures for these marks, named in the order the message describes them.
 ///
 /// The names matter: the message says "mark 2" and the agent has to be able to tell
-/// which picture that is.
+/// which picture that is. A mark that photographed once keeps the plain name it always
+/// had; a recording numbers its frames after it, so a set of six is a sequence rather
+/// than six unrelated pictures of the same corner of a screen.
 fn attach(shots: &MarkShots, mark_ids: &[String]) -> Result<Vec<ChatAttachment>, String> {
-    Ok(shots
-        .pick(mark_ids)?
-        .into_iter()
-        .enumerate()
-        .map(|(at, (_, png, width, height))| ChatAttachment {
-            kind: "image".to_string(),
-            mime_type: "image/png".to_string(),
-            file_name: format!("mark-{}.png", at + 1),
-            content: base64::engine::general_purpose::STANDARD.encode(png),
-            width,
-            height,
-        })
-        .collect())
+    let mut carried = Vec::new();
+    for (at, (_, frames, width, height)) in shots.pick(mark_ids)?.into_iter().enumerate() {
+        let many = frames.len() > 1;
+        for (frame, png) in frames.into_iter().enumerate() {
+            carried.push(ChatAttachment {
+                kind: "image".to_string(),
+                mime_type: "image/png".to_string(),
+                file_name: if many {
+                    format!("mark-{}-{}.png", at + 1, frame + 1)
+                } else {
+                    format!("mark-{}.png", at + 1)
+                },
+                content: base64::engine::general_purpose::STANDARD.encode(png),
+                width,
+                height,
+            });
+        }
+    }
+    Ok(carried)
 }
 
 /// Stop listening to a conversation.

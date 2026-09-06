@@ -30,6 +30,8 @@ const TOOLS = {
   circle: { label: "Circle", press: "O", glyph: "circle", writes: false },
   measure: { label: "Measure", press: "M", glyph: "measure", writes: false },
   colour: { label: "Colour", press: "C", glyph: "colour", writes: false },
+  record: { label: "Recording", press: "R", glyph: "record", writes: false },
+  compare: { label: "Before and after", press: "A", glyph: "compare", writes: false },
   wireframe: { label: "Create wireframe", glyph: "wireframe", writes: false },
   screenshot: { label: "Screenshot", glyph: "screenshot", writes: false },
 };
@@ -58,6 +60,9 @@ const MODES = {
 /** Where a wireframe goes when nobody says otherwise. */
 const WIREFRAME_HOME = "docs/Design/";
 
+/** How far apart a recording's frames are, which is what makes it a duration. */
+const RECORD_EVERY = 300;
+
 /**
  * What each tool draws while it is being dragged, if anything.
  *
@@ -72,6 +77,8 @@ const DRAWS = {
   screenshot: "box",
   wireframe: "box",
   measure: "span",
+  record: "box",
+  compare: "box",
 };
 
 /** The tools for which a click that selected nothing means the whole display. */
@@ -86,6 +93,8 @@ const KEYS = {
   o: "circle",
   m: "measure",
   c: "colour",
+  r: "record",
+  a: "compare",
 };
 
 /**
@@ -106,7 +115,11 @@ function summaryFor(marks, mode, text, surface) {
     const tool = TOOLS[mark.tool];
     const note = (mark.note || "").trim();
     const detail = detailOf(mark);
-    const named = `${at + 1}. ${tool ? tool.label : mark.tool} (mark-${at + 1}.png)`;
+    const files =
+      mark.frames > 1
+        ? `mark-${at + 1}-1.png … mark-${at + 1}-${mark.frames}.png`
+        : `mark-${at + 1}.png`;
+    const named = `${at + 1}. ${tool ? tool.label : mark.tool} (${files})`;
     return [named, detail, note].filter(Boolean).join(" — ");
   };
   if (marks.length) {
@@ -332,6 +345,12 @@ function detailOf(mark) {
     return `${mark.px}px apart`;
   }
   if (mark.tool === "colour" && mark.hex) return mark.hex;
+  // A recording says how long it covers, because a run of pictures with no duration is
+  // just pictures. A comparison says nothing here: its own name is "Before and after",
+  // and the two files in order say the rest.
+  if (mark.tool === "record" && mark.frames > 1) {
+    return `${mark.frames} frames over ${(mark.frames * RECORD_EVERY) / 1000}s`;
+  }
   return null;
 }
 
