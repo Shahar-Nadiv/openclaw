@@ -32,6 +32,18 @@ pub(crate) struct ToolbarAgent {
 ///
 /// System agents are left out, the way Quick Chat leaves them out: they are machinery
 /// rather than somebody you would hand a region to.
+/// What this connection may do, so the toolbar can offer only what will work.
+///
+/// Asked rather than assumed. Rewinding a conversation needs a scope a desktop token may
+/// simply not carry, and a menu item that always fails is worse than one that is absent —
+/// it teaches somebody the toolbar is broken.
+#[tauri::command]
+pub(crate) fn colai_allowed(
+    gateway: tauri::State<'_, crate::gateway_ws::GatewayClient>,
+) -> Vec<String> {
+    gateway.scopes()
+}
+
 #[tauri::command]
 pub(crate) async fn colai_agents(
     gateway: tauri::State<'_, crate::gateway_ws::GatewayClient>,

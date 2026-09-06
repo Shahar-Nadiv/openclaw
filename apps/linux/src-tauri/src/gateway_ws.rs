@@ -612,6 +612,8 @@ struct GatewayClientInner {
     agents_cache: Mutex<Option<CachedAgents>>,
     identity: Mutex<Option<GatewayDeviceIdentityStore>>,
     canvas_surface: Mutex<CanvasSurfaceState>,
+    /// What the Gateway said this connection may do, from the last handshake.
+    scopes: Mutex<Vec<String>>,
     user_accent: Mutex<Option<String>>,
     connection_notice: Mutex<Option<String>>,
     connection_state: AtomicU64,
@@ -632,6 +634,7 @@ impl GatewayClient {
                 config: Mutex::new(None),
                 config_generation: AtomicU64::new(0),
                 commands: Mutex::new(None),
+                scopes: Mutex::new(Vec::new()),
                 agents_cache: Mutex::new(None),
                 identity: Mutex::new(None),
                 canvas_surface: Mutex::new(CanvasSurfaceState::default()),
@@ -1244,6 +1247,9 @@ impl GatewayClient {
         if let Some(device_token) = hello.device_token.as_deref() {
             self.persist_device_token(&config.ws_url, device_token)?;
         }
+        if let Ok(mut held) = self.inner.scopes.lock() {
+            *held = hello.scopes.clone();
+        }
         self.set_canvas_surface_url(
             generation,
             gated_canvas_surface_url(hello.canvas_surface_url, inline_widgets_available),
@@ -1391,6 +1397,18 @@ impl GatewayClient {
             fetched_at: Instant::now(),
             result,
         });
+    }
+
+    /// What this connection is allowed to do, as the Gateway last reported it.
+    ///
+    /// Empty before the first handshake, and empty is not "everything" — a toolbar that
+    /// offered an action because it had not heard yet would offer one that fails.
+    pub fn scopes(&self) -> Vec<String> {
+        self.inner
+            .scopes
+            .lock()
+            .map(|held| held.clone())
+            .unwrap_or_default()
     }
 
     fn set_canvas_surface_url(&self, generation: u64, url: Option<String>) {
@@ -2052,6 +2070,7 @@ struct ValidatedHello {
     device_token: Option<String>,
     tick_watch_timeout: Duration,
     canvas_surface_url: Option<String>,
+    scopes: Vec<String>,
 }
 
 impl ValidatedHello {
@@ -2059,8 +2078,10 @@ impl ValidatedHello {
         device_token: Option<String>,
         tick_watch_timeout: Duration,
         canvas_surface_url: Option<String>,
+        scopes: Vec<String>,
     ) -> Self {
         Self {
+            scopes,
             device_token,
             tick_watch_timeout,
             canvas_surface_url,
@@ -2097,6 +2118,14 @@ fn validate_hello(payload: Value) -> Result<ValidatedHello, String> {
     #[serde(rename_all = "camelCase")]
     struct HelloAuth {
         device_token: Option<String>,
+        /// What this connection is allowed to do, as the Gateway itself reports it.
+        ///
+        /// Read rather than assumed. Several things worth offering — rewinding a
+        /// conversation among them — need a scope a desktop token may simply not have,
+        /// and a menu item that always fails is worse than one that is not there. This
+        /// is how the toolbar knows which of the two to show.
+        #[serde(default)]
+        scopes: Vec<String>,
     }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -2126,6 +2155,7 @@ fn validate_hello(payload: Value) -> Result<ValidatedHello, String> {
         .unwrap_or(30_000)
         .max(1);
     let issued_device_auth = hello.auth.device_token;
+    let scopes = hello.auth.scopes;
     let canvas_surface_url = hello
         .plugin_surface_urls
         .and_then(|surface_urls| surface_urls.get("canvas").cloned())
@@ -2135,6 +2165,7 @@ fn validate_hello(payload: Value) -> Result<ValidatedHello, String> {
         issued_device_auth,
         Duration::from_millis(tick_interval_ms).saturating_mul(2),
         canvas_surface_url,
+        scopes,
     ))
 }
 

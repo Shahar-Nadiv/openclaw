@@ -1444,6 +1444,7 @@ fn main() {
         colai::colai_frontmost,
         colai::colai_screens,
         colai::colai_take_keyboard,
+        colai_receivers::colai_allowed,
         colai_receivers::colai_agents,
         colai_receivers::colai_sessions,
         colai_receivers::colai_threads,
