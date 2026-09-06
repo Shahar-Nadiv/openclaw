@@ -1338,3 +1338,35 @@ describe("the glass and the picture draw the same mark", () => {
     );
   });
 });
+
+describe("a key says what is behind it", () => {
+  const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+
+  test("every key with a right-click menu wears the wedge", () => {
+    // The bug this exists for is invisible by construction: a menu behind a key that
+    // looks like every other key is a menu nobody finds. It happened twice — the design
+    // family and then the pens — and both times the only symptom was somebody asking
+    // where the feature was.
+    const wearing = new Set([...rail.matchAll(/key\("(\w+)"[^\n]*\bMORE\)/g)].map((f) => f[1]));
+    const listening = new Set(
+      [
+        ...(/for \(const \[id, which\] of \[([\s\S]*?)\]\) \{/.exec(rail)?.[1] ?? "").matchAll(
+          /\["(\w+)", "\w+"\]/g,
+        ),
+      ].map((f) => f[1]),
+    );
+    expect(listening.size).toBeGreaterThan(0);
+    // As sets, because the order two lists happen to be written in is not the invariant.
+    expect(wearing).toEqual(listening);
+  });
+
+  test("the two marks mean two different things and are not the same mark", () => {
+    // A caret means the key *is* a menu; a wedge means the key is a tool that has
+    // variants. A key that opened a list when somebody meant to draw is the worse half
+    // of that trade, so they must not look alike.
+    expect(rail).toContain('const MENU = "caret"');
+    expect(rail).toContain('const MORE = "wedge"');
+    const sheet = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+    expect(sheet).toContain(".key-more");
+  });
+});

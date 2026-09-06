@@ -99,7 +99,22 @@ function openclawMark(size) {
 
 const buttons = {};
 
-function key(id, title, glyph, onClick, caret) {
+/**
+ * The two marks a key can wear, and why they are not the same mark.
+ *
+ * A caret beside the glyph means the key *is* a menu: pressing it opens a list and
+ * nothing else happens. A wedge in the corner means the key is a tool that has variants
+ * — pressing it draws, and the variants are a right click away. Same idea, different
+ * promise, so they cannot look alike; a key that opened a menu when somebody expected
+ * to draw would be the worse half of that trade.
+ *
+ * The wedge is the older idiom, off every drawing application there has ever been, and
+ * it is here because without it a right-click menu is a feature nobody finds.
+ */
+const MENU = "caret";
+const MORE = "wedge";
+
+function key(id, title, glyph, onClick, mark) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "key";
@@ -110,7 +125,8 @@ function key(id, title, glyph, onClick, caret) {
     // Only the keys that count something get somewhere to put it; the rest would carry
     // an empty span for the life of the rail.
     (id === "watch" ? '<span class="watch-many"></span>' : "") +
-    (caret ? '<span class="caret">▾</span>' : "");
+    (mark === MENU ? '<span class="caret">▾</span>' : "") +
+    (mark === MORE ? '<span class="key-more" aria-hidden="true"></span>' : "");
   button.addEventListener("click", onClick);
   buttons[id] = button;
   return button;
@@ -122,9 +138,9 @@ function buildRail() {
   tools.append(
     key("pointer", "Pointer · V", "pointer", () => use("pointer")),
     key("pointAt", "Point at · P", "pointAt", () => use("pointAt")),
-    key("draw", "Draw · D · right-click to pick a pen", "draw", () => use("draw")),
-    key("shape", "Box / circle · S", "shape", () => flyout("shape"), true),
-    key("design", "Design", "design", () => flyout("design"), true),
+    key("draw", "Draw · D · right-click to pick a pen", "draw", () => use("draw"), MORE),
+    key("shape", "Box / circle · S", "shape", () => flyout("shape"), MENU),
+    key("design", "Design", "design", () => flyout("design"), MENU),
   );
   dividers[0].after(tools);
 
@@ -143,10 +159,10 @@ function buildRail() {
   // to read when it is shorter — not that somewhere else is a better home for them.
   const exact = document.createDocumentFragment();
   exact.append(
-    key("exact", "Measure, colour, record…", "more", toggleTucked, true),
+    key("exact", "Measure, colour, record…", "more", toggleTucked, MENU),
     key("measure", "Measure · M", "measure", () => use("measure")),
     key("colour", "Colour · C", "colour", () => use("colour")),
-    key("record", "Record · R · right-click for how long", "record", () => use("record")),
+    key("record", "Record · R · right-click for how long", "record", () => use("record"), MORE),
     key("compare", "Before and after · A", "compare", () => compareStep()),
     key("watch", "Watch for a change · W", "watch", () => use("watch")),
     key("inspect", "Inspect what is there · I", "inspect", () => use("inspect")),

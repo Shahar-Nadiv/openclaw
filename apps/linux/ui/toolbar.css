@@ -110,6 +110,8 @@ body {
 .key {
   all: unset;
   box-sizing: border-box;
+  /* The corner wedge hangs off this. */
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -201,6 +203,32 @@ body {
   .caret {
     transition: none;
   }
+}
+
+/*
+ * "There is more behind this key."
+ *
+ * The wedge in the corner off every drawing application there has ever been. It is a
+ * hint and not a target: at four pixels nobody could hit it on purpose, and the thing
+ * it hints at is a right click. Deliberately unlike the caret beside a glyph, which
+ * means the key itself opens a menu — one promises variants, the other promises a list,
+ * and a key that opened a list when somebody meant to draw is the worse of the two.
+ */
+.key-more {
+  position: absolute;
+  /* Inside the disc a pressed key wears, not in the corner of the square box it does
+     not: five pixels is where the diagonal still lands on the circle. */
+  right: 5px;
+  bottom: 5px;
+  width: 0;
+  height: 0;
+  border-left: 4.5px solid transparent;
+  border-bottom: 4.5px solid currentColor;
+  opacity: 0.55;
+}
+.key:hover .key-more,
+.key[aria-pressed="true"] .key-more {
+  opacity: 1;
 }
 
 .key:hover:not([disabled]):not([aria-pressed="true"]) {
