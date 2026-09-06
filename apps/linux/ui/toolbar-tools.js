@@ -848,6 +848,33 @@ function headOf(from, to, screen) {
   ];
 }
 
+/**
+ * The tools you keep using without being interrupted.
+ *
+ * Annotating is not one thing at a time. You circle three buttons and *then* say they are
+ * misaligned; you point at a label and an icon and a gap and *then* ask why they
+ * disagree. For these four, a press outside the popup keeps the mark you just made and
+ * begins the next one, instead of discarding it.
+ *
+ * The rest are not on this list because they each answer one question in one go — a
+ * distance, a colour, a recording, what the desktop says is under the pointer. Nobody
+ * accumulates those, and for them a press outside still means "never mind".
+ */
+const KEEPS_MARKING = ["pointAt", "box", "circle", "draw"];
+
+/**
+ * What a mark is called on screen, which has to be what it is called in the message.
+ *
+ * One number from one place. Pins used to carry their own count — of pins only — while
+ * the message numbered every mark, so a box followed by a pin showed "1" on the glass and
+ * was called "2" in the words. With one mark on screen nobody noticed; with four it is
+ * the difference between a readable screen and a pile of red rectangles.
+ */
+function numberOf(marks, mark) {
+  const at = (marks || []).indexOf(mark);
+  return at < 0 ? null : at + 1;
+}
+
 /** The tools for which a click that selected nothing means the whole display. */
 const WHOLE_DISPLAY = ["screenshot", "design"];
 

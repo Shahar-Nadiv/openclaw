@@ -1291,6 +1291,20 @@ body {
   touch-action: none;
 }
 
+/*
+ * A mark's number, and the number the message gives it.
+ *
+ * A pin has nothing else to show for itself, so its badge sits on the spot and is the
+ * mark. Anything with a shape already draws that shape, so its badge sits at the corner
+ * and gets out of the way — smaller, and outside the region rather than over the thing
+ * somebody was pointing at.
+ */
+.pin[data-pointing="false"] {
+  width: 17px;
+  height: 17px;
+  font-size: 10px;
+  transform: translate(-55%, -55%);
+}
 .pin {
   position: absolute;
   display: grid;

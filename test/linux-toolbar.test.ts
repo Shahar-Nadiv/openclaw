@@ -159,6 +159,8 @@ type ToolbarHelpers = {
   ) => { words: string; when: string | null };
   agoSaid: (at: number, now: number) => string;
   GOING_BACK: Record<string, { label: string; says: string; fork: boolean }>;
+  KEEPS_MARKING: string[];
+  numberOf: (marks: unknown[] | undefined, mark: unknown) => number | null;
 };
 
 /** A run the toolbar believes is underway. */
@@ -196,7 +198,7 @@ type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, pointSaid, agoSaid, GOING_BACK };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, pointSaid, agoSaid, GOING_BACK, KEEPS_MARKING, numberOf };`,
   context,
 );
 const {
@@ -258,6 +260,8 @@ const {
   pointSaid,
   agoSaid,
   GOING_BACK,
+  KEEPS_MARKING,
+  numberOf,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -1909,5 +1913,47 @@ describe("taking a conversation back", () => {
     expect(agoSaid(now - 3_600_000, now)).toBe("1 hour ago");
     expect(agoSaid(now - 100_000, now)).toBe("2 minutes ago");
     expect(agoSaid(now - 86_400_000, now)).toBe("1 day ago");
+  });
+});
+
+describe("marking several things before saying anything", () => {
+  test("annotating accumulates; answering a question does not", () => {
+    // Asserted against the whole tool table rather than as a list, so a tool added later
+    // is not silently left out of the decision — which is how a rule like this rots.
+    expect([...KEEPS_MARKING].toSorted()).toEqual(["box", "circle", "draw", "pointAt"]);
+    for (const tool of Object.keys(TOOLS)) {
+      const accumulates = KEEPS_MARKING.includes(tool);
+      // Every one of these answers one question in one go. Nobody makes three colour
+      // readings before saying anything about them.
+      const answers = ["measure", "colour", "record", "watch", "inspect", "screenshot", "design"];
+      if (answers.includes(tool)) {
+        expect(accumulates, tool).toBe(false);
+      }
+    }
+  });
+
+  test("the pointer is not a marking tool and does not accumulate", () => {
+    expect(KEEPS_MARKING).not.toContain("pointer");
+  });
+
+  test("a mark is called the same thing on the glass and in the message", () => {
+    // The bug this replaces: pins counted only pins while the message numbered every
+    // mark, so a box followed by a pin showed "1" on screen and was called "2" in the
+    // words. Nobody saw it with one mark on screen.
+    const marks = [{ tool: "box" }, { tool: "pointAt" }, { tool: "circle" }];
+    const said = summaryFor(marks, "ask", "", null);
+    for (const [at, mark] of marks.entries()) {
+      const number = numberOf(marks, mark);
+      expect(number).toBe(at + 1);
+      expect(said).toContain(`${number}. `);
+    }
+    // And the pin — the one that used to count for itself — is the second of the three.
+    expect(numberOf(marks, marks[1])).toBe(2);
+  });
+
+  test("a mark that is not in the list has no number", () => {
+    expect(numberOf([{ tool: "box" }], { tool: "circle" })).toBeNull();
+    expect(numberOf([], { tool: "box" })).toBeNull();
+    expect(numberOf(undefined, { tool: "box" })).toBeNull();
   });
 });

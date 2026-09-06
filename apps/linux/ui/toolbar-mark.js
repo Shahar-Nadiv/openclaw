@@ -43,11 +43,20 @@ function startGesture(event) {
   // is underneath, and swallowing it is how an overlay earns a reputation.
   if (event.button !== 0) return;
   event.preventDefault();
-  // Anywhere off the popup is the third way out of it. The catcher covers the whole
-  // desk and the popup is stacked above it, so this only ever fires outside.
+  // A press off the popup. The catcher covers the whole desk and the popup is stacked
+  // above it, so this only ever fires outside.
+  //
+  // For a tool somebody is annotating with, that means "keep that one, here is another":
+  // the mark is already photographed and already in the tray, so the popup simply closes
+  // and a new gesture begins under the same press. For everything else it still means
+  // never mind, which is the third way out the popup was given.
   if (state.popup !== null) {
-    cancelMark(state.popup);
-    return;
+    if (!KEEPS_MARKING.includes(state.tool)) {
+      cancelMark(state.popup);
+      return;
+    }
+    state.popup = null;
+    render();
   }
   if (event.target.setPointerCapture) event.target.setPointerCapture(event.pointerId);
 
@@ -335,17 +344,21 @@ function drawMarks() {
   el.marks.replaceChildren(...drawn);
   if (live) el.marks.append(live);
 
-  let number = 0;
+  // Every waiting mark wears its number, and it is the number the message will give it.
+  // One mark on screen needed none of this; four of them are unreadable without it.
   const drawnPins = state.marks
-    .filter((mark) => mark.tool === "pointAt")
     .map((mark) => {
+      const spot = badgeAt(mark);
+      if (!spot) return null;
       const pin = document.createElement("span");
       pin.className = "pin";
-      pin.style.left = `${mark.points[0].x * 100}%`;
-      pin.style.top = `${mark.points[0].y * 100}%`;
-      pin.textContent = String(++number);
+      pin.dataset.pointing = String(mark.tool === "pointAt");
+      pin.style.left = `${spot.x * 100}%`;
+      pin.style.top = `${spot.y * 100}%`;
+      pin.textContent = String(numberOf(state.marks, mark));
       return pin;
-    });
+    })
+    .filter(Boolean);
   // A measurement's whole point is its number, so the number is on the screen and not
   // only in the message. Written in HTML rather than into the marks layer, which is a
   // unit square stretched to the display and would stretch the text with it.
@@ -395,6 +408,17 @@ async function showing(where, mark) {
   if (seen && seen.url) return { ...where, url: seen.url };
   state.mute.add(where.id);
   return where;
+}
+
+/**
+ * Where a mark's number sits: on a pin, or at the top-left corner of anything with a
+ * shape. Nothing for a mark that has neither, which is a screenshot of the whole display
+ * — a number in the corner of the desktop labels the desktop.
+ */
+function badgeAt(mark) {
+  if (mark.region) return { x: mark.region.box.x, y: mark.region.box.y };
+  if (mark.points && mark.points.length) return mark.points[0];
+  return null;
 }
 
 /** How big the layer the marks are stretched over actually is, in pixels. */
