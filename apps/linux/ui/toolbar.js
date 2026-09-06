@@ -7,6 +7,7 @@
 
 const tauri = window["__TAURI__"];
 const invoke = tauri ? tauri.core.invoke : async () => undefined;
+const listen = tauri ? tauri.event.listen : async () => () => {};
 
 const GLYPHS = {
   pointer: '<path d="M5 3.5l14.5 7.2-6.3 1.6-2.3 6.1z"/><path d="M12.4 12.3l5.6 5.7"/>',
@@ -88,6 +89,7 @@ const el = {
   pins: document.getElementById("pins"),
   capture: document.getElementById("capture"),
   popup: document.getElementById("popup"),
+  answers: document.getElementById("answers"),
   flySend: document.getElementById("fly-send"),
 };
 
@@ -136,6 +138,10 @@ const state = {
   // What went wrong, when something did. Null the rest of the time, which is the rest
   // of the time.
   trouble: null,
+  // What has been sent and is still owed an answer, and the answers that have arrived.
+  // Kept after the marks themselves are gone, because the point of an answer is that it
+  // comes back to the place the question was asked about.
+  answers: [],
 };
 
 /* ── the rail ───────────────────────────────────────────────────────────── */
@@ -654,6 +660,7 @@ function render() {
   }
 
   drawMarks();
+  drawAnswers();
   drawPopup();
   drawTrouble();
   // Left mounted while a popup is open, which is how a click off the popup is heard at
@@ -757,6 +764,26 @@ function drawMarks() {
  * reading its own state back — the kind of thing somebody notices once and then never
  * reads again, while it sits over their work.
  */
+/**
+ * What an agent actually said, out of a message that may be many things.
+ *
+ * A turn carries tool calls, reasoning and images as well as words. Only the words are
+ * an answer, and only from the other side — the echo of the question going in is not a
+ * reply to it.
+ */
+function spokenBy(message) {
+  if (!message || message.role !== "assistant") return null;
+  const content = message.content;
+  if (typeof content === "string") return content.trim() || null;
+  if (!Array.isArray(content)) return null;
+  const words = content
+    .filter((part) => part && part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text.trim())
+    .filter(Boolean)
+    .join("\n\n");
+  return words || null;
+}
+
 /** The overlay's own size, which is what a fraction of it is a fraction of. */
 function screenNow() {
   return { width: window.innerWidth, height: window.innerHeight };
@@ -770,6 +797,63 @@ function spanLabel(points, said) {
   label.style.top = `${((from.y + to.y) / 2) * 100}%`;
   label.textContent = said;
   return label;
+}
+
+/**
+ * The answers, waiting or arrived, on the regions they are about.
+ *
+ * Each one is measured for the input shape on its own rather than as a group: a pin at
+ * one corner of the screen and a pin at the other would otherwise claim everything
+ * between them, and everything between them is somebody's desktop.
+ */
+function drawAnswers() {
+  el.answers.replaceChildren(
+    ...state.answers.map((answer) => {
+      const at = document.createElement("div");
+      at.className = "answer-at";
+      at.style.left = `${answer.at.x * 100}%`;
+      at.style.top = `${answer.at.y * 100}%`;
+
+      const dot = document.createElement("button");
+      dot.type = "button";
+      dot.className = "answer-dot";
+      dot.dataset.waiting = String(!answer.said);
+      dot.title = answer.said ? `Reply from ${answer.who}` : `Waiting on ${answer.who}`;
+      dot.textContent = answer.said ? "" : "…";
+      dot.addEventListener("click", () => {
+        answer.open = !answer.open;
+        render();
+      });
+      at.append(dot);
+
+      if (answer.open && answer.said) {
+        const panel = document.createElement("div");
+        panel.className = "answer-said";
+        const who = document.createElement("p");
+        who.className = "answer-who";
+        who.textContent = answer.who;
+        const said = document.createElement("p");
+        said.className = "answer-text";
+        said.textContent = answer.said;
+        const done = document.createElement("button");
+        done.type = "button";
+        done.className = "popup-do";
+        done.textContent = "Done";
+        done.addEventListener("click", () => void forgetAnswer(answer));
+        panel.append(who, said, done);
+        at.append(panel);
+      }
+      return at;
+    }),
+  );
+}
+
+/** Stop waiting on a conversation, and stop the Gateway talking to nobody. */
+async function forgetAnswer(answer) {
+  state.answers = state.answers.filter((held) => held !== answer);
+  render();
+  const still = state.answers.some((held) => held.sessionKey === answer.sessionKey);
+  if (!still) await invoke("colai_unwatch", { sessionKey: answer.sessionKey }).catch(() => {});
 }
 
 function drawTrouble() {
@@ -792,6 +876,7 @@ function shape() {
       ? [{ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }]
       : [boxAround(el.wrap)];
   if (state.popup !== null && !el.popup.hidden) rects.push(boxAround(el.popup));
+  for (const answer of el.answers.children) rects.push(boxAround(answer));
   const key = JSON.stringify(rects);
   if (key === shaped) return;
   shaped = key;
@@ -930,6 +1015,22 @@ async function start() {
   } catch {
     state.surface = null;
   }
+
+  // Answers, as they arrive. A session says a great deal — the question going in, the
+  // work coming out — and only what an agent finally said back is an answer to what was
+  // pointed at.
+  void listen("colai:reply", (event) => {
+    const payload = event && event.payload;
+    if (!payload) return;
+    const waiting = state.answers.find(
+      (answer) => answer.sessionKey === payload.sessionKey && !answer.said,
+    );
+    if (!waiting) return;
+    const said = spokenBy(payload.message);
+    if (!said) return;
+    waiting.said = said;
+    render();
+  }).catch(() => {});
 
   void loadWho();
   // The Gateway connects a moment after the app does, so the first ask usually lands

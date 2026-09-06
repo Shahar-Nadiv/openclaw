@@ -26,6 +26,28 @@ function cancelMark(id) {
   render();
 }
 
+/**
+ * The middle of everything being sent, in fractions of the overlay.
+ *
+ * One answer for a batch, placed over the things it was asked about. Sending three
+ * marks and getting three identical pins would be three copies of one reply pretending
+ * to be three answers.
+ */
+function middleOf(marks) {
+  const spots = marks.flatMap((mark) =>
+    mark.region
+      ? [
+          { x: mark.region.box.x + mark.region.box.w / 2, y: mark.region.box.y + mark.region.box.h / 2 },
+        ]
+      : mark.points,
+  );
+  if (spots.length === 0) return { x: 0.5, y: 0.5 };
+  return {
+    x: spots.reduce((sum, spot) => sum + spot.x, 0) / spots.length,
+    y: spots.reduce((sum, spot) => sum + spot.y, 0) / spots.length,
+  };
+}
+
 /** The marks that go in the next send, in the order they were made. */
 function chosenMarks() {
   return state.marks.filter((mark) => mark.chosen);
@@ -85,10 +107,25 @@ async function sendMarks(ids) {
     state.text = "";
     state.popup = null;
     state.open = null;
-    // Nothing is said about it. What was sent leaves the tray and the count on the rail
-    // drops, which is the outcome — a line announcing what just visibly happened is the
-    // sort of thing somebody reads once and then reads past forever.
-    state.trouble = null;
+    // Where to put the answer when it comes. The marks are about to be cleared, so the
+    // place they were asking about has to be kept now or the reply has nowhere to land
+    // — which was the whole trouble with this surface: you sent, and nothing ever came
+    // back to the screen you were looking at.
+    // Only when the answer can actually come back. A pin waiting on a reply that will
+    // never arrive here looks exactly like an agent still thinking, which is the one
+    // thing it must not look like.
+    if (sent.watching) {
+      state.answers.push({
+        sessionKey: sent.sessionKey,
+        at: middleOf(going),
+        who: state.receiving.name || who.id,
+        said: null,
+        open: false,
+      });
+    }
+    state.trouble = sent.watching
+      ? null
+      : `Sent, but the reply will only be in ${state.receiving.name || who.id} — colai could not listen for it here.`;
   } catch (error) {
     state.trouble = `Could not send — ${error && error.message ? error.message : String(error)}`;
   } finally {

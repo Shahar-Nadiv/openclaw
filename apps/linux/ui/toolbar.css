@@ -620,6 +620,81 @@ body {
   cursor: default;
 }
 
+/* ── answers, on the regions they are about ───────────────────────────────── */
+
+/*
+ * The layer takes no pointer at all; the pins and panels in it take their own. Anything
+ * else and a full-screen sheet would sit between somebody and their desktop for as long
+ * as they were waiting on an agent.
+ */
+.answers {
+  position: absolute;
+  inset: 0;
+  z-index: 65;
+  pointer-events: none;
+}
+.answer-at {
+  position: absolute;
+  transform: translate(-50%, -50%);
+}
+.answer-dot {
+  all: unset;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  cursor: pointer;
+  pointer-events: auto;
+  font-size: 11px;
+  color: #1c1c1e;
+  background: var(--accent, #ff6b6b);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 50%);
+}
+/* Still waiting: it breathes, so it reads as pending rather than as an answer nobody
+   has opened. */
+.answer-dot[data-waiting="true"] {
+  background: rgb(28 28 30 / 97%);
+  color: #f7f7f8;
+  border: 1px solid var(--accent, #ff6b6b);
+  animation: breathe 1.8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .answer-dot[data-waiting="true"] {
+    animation: none;
+  }
+}
+
+.answer-said {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  width: 320px;
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 11px 12px;
+  border-radius: 12px;
+  pointer-events: auto;
+  background: rgb(20 20 22 / 98%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 60%);
+}
+.answer-who {
+  margin: 0 0 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8e8e93;
+}
+.answer-text {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #f7f7f8;
+  white-space: pre-wrap;
+}
+
 /* A measurement's number, sitting on the line it belongs to. */
 .span-label {
   position: absolute;

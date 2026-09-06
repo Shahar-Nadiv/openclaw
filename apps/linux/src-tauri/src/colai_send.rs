@@ -40,6 +40,13 @@ pub(crate) struct Sent {
     /// is still described in the message; it just arrives without its picture, and the
     /// receipt should not claim otherwise.
     pub pictures: usize,
+    /// Whether the reply will find its way back to the screen.
+    ///
+    /// Said rather than swallowed. A subscription that quietly failed leaves a mark
+    /// waiting on an answer that is never coming, which looks exactly like an agent
+    /// thinking about it — the worst of both, since the answer did arrive, just
+    /// somewhere else.
+    pub watching: bool,
 }
 
 /// Send the marked work to whoever was chosen.
@@ -71,10 +78,18 @@ pub(crate) async fn colai_send(
     // Only once it has landed. A failed send that had already forgotten its pictures
     // would leave the marks in the tray with nothing behind them.
     shots.forget(&mark_ids)?;
+    // Listening is not worth failing the send over — the message has already landed,
+    // and all that is lost is the answer coming back to the screen rather than to the
+    // conversation. Worth saying, though, which is what `watching` is for.
+    let watching = gateway
+        .watch_session(&sent.target.session_key, true)
+        .await
+        .is_ok();
     Ok(Sent {
         session_key: sent.target.session_key,
         run_id: sent.run_id,
         pictures,
+        watching,
     })
 }
 
@@ -128,4 +143,17 @@ fn attach(shots: &MarkShots, mark_ids: &[String]) -> Result<Vec<ChatAttachment>,
             height,
         })
         .collect())
+}
+
+/// Stop listening to a conversation.
+///
+/// Called when the overlay is put away and when what was being waited on is dismissed.
+/// A subscription the Gateway is holding for a window that has gone is a socket kept
+/// open for nobody.
+#[tauri::command]
+pub(crate) async fn colai_unwatch(
+    gateway: State<'_, GatewayClient>,
+    session_key: String,
+) -> Result<(), String> {
+    gateway.watch_session(&session_key, false).await
 }

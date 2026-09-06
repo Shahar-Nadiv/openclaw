@@ -24,6 +24,7 @@ commands.allow = [
   "colai_capture_mark",
   "colai_forget_marks",
   "colai_send",
+  "colai_unwatch",
   "colai_release",
   "colai_open_settings",
 ]

@@ -1445,6 +1445,7 @@ fn main() {
         colai_capture::colai_capture_mark,
         colai_capture::colai_forget_marks,
         colai_send::colai_send,
+        colai_send::colai_unwatch,
         colai::colai_summon,
         colai::colai_release,
         colai::colai_open_settings

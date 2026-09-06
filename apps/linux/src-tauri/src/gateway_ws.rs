@@ -35,6 +35,8 @@ use uuid::Uuid;
 const AGENT_KIND_CLIENT_CAPABILITY: &str = "agent-kind";
 const GATEWAY_STATE_EVENT: &str = "quickchat:gateway-state";
 const CHAT_EVENT: &str = "quickchat:chat-event";
+/// What the toolbar hears when a session it is watching says something.
+const REPLY_EVENT: &str = "colai:reply";
 const GATEWAY_DEVICE_IDENTITY_FILE: &str = "quickchat-gateway-device.json";
 const AGENTS_CACHE_TTL: Duration = Duration::from_secs(60);
 /// How many conversations the toolbar's picker asks for.
@@ -405,6 +407,7 @@ enum GatewayRequest {
     SessionsList,
     SessionsCatalogList,
     SessionsCatalogContinue(ThreadLocator),
+    WatchSession { key: String, watching: bool },
     ChatSend(ChatSendParams),
     RefreshCanvasSurface {
         observed_url: Option<String>,
@@ -728,6 +731,20 @@ impl GatewayClient {
             );
         };
         Ok(result)
+    }
+
+    /// Hear what a session says from now on, or stop hearing it.
+    ///
+    /// A subscription is a thing the server holds open, so letting go is not optional
+    /// housekeeping: an overlay that is put away while still listening leaves the
+    /// Gateway talking to nobody.
+    pub async fn watch_session(&self, key: &str, watching: bool) -> Result<(), String> {
+        self.request(GatewayRequest::WatchSession {
+            key: key.to_string(),
+            watching,
+        })
+        .await
+        .map(|_| ())
     }
 
     /// Adopt a conversation held elsewhere, and learn the session key it now answers to.
@@ -1116,6 +1133,7 @@ impl GatewayClient {
         let config_changed = AtomicBool::new(false);
         let dispatch = |frame: &Value| {
             dispatch_chat_event(app, frame);
+            dispatch_session_message(app, frame);
             if frame.get("type").and_then(Value::as_str) == Some("event")
                 && frame.get("event").and_then(Value::as_str) == Some("config.changed")
             {
@@ -1709,6 +1727,16 @@ where
                     ))
                 })
         }
+        GatewayRequest::WatchSession { key, watching } => {
+            let method = if watching {
+                "sessions.messages.subscribe"
+            } else {
+                "sessions.messages.unsubscribe"
+            };
+            request_on_socket(socket, method, json!({ "key": key }), budget, dispatch)
+                .await
+                .map(|_| GatewayResponse::CanvasSurface(None))
+        }
         GatewayRequest::SessionsCatalogContinue(locator) => {
             let params = serde_json::to_value(locator).map_err(|error| {
                 RequestFailure::transport(format!(
@@ -2110,6 +2138,22 @@ where
         }),
         Message::Close(_) => Err(RequestFailure::transport("Gateway connection closed.")),
         _ => Ok(()),
+    }
+}
+
+/// A message from a session the toolbar is watching, sent to the overlay.
+///
+/// The same pushed frames Quick Chat reads, filtered differently. Emitted raw, because
+/// deciding which reply belongs to which mark is the page's business and it already
+/// knows what it sent where.
+fn dispatch_session_message<R: tauri::Runtime>(app: &AppHandle<R>, frame: &Value) {
+    if frame.get("type").and_then(Value::as_str) != Some("event")
+        || frame.get("event").and_then(Value::as_str) != Some("session.message")
+    {
+        return;
+    }
+    if let Some(payload) = frame.get("payload") {
+        let _ = app.emit_to(crate::colai::OVERLAY_LABEL, REPLY_EVENT, payload.clone());
     }
 }
 
