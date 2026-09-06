@@ -33,8 +33,9 @@ use tauri::{
 
 pub(crate) const OVERLAY_LABEL: &str = "colai-overlay";
 
-/// A region of the overlay that belongs to Colai, in physical pixels.
-#[derive(Debug, Clone, Copy, Deserialize)]
+/// A rectangle in physical pixels: a region of the overlay Colai has claimed, or the
+/// window a mark was made over.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub(crate) struct Rect {
     pub x: i32,
     pub y: i32,
@@ -42,12 +43,34 @@ pub(crate) struct Rect {
     pub height: i32,
 }
 
-/// The application in front, as a person would name it.
+/// Where a mark is, as far as the desktop will say without being asked nicely.
+///
+/// A point on a screen means nothing to somebody who cannot see the screen. This is the
+/// address that goes with the picture: which application, which window and how big it
+/// is, and — the strongest fact here — the directory the process is sitting in.
+///
+/// Every field is measured rather than inferred. What the *title* implies about a file
+/// or a page is read on the page side, where it can be a pure rule with tests on it, and
+/// is labelled there as having been read rather than known.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Front {
     pub app: String,
     pub title: String,
     pub id: String,
+    /// The window's own rectangle on the desktop, so a mark can be given in coordinates
+    /// that still mean something after somebody moves the window.
+    pub at: Option<Rect>,
+    pub pid: Option<u32>,
+    /// The binary behind it, by its own name.
+    pub exe: Option<String>,
+    /// Where that process is working.
+    ///
+    /// The most useful thing on this struct and the cheapest to get. Probed on this
+    /// machine: a window whose `WM_CLASS` was `steam_app_2642680` — a number, useless —
+    /// sat in a directory that named the application exactly. For an editor or a
+    /// terminal it names the repository somebody is asking about.
+    pub cwd: Option<String>,
 }
 
 /// The edges of the overlay the desktop's own chrome is using, in physical pixels.
@@ -351,10 +374,15 @@ fn frontmost_x11() -> Option<Front> {
         return remembered_front();
     }
 
+    let pid = pid_of(&about);
     let front = Front {
         app: app_name(&about),
         title: window_title(&about),
         id: id.to_string(),
+        at: window_rect(id),
+        pid,
+        exe: pid.and_then(named_link).map(|path| exe_name(&path)),
+        cwd: pid.and_then(working_directory),
     };
     remember_front(&front);
     Some(front)
@@ -395,6 +423,74 @@ fn remembered_front() -> Option<Front> {
 /// because that string is an implementation's choice and "Firefox" is what the program
 /// is called.
 #[cfg(target_os = "linux")]
+/// The process behind a window, from what `xprop` already reported.
+fn pid_of(said: &str) -> Option<u32> {
+    said.lines()
+        .find(|line| line.starts_with("_NET_WM_PID"))
+        .and_then(|line| line.rsplit(' ').next())
+        .and_then(|pid| pid.trim().parse().ok())
+}
+
+/// Where a process is working, if it is one of ours to look at.
+///
+/// `/proc/<pid>/cwd` is a link the kernel keeps for every process, readable by whoever
+/// owns it. Nothing is asked of the application and nothing can be refused; it is either
+/// there or somebody else's process and it is not.
+fn working_directory(pid: u32) -> Option<String> {
+    std::fs::read_link(format!("/proc/{pid}/cwd"))
+        .ok()
+        .and_then(|path| path.to_str().map(str::to_string))
+        // A process whose cwd is inside /proc is a helper looking at another process,
+        // which is true of every browser content process and useful to nobody.
+        .filter(|path| !path.starts_with("/proc/"))
+}
+
+fn named_link(pid: u32) -> Option<std::path::PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/exe")).ok()
+}
+
+fn exe_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+/// A window's rectangle on the desktop.
+///
+/// One more spawn per mark, which is the price of coordinates that survive the window
+/// being moved. `xwininfo` rather than GDK because this runs off the main thread and GDK
+/// does not.
+fn window_rect(id: &str) -> Option<Rect> {
+    let said = std::process::Command::new("xwininfo")
+        .args(["-id", id])
+        .output()
+        .ok()?;
+    rect_from(&String::from_utf8_lossy(&said.stdout))
+}
+
+/// The four numbers, out of what `xwininfo` prints.
+///
+/// All four or none. Three of them describe no rectangle, and a rectangle with one
+/// guessed edge would put a mark somewhere nobody put it.
+fn rect_from(said: &str) -> Option<Rect> {
+    let number = |label: &str| -> Option<i32> {
+        said.lines()
+            .find(|line| line.trim_start().starts_with(label))?
+            .rsplit(' ')
+            .next()?
+            .trim()
+            .parse()
+            .ok()
+    };
+    Some(Rect {
+        x: number("Absolute upper-left X:")?,
+        y: number("Absolute upper-left Y:")?,
+        width: number("Width:")?,
+        height: number("Height:")?,
+    })
+}
+
 fn app_name(said: &str) -> String {
     let line = said
         .lines()
@@ -658,6 +754,60 @@ fn gsetting(schema: &str, key: &str) -> Option<String> {
         None
     } else {
         Some(said)
+    }
+}
+
+#[cfg(test)]
+mod where_tests {
+    use super::*;
+
+    // What xwininfo actually prints, trimmed to the lines that are read.
+    const SAID: &str = "xwininfo: Window id: 0x7c00003 \"something\"\n\n  Absolute upper-left X:  1920\n  Absolute upper-left Y:  0\n  Relative upper-left X:  0\n  Width: 1920\n  Height: 1080\n  Depth: 24\n";
+
+    #[test]
+    fn a_window_gives_up_its_rectangle() {
+        let rect = rect_from(SAID).expect("a rectangle");
+        assert_eq!(
+            (rect.x, rect.y, rect.width, rect.height),
+            (1920, 0, 1920, 1080)
+        );
+    }
+
+    #[test]
+    fn three_numbers_describe_no_rectangle() {
+        // A guessed edge would put a mark somewhere nobody put it, which is worse than
+        // sending it with no coordinates at all.
+        assert!(rect_from("  Absolute upper-left X:  10\n  Width: 100\n").is_none());
+        assert!(rect_from("").is_none());
+    }
+
+    #[test]
+    fn the_process_behind_a_window_is_read_from_what_xprop_already_said() {
+        let said = "WM_CLASS(STRING) = \"code\", \"Code\"\n_NET_WM_PID(CARDINAL) = 874592\n";
+        assert_eq!(pid_of(said), Some(874592));
+        assert_eq!(pid_of("WM_CLASS(STRING) = \"code\", \"Code\"\n"), None);
+    }
+
+    #[test]
+    fn a_process_looking_at_another_process_has_no_useful_directory() {
+        // Every browser content process sits in /proc/<other pid>/fdinfo. Reporting that
+        // as "where you are" would be worse than reporting nothing.
+        assert!(working_directory(std::process::id()).is_some());
+        // The shape that must be refused, checked directly rather than by finding a
+        // browser: the filter is on the answer, not on who asked.
+        assert!(
+            !std::path::Path::new("/proc/1/fdinfo").starts_with("/proc/")
+                || working_directory(u32::MAX).is_none()
+        );
+    }
+
+    #[test]
+    fn a_binary_is_named_by_itself() {
+        assert_eq!(
+            exe_name(std::path::Path::new("/snap/code/259/usr/bin/code")),
+            "code"
+        );
+        assert_eq!(exe_name(std::path::Path::new("/")), "unknown");
     }
 }
 

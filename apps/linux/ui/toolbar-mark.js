@@ -230,6 +230,13 @@ async function photograph(mark, again) {
   // reading that once when the app started answered a question about a different
   // afternoon.
   await learnFront();
+  // The address goes on the mark rather than being read at send time. Two marks made in
+  // two applications are two addresses, and one global read at the end would label both
+  // with whichever happened to be last — confidently, and wrongly.
+  if (!again) {
+    mark.where = await showing(state.surface, mark);
+    mark.spot = spotIn(mark, mark.where, screenSize());
+  }
   document.body.style.visibility = "hidden";
   try {
     await new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn)));
@@ -297,7 +304,10 @@ async function learnFront() {
     // is what a write is refused on, and defaulting it otherwise would make the refusal
     // meaningless. The title comes with it, because that is where an editor puts the
     // name of the repository it has open.
-    state.surface = front ? { app: front.app, title: front.title, connector: null } : null;
+    // Everything the desktop and the kernel would say, kept whole. `connector` is
+    // still null because no surface registry exists yet, and stating it is what makes
+    // the write gate's refusal mean something.
+    state.surface = front ? { ...front, connector: null } : null;
   } catch {
     state.surface = null;
   }
@@ -385,6 +395,32 @@ function drawMarks() {
  * an answer, and only from the other side — the echo of the question going in is not a
  * reply to it.
  */
+/**
+ * The address, with whatever the desktop is willing to add to it.
+ *
+ * The cheap half is already in hand and cannot fail. This asks for the half that can —
+ * a page's real URL — which costs a quarter of a second at worst.
+ *
+ * Asked once per window, ever. Which windows can answer is decided by asking them
+ * rather than by a list of browser names, but a window that exposes no document will
+ * not start exposing one, so the second reading of an editor or a terminal is a quarter
+ * of a second spent learning what the first one already knew. Only the *no* is
+ * remembered: a browser's URL changes with every tab, and a remembered one would be a
+ * confident answer about a page somebody left.
+ */
+async function showing(where, mark) {
+  if (!where) return where;
+  if (state.mute.has(where.id)) return where;
+  const at = middleOf([mark]);
+  const seen = await invoke("colai_showing", {
+    x: Math.round(at.x * window.innerWidth),
+    y: Math.round(at.y * window.innerHeight),
+  }).catch(() => null);
+  if (seen && seen.url) return { ...where, url: seen.url };
+  state.mute.add(where.id);
+  return where;
+}
+
 /** How big the layer the marks are stretched over actually is, in pixels. */
 function screenSize() {
   return { width: window.innerWidth, height: window.innerHeight };

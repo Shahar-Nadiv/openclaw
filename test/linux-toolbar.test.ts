@@ -74,6 +74,8 @@ type ToolbarHelpers = {
       seconds?: number;
       design?: string;
       pen?: string;
+      where?: Front | null;
+      spot?: Spot | null;
     }[],
     mode: string,
     text: string,
@@ -115,7 +117,7 @@ type ToolbarHelpers = {
   scheduleSays: (cron: Cron) => string | null;
   nameFor: (marks: { note?: string }[], text: string, surface: Surface) => string;
   automationFor: (
-    marks: { tool: string; note?: string }[],
+    marks: { tool: string; note?: string; where?: Front | null; spot?: Spot | null }[],
     mode: string,
     text: string,
     surface: Surface,
@@ -133,7 +135,31 @@ type ToolbarHelpers = {
   ARROW_LEAST: number;
   ARROW_MOST: number;
   HIGHLIGHT_WIDE: number;
+  placeOf: (front: Front | null) => Place;
+  whereSaid: (where: Front | null) => string[];
+  spotIn: (
+    mark: { region?: { box: Box } | null; points?: Point[] },
+    where: Front | null,
+    screen: { width: number; height: number },
+  ) => Spot | null;
+  spotSaid: (spot: Spot | null) => string | null;
+  samePlace: (one: Front | null, two: Front | null) => boolean;
 };
+
+/** Where a mark was made, as the toolbar gathers it. */
+type Front = {
+  app?: string;
+  title?: string;
+  id?: string;
+  cwd?: string;
+  exe?: string;
+  url?: string;
+  folder?: string;
+  at?: { x: number; y: number; width: number; height: number } | null;
+};
+type Place = { file?: string; project?: string; page?: string; path?: string };
+type Box = { x: number; y: number; w: number; h: number };
+type Spot = { x: number; y: number; width?: number; height?: number; to?: Point };
 
 /** The automation being written, as the panel holds it. */
 type Cron = {
@@ -152,7 +178,7 @@ type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace };`,
   context,
 );
 const {
@@ -200,6 +226,11 @@ const {
   ARROW_LEAST,
   ARROW_MOST,
   HIGHLIGHT_WIDE,
+  placeOf,
+  whereSaid,
+  spotIn,
+  spotSaid,
+  samePlace,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -410,17 +441,18 @@ describe("what the agent is actually sent", () => {
       "",
       surface,
     );
-    expect(said).toContain("2 things marked on Openclaw Desktop:");
+    expect(said).toContain("In Openclaw Desktop");
     // The number, the tool and the file name travel together, because three images
     // arriving as a set are only tellable apart by their names.
     expect(said).toContain("1. Box (mark-1.png) — this padding is wrong");
     expect(said).toContain("2. Point at (mark-2.png)");
   });
 
-  test("one thing is one thing, not 1 things", () => {
-    expect(summaryFor([{ tool: "circle" }], "ask", "", surface)).toContain(
-      "One thing marked on Openclaw Desktop:",
-    );
+  test("the message opens with where it happened, before what happened", () => {
+    // The address is what an agent needs first: which application, and from there
+    // everything else. It used to be a count and an app name on one line, which said
+    // how many but not where.
+    expect(summaryFor([{ tool: "circle" }], "ask", "", surface)).toContain("In Openclaw Desktop");
   });
 
   test("the instruction comes last, and what you wrote comes after it", () => {
@@ -455,10 +487,8 @@ describe("what the agent is actually sent", () => {
     expect(said).toBe(`Ask: ${MODES.ask!.says}\n\nwhat does the rail do?`);
   });
 
-  test("not knowing what is in front does not invent an application", () => {
-    expect(summaryFor([{ tool: "box" }], "plan", "", null)).toContain(
-      "One thing marked on screen:",
-    );
+  test("not knowing where you are is said, not invented", () => {
+    expect(summaryFor([{ tool: "box" }], "plan", "", null)).toContain("the desktop would not say");
   });
 });
 
@@ -1142,7 +1172,7 @@ describe("scheduling what was marked", () => {
     expect(said).toContain("Debug:");
     expect(said).toContain("Tell me if this goes red.");
     expect(said).toContain("About: the build status");
-    expect(said).toContain("on Firefox");
+    expect(said).toContain("In Firefox");
     expect(said).toContain("No pictures travel");
   });
 
@@ -1378,5 +1408,246 @@ describe("nothing is reachable only by right click", () => {
     // A second idiom for the same idea is a second thing to learn for no gain.
     expect(page).toContain('const MENU = "caret"');
     expect(page).not.toContain("key-more");
+  });
+});
+
+describe("what a window title says about where you are", () => {
+  /*
+   * The guessing layer, and the one that will be wrong in a way nobody notices. Titles
+   * are a convention rather than an interface, so every rule matches a shape only one
+   * kind of application produces — and the rows that must yield *nothing* are the point
+   * of this table, not an afterthought.
+   */
+  const read = (title: string, app = "", exe = "") => placeOf({ title, app, exe });
+
+  test("an editor gives up the file and the folder it is in", () => {
+    expect(read("toolbar-rail.js — colai - Visual Studio Code")).toEqual({
+      file: "toolbar-rail.js",
+      project: "colai",
+    });
+    // Unsaved work wears a dot, which is not part of the filename.
+    expect(read("● main.rs — openclaw - Visual Studio Code")).toEqual({
+      file: "main.rs",
+      project: "openclaw",
+    });
+    expect(read("notes.md (~/Documents) - Text Editor")).toEqual({
+      file: "notes.md",
+      project: "~/Documents",
+    });
+  });
+
+  test("a browser gives up the page it is on, and never pretends to know the address", () => {
+    // The URL is the layer above. A title that looked like one would be the worst
+    // possible fact here: confidently wrong, and impossible to tell apart from a real
+    // one further down the message.
+    expect(read("Billing · Example — Mozilla Firefox")).toEqual({ page: "Billing · Example" });
+    expect(read("Pull requests - Google Chrome")).toEqual({ page: "Pull requests" });
+    expect(read("Docs — Mozilla Firefox").page).not.toContain("http");
+  });
+
+  test("a terminal gives up the path it is sitting in", () => {
+    expect(read("someone@machine: ~/Desktop/colai")).toEqual({ path: "~/Desktop/colai" });
+  });
+
+  test("a title it does not recognise says nothing at all", () => {
+    // Far more often the right answer than any guess. Every one of these contains a
+    // separator some rule could have latched onto.
+    expect(read("")).toEqual({});
+    expect(read("Half Sword Demo")).toEqual({});
+    expect(read("Slack | general | Example")).toEqual({});
+    expect(read("Settings")).toEqual({});
+    // A dash in a page's own title, in an application that is not a browser.
+    expect(read("Getting started - a guide")).toEqual({});
+  });
+
+  test("the editor shape does not fire for something that merely resembles it", () => {
+    // An em dash and a hyphen in one line is not enough; the application at the end has
+    // to be one that writes its titles that way.
+    expect(read("Chapter 3 — the middle - a novel")).toEqual({});
+  });
+});
+
+describe("the address that travels with a mark", () => {
+  const code: Front = {
+    app: "Code",
+    id: "0x1",
+    title: "toolbar-rail.js — colai - Visual Studio Code",
+    cwd: "/home/someone/Desktop/colai",
+    at: { x: 0, y: 0, width: 1920, height: 1080 },
+  };
+  const browser: Front = {
+    app: "Firefox",
+    id: "0x2",
+    title: "Billing · Example — Mozilla Firefox",
+    url: "https://app.example.com/settings#billing",
+    at: { x: 1920, y: 0, width: 1600, height: 900 },
+  };
+
+  test("the working directory leads, because it is the fact that cannot be wrong", () => {
+    // Probed on a real desktop: a window whose class was `steam_app_2642680` sat in a
+    // directory that named the application exactly. The title is a convention; this is
+    // the kernel.
+    const said = whereSaid(code).join("\n");
+    expect(said).toContain("In Code — /home/someone/Desktop/colai");
+    expect(said).toContain("window 1920×1080");
+  });
+
+  test("a fact read from a title says that it was", () => {
+    // An agent must never be unable to tell something measured from something inferred.
+    const said = whereSaid(code).join("\n");
+    expect(said).toContain("file toolbar-rail.js in colai (read from the title)");
+    expect(said).not.toContain("/home/someone/Desktop/colai (read from the title)");
+  });
+
+  test("a real URL replaces the page title rather than sitting beside it", () => {
+    const said = whereSaid(browser).join("\n");
+    expect(said).toContain("https://app.example.com/settings#billing");
+    expect(said).not.toContain("(read from the title)");
+  });
+
+  test("a page with no address says the address was missing", () => {
+    // An agent given a page title and no URL knows it has to go and find the page. One
+    // given nothing assumes there was never a page to find. Measured on this desktop:
+    // holding an accessibility connection open does not make browsers start answering,
+    // so this is the common case and not the rare one.
+    const said = whereSaid({ ...browser, url: undefined }).join("\n");
+    expect(said).toContain('page "Billing · Example"');
+    expect(said).toContain("the URL was not available");
+  });
+
+  test("no address is said as no address, not as nothing", () => {
+    expect(whereSaid(null).join(" ")).toContain("would not say");
+  });
+
+  test("two windows are two addresses, however alike they look", () => {
+    // The bug this exists for: one surface read at send time labelled every mark in a
+    // batch with whichever window happened to be last.
+    expect(samePlace(code, code)).toBe(true);
+    expect(samePlace(code, browser)).toBe(false);
+    expect(samePlace(code, { ...code, id: "0x9" })).toBe(false);
+    expect(samePlace(browser, { ...browser, url: "https://app.example.com/other" })).toBe(false);
+  });
+});
+
+describe("where a mark sits in the window it was made over", () => {
+  const screen = { width: 3520, height: 1080 };
+  const second: Front = {
+    app: "Firefox",
+    id: "0x2",
+    at: { x: 1920, y: 0, width: 1600, height: 900 },
+  };
+
+  test("a region is given in the window's own pixels, not the desktop's", () => {
+    // A desktop coordinate stops being true the moment somebody moves the window, and
+    // means nothing to an agent that never saw the desk.
+    const spot = spotIn({ region: { box: { x: 0.6, y: 0.1, w: 0.1, h: 0.1 } } }, second, screen);
+    expect(spot).toEqual({ x: 0.6 * 3520 - 1920, y: 108, width: 352, height: 108 });
+    expect(spotSaid(spot)).toBe("at 192,108 · 352×108");
+  });
+
+  test("a pin is a point and a stroke is a journey", () => {
+    expect(spotSaid(spotIn({ points: [{ x: 0.6, y: 0.2 }] }, second, screen))).toBe("at 192,216");
+    const drawn = spotIn(
+      {
+        points: [
+          { x: 0.6, y: 0.2 },
+          { x: 0.7, y: 0.4 },
+        ],
+      },
+      second,
+      screen,
+    );
+    expect(spotSaid(drawn)).toBe("192,216 → 544,432");
+  });
+
+  test("a mark made outside the window is not given coordinates inside it", () => {
+    // The window with the keyboard is usually the one somebody is looking at, and
+    // occasionally they reach across and mark something else. Offering a spot in a
+    // window the mark is not in would be the confident kind of wrong this whole idea
+    // exists to remove — and negative numbers are what it looks like when it happens.
+    const across = spotIn(
+      { region: { box: { x: 0.05, y: 0.1, w: 0.05, h: 0.05 } } },
+      second,
+      screen,
+    );
+    expect(across).toBeNull();
+  });
+
+  test("the message says when the address and the picture disagree", () => {
+    // An agent that trusted the address over the picture would go and work on the wrong
+    // thing, which costs more than having no address at all.
+    const said = summaryFor([{ tool: "box", where: second, spot: null }], "ask", "", null);
+    expect(said).toContain("marked outside that window");
+    expect(said).toContain("Trust the picture");
+  });
+
+  test("no window means no coordinates rather than the desktop's", () => {
+    // Half an answer here is worse than none: an agent given a number will use it.
+    expect(spotIn({ points: [{ x: 0.5, y: 0.5 }] }, null, screen)).toBeNull();
+    expect(spotIn({ points: [{ x: 0.5, y: 0.5 }] }, { app: "Code" }, screen)).toBeNull();
+    expect(spotSaid(null)).toBeNull();
+  });
+});
+
+describe("the message an agent actually reads", () => {
+  const code: Front = {
+    app: "Code",
+    id: "0x1",
+    title: "rail.js — colai - Visual Studio Code",
+    cwd: "/home/someone/colai",
+    at: { x: 0, y: 0, width: 1920, height: 1080 },
+  };
+  const browser: Front = { app: "Firefox", id: "0x2", url: "https://example.com/a" };
+
+  test("marks made in one place share one address", () => {
+    // Repeating it under every mark would spend more tokens than the whole idea saves.
+    const said = summaryFor(
+      [
+        { tool: "box", where: code, spot: { x: 10, y: 20, width: 30, height: 40 } },
+        { tool: "box", where: code, spot: { x: 50, y: 60, width: 70, height: 80 } },
+      ],
+      "ask",
+      "",
+      null,
+    );
+    expect(said.match(/In Code/g)).toHaveLength(1);
+    expect(said).toContain("1. Box (mark-1.png) at 10,20 · 30×40");
+    expect(said).toContain("2. Box (mark-2.png) at 50,60 · 70×80");
+  });
+
+  test("marks made in two places get two", () => {
+    const said = summaryFor(
+      [
+        { tool: "box", where: code },
+        { tool: "pointAt", where: browser },
+      ],
+      "ask",
+      "",
+      null,
+    );
+    expect(said).toContain("In Code");
+    expect(said).toContain("In Firefox");
+    expect(said).toContain("https://example.com/a");
+  });
+
+  test("a mark whose window could not be read still says what it is", () => {
+    // Losing the address must never cost the picture and the note as well.
+    const said = summaryFor([{ tool: "box", note: "this bit" }], "ask", "", null);
+    expect(said).toContain("would not say");
+    expect(said).toContain("1. Box (mark-1.png) — this bit");
+  });
+
+  test("an automation carries the address and refuses the coordinates", () => {
+    // It runs later, when the window has moved or gone. "Which project" is still true
+    // tomorrow; "340,128" is a number about a window that no longer exists.
+    const said = automationFor(
+      [{ tool: "box", where: code, spot: { x: 340, y: 128 } }],
+      "ask",
+      "watch this",
+      null,
+    );
+    expect(said).toContain("In Code — /home/someone/colai");
+    expect(said).not.toContain("340,128");
+    expect(said).not.toContain("window 1920");
   });
 });

@@ -144,6 +144,171 @@ function homeOf(mark) {
   return (mark.dest || "").trim() || kind.home || "";
 }
 
+/*
+ * ── where a mark is ──────────────────────────────────────────────────────────
+ *
+ * A point on a screen means nothing to somebody who cannot see the screen. `x=1420,
+ * y=880` is a fact about a desk, and an agent given it has to work out which
+ * application, which page and which file before it can do anything — usually by asking,
+ * which costs a turn, or by reading around, which costs tokens. Sending the address
+ * with the picture is the whole saving.
+ *
+ * Three layers, and which layer a fact came from travels with it. An agent must never
+ * be unable to tell something measured from something inferred:
+ *
+ *   known  — the desktop and the kernel said so. Application, window, size, working
+ *            directory. Cannot be wrong.
+ *   read   — worked out from the window title by the rules below. Usually right, and
+ *            occasionally a title that merely looks like an editor's.
+ *   asked  — the desktop answered a question about itself. A page's real URL, the
+ *            element under the pointer. Absent whenever accessibility is switched off,
+ *            which is most of the time.
+ *
+ * Everything below is the middle layer, and every rule in it would rather return
+ * nothing than something plausible.
+ */
+
+/**
+ * What a window title says about the file, project or page behind it.
+ *
+ * Titles are a convention rather than an interface, so each rule matches a shape that
+ * only one kind of application produces and refuses everything else. A title with no
+ * recognised shape yields nothing at all, which is the correct answer far more often
+ * than any guess would be.
+ */
+function placeOf(front) {
+  const title = ((front && front.title) || "").trim();
+  if (!title) return {};
+  const app = ((front && front.app) || "").toLowerCase();
+  const exe = ((front && front.exe) || "").toLowerCase();
+  const both = `${app} ${exe}`;
+
+  // An editor: "file.ts — folder - Visual Studio Code", with a dot for unsaved work.
+  // The em dash is what makes this shape safe to match — a page title containing " - "
+  // is common and " — " between two path-ish words is not.
+  const code = /^[●•*\s]*(.+?)\s+[—–]\s+(.+?)\s+-\s+(?:Visual Studio Code|VSCodium|Code - OSS)$/.exec(
+    title,
+  );
+  if (code) return { file: code[1].trim(), project: code[2].trim() };
+
+  // Sublime and friends: "file — folder", and nothing else on the line.
+  const plain = /^(\S[^—–]*?)\s+[—–]\s+([^—–]+)$/.exec(title);
+  if (plain && wordIn(both, "sublime")) {
+    return { file: plain[1].trim(), project: plain[2].trim() };
+  }
+
+  // A browser puts the page title in front of its own name. The URL is not in there —
+  // that is the layer above, and it is why the layer above exists.
+  const browser = /^(.+?)\s+[—-]\s+(?:Mozilla Firefox|Google Chrome|Chromium|Brave|Microsoft Edge)$/.exec(
+    title,
+  );
+  if (browser) return { page: browser[1].trim() };
+
+  // A terminal: "someone@machine: ~/somewhere". The path is the half worth having.
+  const shell = /^[^\s@]+@[^\s:]+:\s*(\S.*)$/.exec(title);
+  if (shell) return { path: shell[1].trim() };
+
+  // GNOME's editor: "file (~/folder) - Text Editor".
+  const gedit = /^[●•*\s]*(.+?)\s+\((.+?)\)\s+-\s+(?:Text Editor|gedit)$/.exec(title);
+  if (gedit) return { file: gedit[1].trim(), project: gedit[2].trim() };
+
+  return {};
+}
+
+/**
+ * The address of a mark, in the order somebody would say it out loud.
+ *
+ * Written as lines rather than a paragraph because an agent reads it as a lookup, and
+ * because a fact that turned out to be unavailable has to be visibly missing rather
+ * than quietly absent. Each line says which layer it came from where that is not
+ * obvious; the ones with no note are the ones that cannot be wrong.
+ */
+function whereSaid(where) {
+  if (!where || !where.app) return ["Somewhere on the screen — the desktop would not say."];
+  const said = [];
+  const place = placeOf(where);
+  const head = [`In ${where.app}`];
+  if (where.cwd) head.push(`— ${where.cwd}`);
+  said.push(head.join(" "));
+  if (where.url) said.push(`  ${where.url}`);
+  const window = [];
+  if (where.at) window.push(`window ${where.at.width}×${where.at.height}`);
+  if (where.title) window.push(`"${where.title}"`);
+  if (window.length) said.push(`  ${window.join(" · ")}`);
+  if (place.file) {
+    const of = place.project ? `${place.file} in ${place.project}` : place.file;
+    said.push(`  file ${of} (read from the title)`);
+  }
+  if (place.path) said.push(`  path ${place.path} (read from the title)`);
+  // A page with no address. Said rather than left out: an agent given a page title and
+  // no URL knows it has to find the page, where one given nothing assumes there was
+  // never a page to find. Measured on this desktop — holding an accessibility
+  // connection open does not make browsers start answering; it has to be switched on.
+  if (place.page && !where.url) {
+    said.push(`  page "${place.page}" (read from the title — the URL was not available)`);
+  }
+  if (where.folder) said.push(`  folder ${where.folder}`);
+  return said;
+}
+
+/**
+ * Where a mark sits inside the window it was made over, in that window's own pixels.
+ *
+ * Not the desktop's. A desktop coordinate stops being true the moment somebody moves
+ * the window, and it is meaningless to an agent that never saw the desk; a window
+ * coordinate with the window's size beside it can be acted on.
+ */
+function spotIn(mark, where, screen) {
+  if (!where || !where.at || !screen || !screen.width) return null;
+  const of = (point) => ({
+    x: Math.round(point.x * screen.width - where.at.x),
+    y: Math.round(point.y * screen.height - where.at.y),
+  });
+  // Marking is not clicking. The window with the keyboard is usually the one somebody
+  // is looking at, and occasionally they reach across and mark something else — so a
+  // spot that falls outside the window is not a spot in that window, and offering it as
+  // one would be the confident kind of wrong this whole idea exists to remove.
+  const inside = (spot) =>
+    spot.x >= 0 && spot.y >= 0 && spot.x <= where.at.width && spot.y <= where.at.height;
+  if (mark.region) {
+    const box = mark.region.box;
+    const corner = of({ x: box.x, y: box.y });
+    if (!inside(corner)) return null;
+    return {
+      ...corner,
+      width: Math.round(box.w * screen.width),
+      height: Math.round(box.h * screen.height),
+    };
+  }
+  if (!mark.points || mark.points.length === 0) return null;
+  const from = of(mark.points[0]);
+  if (!inside(from)) return null;
+  if (mark.points.length === 1) return from;
+  const to = of(mark.points[mark.points.length - 1]);
+  return { ...from, to };
+}
+
+/** That spot, in the words the message uses. */
+function spotSaid(spot) {
+  if (!spot) return null;
+  if (typeof spot.width === "number") {
+    return `at ${spot.x},${spot.y} · ${spot.width}×${spot.height}`;
+  }
+  if (spot.to) return `${spot.x},${spot.y} → ${spot.to.x},${spot.to.y}`;
+  return `at ${spot.x},${spot.y}`;
+}
+
+/**
+ * Whether two marks were made in the same place, and can share one address.
+ *
+ * By the window rather than the application: two windows of one editor are two
+ * different files, and saying the address once for both would be saying it wrong.
+ */
+function samePlace(one, two) {
+  if (!one || !two) return one === two;
+  return one.id === two.id && one.title === two.title && one.url === two.url;
+}
+
 /** What a mark is called in the message: for a design mark, which kind it is. */
 function labelOf(mark) {
   if (mark.tool === "design") return kindOf(mark).label;
@@ -307,10 +472,18 @@ function automationFor(marks, mode, text, surface) {
     said.push("");
     said.push(notes.length === 1 ? `About: ${notes[0]}` : `About: ${notes.join("; ")}`);
   }
+  // The address, and not the coordinates. A scheduled run happens later, when the
+  // window has been moved or closed; a point inside a window that no longer exists is
+  // worse than no point, where "which project, which page" is still true tomorrow.
+  const place = (marks.find((mark) => mark.where) || {}).where || surface;
+  if (place && place.app) {
+    said.push("");
+    for (const line of whereSaid({ ...place, at: null })) said.push(line);
+  }
   said.push("");
   said.push(
-    `Set up from the colai toolbar${surface && surface.app ? ` on ${surface.app}` : ""}. ` +
-      `No pictures travel with a scheduled run — go and look at what you need.`,
+    "Set up from the colai toolbar. No pictures travel with a scheduled run, and the " +
+      "screen will have moved on — go and look at what you need.",
   );
   return said.join("\n");
 }
@@ -571,18 +744,31 @@ function summaryFor(marks, mode, text, surface, files) {
       mark.frames > 1
         ? `mark-${at + 1}-1.png … mark-${at + 1}-${mark.frames}.png`
         : `mark-${at + 1}.png`;
-    const named = `${at + 1}. ${labelOf(mark)} (${files})`;
+    const spot = spotSaid(mark.spot);
+    const named = `${at + 1}. ${labelOf(mark)} (${files})${spot ? ` ${spot}` : ""}`;
     return [named, detail, note].filter(Boolean).join(" — ");
   };
   if (marks.length) {
-    const where = (surface && surface.app) || "screen";
-    said.push(
-      marks.length === 1
-        ? `One thing marked on ${where}:`
-        : `${marks.length} things marked on ${where}:`,
-    );
-    said.push("");
-    marks.forEach((mark, at) => said.push(said_of(mark, at)));
+    // Grouped by where they were made, and the address said once per group. Repeating
+    // it under every mark would spend more tokens than the whole idea saves, and two
+    // marks made in two applications must not end up under one heading — which is what
+    // a single surface read at send time used to do.
+    let place = undefined;
+    marks.forEach((mark, at) => {
+      if (at === 0 || !samePlace(place, mark.where)) {
+        place = mark.where;
+        if (at > 0) said.push("");
+        for (const line of whereSaid(place || surface)) said.push(line);
+        // The window with the keyboard is usually the one somebody is looking at, and
+        // occasionally they reach across and mark something else. Said, because an agent
+        // that trusts the address over the picture would go and work on the wrong thing.
+        if (place && place.at && !mark.spot) {
+          said.push("  — but this was marked outside that window. Trust the picture.");
+        }
+        said.push("");
+      }
+      said.push(said_of(mark, at));
+    });
     // A design mark asks for a file rather than an opinion, so it says what to make and
     // where it goes. Stated per mark: two of them in one batch are two documents, not
     // one with two names — and they can be two different kinds.

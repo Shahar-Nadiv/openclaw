@@ -1459,6 +1459,8 @@ fn main() {
         colai_watch::colai_watch_stop,
         #[cfg(target_os = "linux")]
         colai_inspect::colai_inspect,
+        #[cfg(target_os = "linux")]
+        colai_inspect::colai_showing,
         colai::colai_summon,
         colai::colai_release,
         colai::colai_open_settings

@@ -34,6 +34,13 @@ const ON_SCREEN: u32 = 0;
 /// each time and then with itself. One that keeps handing back a different object is
 /// not going to stop, and the toolbar cannot wait for it to.
 const DEEPEST: usize = 40;
+/// How long a reading taken for a mark's address may take.
+///
+/// Shorter than a deliberate inspection, because nobody asked for it. Marking is
+/// instant today and has to stay that way; an address is worth a quarter of a second
+/// and not a whole one.
+const BRIEFLY: std::time::Duration = std::time::Duration::from_millis(250);
+
 /// How long the whole reading may take.
 ///
 /// These calls go to another application's main loop. A window that is busy — or
@@ -117,6 +124,94 @@ async fn look_at(x: i32, y: i32) -> Result<Option<Seen>, String> {
 }
 
 /// The a11y bus, whose address the session bus is asked for.
+/// The address of the page or folder a window is showing, if it will say.
+///
+/// Asked only where there is an answer worth waiting for. A browser has a URL and a file
+/// manager has a folder; an editor, a terminal and a game have nothing here that the
+/// window's own process did not already say better, so they are not asked at all and
+/// marking in them costs exactly nothing.
+///
+/// The kind is decided by what the window exposes rather than by a list of brand names:
+/// a window with a `Document` in it is showing a document, whatever it is called.
+#[tauri::command]
+pub(crate) async fn colai_showing(x: i32, y: i32) -> Option<Showing> {
+    #[cfg(target_os = "linux")]
+    {
+        match tokio::time::timeout(BRIEFLY, showing_at(x, y)).await {
+            Ok(seen) => seen,
+            // A desktop that will not answer in a quarter of a second has told us
+            // nothing, which is the same outcome as one with nothing to tell.
+            Err(_) => None,
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (x, y);
+        None
+    }
+}
+
+/// What a window says it is showing.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Showing {
+    pub url: Option<String>,
+}
+
+#[cfg(target_os = "linux")]
+async fn showing_at(x: i32, y: i32) -> Option<Showing> {
+    let bus = accessibility_bus().await.ok()?;
+    let root: Node = (
+        "org.a11y.atspi.Registry".to_string(),
+        OwnedObjectPath::try_from("/org/a11y/atspi/accessible/root").ok()?,
+    );
+    for app in children(&bus, &root).await.ok()? {
+        for window in children(&bus, &app).await.ok()? {
+            if !contains(&bus, &window, x, y).await {
+                continue;
+            }
+            let url = document_url(&bus, &window).await;
+            return Some(Showing { url });
+        }
+    }
+    None
+}
+
+/// How far into a window to look for the thing that knows its own address.
+///
+/// A browser puts its document two or three levels below the window. Beyond that is
+/// somebody else's document — a frame, an embedded view — and answering with the address
+/// of a thing nobody pointed at is worse than answering with nothing.
+#[cfg(target_os = "linux")]
+const DOCUMENT_WITHIN: usize = 4;
+
+#[cfg(target_os = "linux")]
+async fn document_url(bus: &Connection, window: &Node) -> Option<String> {
+    let mut looking = vec![(window.clone(), 0usize)];
+    while let Some((node, depth)) = looking.pop() {
+        if let Some(paper) = on(bus, &node, "org.a11y.atspi.Document").await {
+            if let Ok(url) = paper
+                .call::<_, _, String>("GetAttributeValue", &("DocURL",))
+                .await
+            {
+                let url = url.trim().to_string();
+                // An empty attribute is the interface saying "I have no document",
+                // which is not the same as a document at the empty address.
+                if !url.is_empty() {
+                    return Some(url);
+                }
+            }
+        }
+        if depth + 1 >= DOCUMENT_WITHIN {
+            continue;
+        }
+        for child in children(bus, &node).await.unwrap_or_default() {
+            looking.push((child, depth + 1));
+        }
+    }
+    None
+}
+
 #[cfg(target_os = "linux")]
 async fn accessibility_bus() -> Result<Connection, String> {
     let session = Connection::session()

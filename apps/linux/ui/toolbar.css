@@ -763,6 +763,18 @@ body {
 }
 
 /* The colour itself, beside its digits. Six characters are not a colour to anybody. */
+/* The address, under the size. One line, clipped rather than wrapped — a popup that
+   grows a paragraph because somebody marked a deep path is a popup in the way. */
+.popup-place {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+  direction: rtl;
+  text-align: left;
+}
+
 .popup-swatch {
   display: inline-block;
   width: 9px;

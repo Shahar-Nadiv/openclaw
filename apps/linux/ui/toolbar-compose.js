@@ -8,6 +8,24 @@
 // The agent picker is here too: what it draws is the list those two choose from, and
 // the choosing is the point of both of them.
 
+/**
+ * The one line of a mark's address that fits beside its thumbnail.
+ *
+ * The most specific thing known, because that is the thing worth checking: a URL beats
+ * a file, a file beats a directory, a directory beats an application name. The whole
+ * address goes in the message; this is only enough to see it was picked up right.
+ */
+function placeSaid(mark) {
+  const where = mark.where;
+  if (!where || !where.app) return null;
+  if (where.url) return where.url;
+  const place = placeOf(where);
+  if (place.file) return place.file;
+  if (place.path) return place.path;
+  if (where.cwd) return where.cwd;
+  return where.app;
+}
+
 function drawPopup() {
   const mark = state.marks.find((held) => held.id === state.popup);
   if (!mark) {
@@ -43,6 +61,17 @@ function drawPopup() {
     size.prepend(swatch);
   }
   named.append(what, size);
+  // Where it was captured, on the mark rather than in a log. This is the half of a mark
+  // an agent will act on, and somebody should be able to see it was picked up correctly
+  // before they send it — not find out afterwards that the address was wrong.
+  const at = placeSaid(mark);
+  if (at) {
+    const place = document.createElement("span");
+    place.className = "popup-size popup-place";
+    place.textContent = at;
+    place.title = at;
+    named.append(place);
+  }
   head.append(named);
 
   // The visible way out, beside the two ways that are not. A dialog with only "Keep"

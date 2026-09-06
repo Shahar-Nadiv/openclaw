@@ -86,7 +86,10 @@ const state = {
   // defaults each time rather than kept: a schedule is about one piece of work, and
   // yesterday's interval sitting in the box is a job somebody creates by accident.
   cron: { ...AUTOMATION_FIRST },
-  // Which pen the drawing tool draws with. Chosen by right-clicking the key.
+  // Windows that were asked what they are showing and had nothing to say. Asking again
+  // is a quarter of a second spent learning what the last answer already said.
+  mute: new Set(),
+  // Which pen the drawing tool draws with. Chosen from the menu the key opens.
   pen: PEN_FIRST,
   // Which kind of design the next design mark asks for. Chosen on the menu, and
   // changeable on the mark itself afterwards.
