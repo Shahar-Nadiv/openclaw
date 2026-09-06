@@ -61,6 +61,23 @@
     <div id="pins" class="pins" aria-hidden="true"></div>
 
     <!--
+      What a recording is recording, while it records it.
+
+      Deliberately outside the marks layer: everything in there is drawn *on* the region
+      it is about, and this has to stay off it. The frames are what the region looked
+      like, and a toolbar that photographed its own outline would be answering a
+      question about itself.
+
+      It is also the one thing that stays visible while the page hides itself to be
+      photographed, which is what the stylesheet's `visibility` is for.
+    -->
+    <div id="recording" class="recording" hidden>
+      <div id="recording-area" class="recording-area">
+        <p id="recording-left" class="recording-left" role="status"></p>
+      </div>
+    </div>
+
+    <!--
       Where answers land.
 
       Not inside the rail, because an answer belongs to the region it is about and not

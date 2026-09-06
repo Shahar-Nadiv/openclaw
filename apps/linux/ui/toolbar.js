@@ -94,6 +94,9 @@ const el = {
   trouble: document.getElementById("trouble"),
   marks: document.getElementById("marks"),
   pins: document.getElementById("pins"),
+  recording: document.getElementById("recording"),
+  recordingArea: document.getElementById("recording-area"),
+  recordingLeft: document.getElementById("recording-left"),
   capture: document.getElementById("capture"),
   popup: document.getElementById("popup"),
   answers: document.getElementById("answers"),
@@ -144,6 +147,9 @@ const state = {
   // Set while something is being dragged over the toolbar, so it can say it will
   // catch it.
   catching: false,
+  // The recording underway, while it is underway: the region it covers and when it
+  // ends. Null the rest of the time.
+  recording: null,
   // Whether the receiver was chosen rather than worked out. A guess may fill an empty
   // seat; it may never take one somebody has sat in.
   picked: false,
@@ -630,6 +636,10 @@ async function shoot(mark, again) {
         y: Math.round(mark.points[0].y * window.innerHeight),
       }).catch(() => null);
     }
+    // A recording is the one capture long enough to be waited through, so it says so
+    // while it happens — and gives the desktop back while it does, because a recording
+    // of somebody being unable to click anything is not what they were pointing at.
+    if (mark.tool === "record") startRecording(mark);
     const taken = await invoke("colai_capture_mark", {
       mark,
       accent: accentNow(),
@@ -646,6 +656,7 @@ async function shoot(mark, again) {
     // picture. Saying which is better than a popup that looks broken.
     mark.trouble = error && error.message ? error.message : String(error);
   } finally {
+    stopRecording();
     document.body.style.visibility = "";
   }
   // A before-and-after is not finished by its first picture. It waits, visibly, for
@@ -845,6 +856,65 @@ function within(node, axis, at) {
   let shift = Math.min(0, far - tail);
   if (head + shift < near) shift = near - head;
   return Math.round(at + shift);
+}
+
+/* ── what a recording shows while it runs ────────────────────────────────── */
+
+let counting = null;
+
+/**
+ * Put up the frame and the countdown, and hand the desktop back.
+ *
+ * Both halves matter. Without the frame a recording is fifteen seconds of a toolbar
+ * that has vanished, and nobody can tell whether it is working or broken. Without
+ * giving the input shape back it is fifteen seconds of a desktop that will not take a
+ * click, which makes the recording a picture of somebody unable to do the thing they
+ * wanted recorded.
+ */
+function startRecording(mark) {
+  // Every record mark is dragged out, so this is a guard rather than a case: a mark
+  // with no region has no area to show, and inventing one would be a lie about what is
+  // in the pictures.
+  if (!mark.region) return;
+  state.recording = {
+    box: mark.region.box,
+    until: Date.now() + state.recordFor * 1000,
+  };
+  drawRecording();
+  // The shape is settled once: what it becomes does not change while the seconds run
+  // down, and asking the window manager to re-shape ten times a second for a number
+  // that is only being read would be work nobody can see.
+  shape();
+  // Tenths, not seconds: a countdown that redraws on its own second boundary sits on
+  // the wrong number for up to a second, which on a two-second recording is half of it.
+  counting = setInterval(drawRecording, 100);
+}
+
+function stopRecording() {
+  if (counting !== null) clearInterval(counting);
+  counting = null;
+  if (!state.recording) return;
+  state.recording = null;
+  drawRecording();
+  // And the desktop stops being entirely the desktop again. Left alone, the overlay
+  // would keep catching nothing while it drew the popup over the region.
+  shape();
+}
+
+function drawRecording() {
+  const now = state.recording;
+  el.recording.hidden = now === null;
+  if (!now) return;
+  const screen = { width: window.innerWidth, height: window.innerHeight };
+  const frame = recordFrame(now.box, screen);
+  el.recordingArea.style.left = `${frame.x * 100}%`;
+  el.recordingArea.style.top = `${frame.y * 100}%`;
+  el.recordingArea.style.width = `${frame.w * 100}%`;
+  el.recordingArea.style.height = `${frame.h * 100}%`;
+  // Above the frame where there is room for it, below where there is not — a badge
+  // half off the top of the screen is the one place it cannot be read.
+  el.recordingArea.dataset.under = String(frame.y * screen.height < 34);
+  el.recordingLeft.textContent = `${secondsLeft(now.until, Date.now())}s`;
 }
 
 function drawMarks() {
@@ -1071,8 +1141,15 @@ let shaped = "";
 function shape() {
   // The popup opens over the region it is about, well away from the rail, so the two are
   // measured as two rectangles rather than one that swallows the desktop between them.
-  const rects =
-    state.tool !== "pointer"
+  // A recording is the one time this window has to get out of the way entirely. Every
+  // tool holds a sheet of glass over the whole desk so it can catch a drag, and holding
+  // it for fifteen seconds would mean nothing on the desktop could be clicked while the
+  // desktop was being filmed — a recording of somebody unable to do the thing they
+  // wanted recorded. Nothing here needs clicking, so nothing here is caught: the frame
+  // and the countdown are pixels on the glass and the desktop is the desktop.
+  const rects = state.recording
+    ? []
+    : state.tool !== "pointer"
       ? [{ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }]
       : [boxAround(el.wrap)];
   if (state.popup !== null && !el.popup.hidden) rects.push(boxAround(el.popup));

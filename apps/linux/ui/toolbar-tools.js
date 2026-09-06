@@ -81,6 +81,41 @@ const RECORD_LENGTHS = [2, 5, 10, 15];
  * carried. Naming is not a failure: the receiving agent is usually on this machine and
  * can open the path itself, and the ones that cannot would not have survived the frame.
  */
+/**
+ * How far outside a recorded region the toolbar may draw while recording it.
+ *
+ * The frames are the region plus `OUTLINE_ROOM` — twelve pixels of context, in
+ * `src/colai_capture.rs` — and anything the overlay paints inside that lands in the
+ * pictures. Sixteen is measured in CSS pixels against a crop measured in device ones,
+ * so it clears twelve on a plain display and more on a dense one, whichever way the
+ * scaling goes.
+ *
+ * Not a decoration budget: this number is why a recording of a flickering panel comes
+ * back as the panel rather than as a red rectangle somebody drew around it.
+ */
+const RECORD_CLEAR = 16;
+
+/** Whole seconds left of a recording, never past its ends. */
+function secondsLeft(until, now) {
+  return Math.max(0, Math.ceil((until - now) / 1000));
+}
+
+/**
+ * Where to draw the frame that shows what is being recorded, in fractions of the
+ * display, given the region and how big the display is.
+ *
+ * Returned in fractions because that is what a mark is kept in and what the layer it
+ * goes on is stretched to — and the clearance is in pixels, so the two have to meet
+ * somewhere. Here.
+ */
+function recordFrame(box, screen) {
+  const across = RECORD_CLEAR / Math.max(1, screen.width);
+  const down = RECORD_CLEAR / Math.max(1, screen.height);
+  const x = box.x - across;
+  const y = box.y - down;
+  return { x, y, w: box.w + across * 2, h: box.h + down * 2 };
+}
+
 const CARRY_FILE = 8 * 1024 * 1024;
 const CARRY_SEND = 20 * 1024 * 1024;
 

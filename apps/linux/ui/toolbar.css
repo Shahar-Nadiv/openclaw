@@ -831,6 +831,71 @@ body {
 }
 
 /*
+ * What a recording is recording, while it records it.
+ *
+ * Visible on purpose while the rest of the page is not. `shoot` hides the whole body so
+ * the toolbar does not photograph itself, and `visibility` is the one property that can
+ * be turned back on underneath a hidden ancestor — which is why the layer is hidden
+ * that way rather than by opacity or display.
+ *
+ * None of it takes the pointer. The frame is drawn around the region so somebody can
+ * see what is being filmed, not so they can click it; the input shape keeps only the
+ * countdown, and everything else on the desktop stays reachable for the whole recording.
+ */
+.recording {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  visibility: visible;
+}
+.recording-area {
+  position: absolute;
+  outline: 2px solid var(--accent, #ff6b6b);
+  /* Outside the box, which is the whole point: the box is already clear of the crop,
+     and a border drawn inward would spend that clearance getting into the picture. */
+  outline-offset: 0;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 45%);
+}
+.recording-left {
+  position: absolute;
+  left: -2px;
+  bottom: calc(100% + 8px);
+  margin: 0;
+  padding: 4px 9px 4px 8px;
+  border-radius: 999px;
+  background: var(--accent, #ff6b6b);
+  color: #1c1c1e;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 45%);
+}
+/* A region against the top of the screen has nowhere above it to put this. */
+.recording-area[data-under="true"] .recording-left {
+  bottom: auto;
+  top: calc(100% + 8px);
+}
+.recording-left::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #1c1c1e;
+  /* The one thing on screen that has to read as "still going" from across a desk. */
+  animation: recording-pulse 1s ease-in-out infinite;
+}
+@keyframes recording-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/*
  * The gesture catcher, mounted only while a tool other than the pointer is out.
  *
  * Removed rather than made inert: an invisible full-screen element that swallows clicks

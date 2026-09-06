@@ -67,6 +67,12 @@ type ToolbarHelpers = {
     files: Brought[] | undefined,
   ) => (Brought & { carried: boolean; why: string | null })[];
   sizeOf: (bytes: number) => string;
+  secondsLeft: (until: number, now: number) => number;
+  recordFrame: (
+    box: { x: number; y: number; w: number; h: number },
+    screen: { width: number; height: number },
+  ) => { x: number; y: number; w: number; h: number };
+  RECORD_CLEAR: number;
 };
 
 /** A file or folder somebody dropped on the toolbar, as the page holds it. */
@@ -74,7 +80,7 @@ type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR };`,
   context,
 );
 const {
@@ -95,6 +101,9 @@ const {
   RECORD_LENGTHS,
   carrying,
   sizeOf,
+  secondsLeft,
+  recordFrame,
+  RECORD_CLEAR,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -631,5 +640,68 @@ describe("files somebody brought in", () => {
     const said = summaryFor([{ tool: "box" }], "ask", "", { app: "Files", connector: null }, []);
     expect(said).not.toContain("attached");
     expect(said).not.toContain("Not attached");
+  });
+});
+
+describe("what a recording shows while it runs", () => {
+  /*
+   * What the capture adds around a region, read out of the capture itself.
+   *
+   * The overlay draws the recording frame in the page and the pictures are cropped in
+   * Rust, so the two halves of "do not photograph your own outline" live in different
+   * languages and cannot check each other at compile time. Reading the number from its
+   * own source is what stops a change on one side from silently putting a red rectangle
+   * into every frame of every recording on the other.
+   */
+  const capture = readFileSync(
+    new URL("../apps/linux/src-tauri/src/colai_capture.rs", import.meta.url),
+    "utf8",
+  );
+  const room = /const OUTLINE_ROOM: f64 = ([\d.]+);/.exec(capture);
+  assert.ok(room, "OUTLINE_ROOM in colai_capture.rs");
+  const OUTLINE_ROOM = Number(room[1]);
+
+  test("the frame clears the pixels the pictures are taken from", () => {
+    // The whole reason this number exists. A frame drawn a pixel too close comes back
+    // in every frame of the recording, and a recording of a red rectangle somebody drew
+    // is not a recording of the thing inside it.
+    const screen = { width: 1920, height: 1080 };
+    const box = { x: 0.25, y: 0.3, w: 0.2, h: 0.1 };
+    const frame = recordFrame(box, screen);
+    expect((box.x - frame.x) * screen.width).toBeGreaterThan(OUTLINE_ROOM);
+    expect((box.y - frame.y) * screen.height).toBeGreaterThan(OUTLINE_ROOM);
+    expect((frame.x + frame.w - (box.x + box.w)) * screen.width).toBeGreaterThan(OUTLINE_ROOM);
+    expect((frame.y + frame.h - (box.y + box.h)) * screen.height).toBeGreaterThan(OUTLINE_ROOM);
+  });
+
+  test("the clearance is the same number of pixels on any size of display", () => {
+    // Kept in pixels and converted, not kept as a fraction: a fraction that clears the
+    // crop on a laptop is four pixels on a wall, and four pixels is inside it.
+    for (const screen of [
+      { width: 1280, height: 800 },
+      { width: 3840, height: 2160 },
+    ]) {
+      const frame = recordFrame({ x: 0.5, y: 0.5, w: 0.1, h: 0.1 }, screen);
+      expect((0.5 - frame.x) * screen.width).toBeCloseTo(RECORD_CLEAR, 6);
+      expect((0.5 - frame.y) * screen.height).toBeCloseTo(RECORD_CLEAR, 6);
+    }
+  });
+
+  test("a region against the edge keeps its frame, even off the screen", () => {
+    // Clamping it would draw the frame *on* the region, which puts it in the pictures.
+    // Off the edge it is simply not seen on that side, which costs nothing.
+    const frame = recordFrame({ x: 0, y: 0, w: 0.1, h: 0.1 }, { width: 1920, height: 1080 });
+    expect(frame.x).toBeLessThan(0);
+    expect(frame.y).toBeLessThan(0);
+  });
+
+  test("the countdown counts whole seconds and stops at nought", () => {
+    // Rounded up, so a recording with any time left on it never reads as finished.
+    expect(secondsLeft(10_000, 0)).toBe(10);
+    expect(secondsLeft(10_000, 9_001)).toBe(1);
+    expect(secondsLeft(10_000, 10_000)).toBe(0);
+    // A capture that runs past its length — the frames are taken against a live
+    // desktop — shows nought rather than counting into negative numbers.
+    expect(secondsLeft(10_000, 12_500)).toBe(0);
   });
 });
