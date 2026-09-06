@@ -28,6 +28,8 @@ const TOOLS = {
   draw: { label: "Draw", press: "D", glyph: "draw", writes: false },
   box: { label: "Box", press: "B", glyph: "box", writes: false },
   circle: { label: "Circle", press: "O", glyph: "circle", writes: false },
+  measure: { label: "Measure", press: "M", glyph: "measure", writes: false },
+  colour: { label: "Colour", press: "C", glyph: "colour", writes: false },
   wireframe: { label: "Create wireframe", glyph: "wireframe", writes: false },
   screenshot: { label: "Screenshot", glyph: "screenshot", writes: false },
 };
@@ -69,13 +71,22 @@ const DRAWS = {
   draw: "stroke",
   screenshot: "box",
   wireframe: "box",
+  measure: "span",
 };
 
 /** The tools for which a click that selected nothing means the whole display. */
 const WHOLE_DISPLAY = ["screenshot", "wireframe"];
 
 /** Single letters that pick a tool, from the tooltips the rail shows. */
-const KEYS = { v: "pointer", p: "pointAt", d: "draw", b: "box", o: "circle" };
+const KEYS = {
+  v: "pointer",
+  p: "pointAt",
+  d: "draw",
+  b: "box",
+  o: "circle",
+  m: "measure",
+  c: "colour",
+};
 
 /**
  * What the agent actually reads.
@@ -94,8 +105,9 @@ function summaryFor(marks, mode, text, surface) {
   const said_of = (mark, at) => {
     const tool = TOOLS[mark.tool];
     const note = (mark.note || "").trim();
+    const detail = detailOf(mark);
     const named = `${at + 1}. ${tool ? tool.label : mark.tool} (mark-${at + 1}.png)`;
-    return note ? `${named} — ${note}` : named;
+    return [named, detail, note].filter(Boolean).join(" — ");
   };
   if (marks.length) {
     const where = (surface && surface.app) || "screen";
@@ -250,7 +262,10 @@ function boxOf(points) {
 function pathFor(shape) {
   if (!shape || shape.points.length === 0) return "";
   const points = shape.points;
-  if (shape.kind === "stroke") {
+  if (shape.kind === "stroke" || shape.kind === "span") {
+    // A span is a stroke of exactly two points. It is drawn without end ticks on
+    // purpose: this layer is a unit square stretched to the screen, so anything meant
+    // to be square to the line comes out leaning.
     return points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x} ${p.y}`).join(" ");
   }
   const box = boxOf(points);
@@ -286,6 +301,38 @@ function gateFor(tool, surface) {
     blocked: true,
     says: `${(surface && surface.app) || "That app"} isn't connected. Region noted, nothing changed.`,
   };
+}
+
+/**
+ * How far apart two points are, in the pixels somebody would count.
+ *
+ * The overlay thinks in fractions of itself so a mark survives the rail moving between
+ * screens, and a fraction is not an answer to "how big is this gap". The screen turns
+ * it back into the number a stylesheet is written in — which is the entire reason the
+ * tool exists, because a picture can be looked at and cannot be measured.
+ */
+function spanOf(points, screen) {
+  if (!points || points.length < 2) return 0;
+  const [from, to] = [points[0], points[points.length - 1]];
+  const across = (to.x - from.x) * screen.width;
+  const down = (to.y - from.y) * screen.height;
+  return Math.round(Math.hypot(across, down));
+}
+
+/**
+ * What a mark carries beyond its picture.
+ *
+ * Most marks are a region and nothing else — the image says everything. Two of them
+ * know something exact that no image can be read for, and this is where that reaches
+ * the agent: a distance in pixels, and a colour as the six digits somebody would paste
+ * into a stylesheet.
+ */
+function detailOf(mark) {
+  if (mark.tool === "measure" && typeof mark.px === "number") {
+    return `${mark.px}px apart`;
+  }
+  if (mark.tool === "colour" && mark.hex) return mark.hex;
+  return null;
 }
 
 /** A count with its noun, so the rail reads as a sentence rather than a gauge. */

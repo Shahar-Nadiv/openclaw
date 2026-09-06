@@ -122,7 +122,16 @@ function drawPopup() {
   what.textContent = TOOLS[mark.tool] ? TOOLS[mark.tool].label : mark.tool;
   const size = document.createElement("span");
   size.className = "popup-size";
-  size.textContent = mark.trouble ? mark.trouble : mark.shot || "taking a picture…";
+  // What the mark knows, when it knows something exact. A colour you cannot see is a
+  // colour you have to send to somebody else to find out.
+  const detail = detailOf(mark);
+  size.textContent = mark.trouble ? mark.trouble : detail || mark.shot || "taking a picture…";
+  if (mark.hex) {
+    const swatch = document.createElement("span");
+    swatch.className = "popup-swatch";
+    swatch.style.background = mark.hex;
+    size.prepend(swatch);
+  }
   named.append(what, size);
   head.append(named);
 

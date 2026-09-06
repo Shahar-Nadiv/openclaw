@@ -27,6 +27,9 @@ const GLYPHS = {
   screenshot:
     '<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/>',
   send: '<path d="M21 3L10.5 13.5"/><path d="M21 3l-6.8 18-3.7-7.5L3 9.8z"/>',
+  measure: '<path d="M4 6v12M20 6v12M4 12h16"/><path d="M8.5 9l-3 3 3 3M15.5 9l3 3-3 3"/>',
+  colour:
+    '<path d="M12 3.5s6 6.4 6 10.1a6 6 0 0 1-12 0C6 9.9 12 3.5 12 3.5z"/><path d="M8.6 14.4a3.4 3.4 0 0 0 3.4 3.2"/>',
 };
 
 function icon(name, size) {
@@ -132,6 +135,13 @@ function buildRail() {
     key("redo", "Redo · ⇧⌘Z", "redo", redo),
   );
   dividers[1].after(edits);
+
+  const exact = document.createDocumentFragment();
+  exact.append(
+    key("measure", "Measure · M", "measure", () => use("measure")),
+    key("colour", "Colour · C", "colour", () => use("colour")),
+  );
+  dividers[1].after(exact);
 
   const agents = document.createElement("button");
   agents.type = "button";
@@ -394,6 +404,8 @@ function release() {
   cancelAnimationFrame(liveFrame);
   const live = document.getElementById("live");
   if (live) live.remove();
+  const liveSpan = document.getElementById("live-span");
+  if (liveSpan) liveSpan.remove();
   if (!finished || finished.points.length === 0) return;
 
   const box = boxOf(finished.points);
@@ -409,14 +421,19 @@ function release() {
     return;
   }
 
-  addMark({
+  const made = {
     tool: state.tool,
     region:
-      finished.kind === "stroke"
+      finished.kind === "stroke" || finished.kind === "span"
         ? null
         : { shape: finished.kind === "ellipse" ? "ellipse" : "box", box },
     points: finished.points,
-  });
+  };
+  // Settled once, here, rather than recomputed wherever it happens to be needed: the
+  // rail can move to a screen of another size, and the answer is about the pixels that
+  // were under the hand at the time.
+  if (finished.kind === "span") made.px = spanOf(finished.points, screenNow());
+  addMark(made);
 }
 
 el.capture.addEventListener("pointerup", release);
@@ -438,6 +455,7 @@ function drawLive() {
   path.setAttribute("vector-effect", "non-scaling-stroke");
   el.marks.append(path);
 
+  let label = null;
   const step = () => {
     liveFrame = requestAnimationFrame(step);
     if (!gesture) return;
@@ -445,6 +463,14 @@ function drawLive() {
     if (d === previous) return;
     previous = d;
     path.setAttribute("d", d);
+    // Measuring without seeing the number while you drag is not measuring, it is
+    // guessing and then being told.
+    if (gesture.kind === "span" && gesture.points.length > 1) {
+      if (label) label.remove();
+      label = spanLabel(gesture.points, `${spanOf(gesture.points, screenNow())}px`);
+      label.id = "live-span";
+      el.pins.append(label);
+    }
     path.setAttribute(
       "fill",
       gesture.kind === "stroke" ? "none" : "color-mix(in srgb, var(--accent, #ff6b6b) 13%, transparent)",
@@ -485,6 +511,7 @@ async function shoot(mark) {
     await new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn)));
     await new Promise((waited) => setTimeout(waited, 40));
     const taken = await invoke("colai_capture_mark", { mark, accent: accentNow() });
+    if (taken.hex) mark.hex = taken.hex;
     mark.thumb = taken.thumb;
     mark.shot = `${taken.width}\u00d7${taken.height}`;
   } catch (error) {
@@ -631,13 +658,18 @@ function drawMarks() {
   const live = document.getElementById("live");
   const drawn = [];
   for (const mark of state.marks) {
-    const kind = mark.tool === "draw" ? "stroke" : mark.region && mark.region.shape;
+    // A span has no region — it is two points and the distance between them — so the
+    // shape cannot be read off the mark the way a box's can. Without this the number
+    // was drawn and the line it measures was not.
+    const kind = DRAWS[mark.tool] === "span" ? "span" : mark.tool === "draw" ? "stroke" : mark.region && mark.region.shape;
     if (!kind) continue;
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", pathFor({ kind, points: mark.points }));
     path.setAttribute(
       "fill",
-      kind === "stroke" ? "none" : "color-mix(in srgb, var(--accent, #ff6b6b) 13%, transparent)",
+      kind === "stroke" || kind === "span"
+        ? "none"
+        : "color-mix(in srgb, var(--accent, #ff6b6b) 13%, transparent)",
     );
     path.setAttribute("stroke", "var(--accent, #ff6b6b)");
     path.setAttribute("stroke-width", "2");
@@ -652,18 +684,24 @@ function drawMarks() {
   if (live) el.marks.append(live);
 
   let number = 0;
-  el.pins.replaceChildren(
-    ...state.marks
-      .filter((mark) => mark.tool === "pointAt")
-      .map((mark) => {
-        const pin = document.createElement("span");
-        pin.className = "pin";
-        pin.style.left = `${mark.points[0].x * 100}%`;
-        pin.style.top = `${mark.points[0].y * 100}%`;
-        pin.textContent = String(++number);
-        return pin;
-      }),
-  );
+  const drawnPins = state.marks
+    .filter((mark) => mark.tool === "pointAt")
+    .map((mark) => {
+      const pin = document.createElement("span");
+      pin.className = "pin";
+      pin.style.left = `${mark.points[0].x * 100}%`;
+      pin.style.top = `${mark.points[0].y * 100}%`;
+      pin.textContent = String(++number);
+      return pin;
+    });
+  // A measurement's whole point is its number, so the number is on the screen and not
+  // only in the message. Written in HTML rather than into the marks layer, which is a
+  // unit square stretched to the display and would stretch the text with it.
+  for (const mark of state.marks) {
+    if (mark.tool !== "measure" || typeof mark.px !== "number") continue;
+    drawnPins.push(spanLabel(mark.points, `${mark.px}px`));
+  }
+  el.pins.replaceChildren(...drawnPins);
 }
 
 /**
@@ -674,6 +712,21 @@ function drawMarks() {
  * reading its own state back — the kind of thing somebody notices once and then never
  * reads again, while it sits over their work.
  */
+/** The overlay's own size, which is what a fraction of it is a fraction of. */
+function screenNow() {
+  return { width: window.innerWidth, height: window.innerHeight };
+}
+
+function spanLabel(points, said) {
+  const [from, to] = [points[0], points[points.length - 1]];
+  const label = document.createElement("span");
+  label.className = "span-label";
+  label.style.left = `${((from.x + to.x) / 2) * 100}%`;
+  label.style.top = `${((from.y + to.y) / 2) * 100}%`;
+  label.textContent = said;
+  return label;
+}
+
 function drawTrouble() {
   el.trouble.hidden = !state.trouble;
   el.trouble.textContent = state.trouble || "";

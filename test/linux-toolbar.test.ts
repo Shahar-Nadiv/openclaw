@@ -34,8 +34,10 @@ type ToolbarHelpers = {
   gateFor: (tool: string, surface: Surface) => { blocked: boolean; says: string | null };
   counted: (many: number, noun: string) => string;
   MODES: Record<string, { label: string; says: string }>;
+  spanOf: (points: Point[], screen: { width: number; height: number }) => number;
+  detailOf: (mark: { tool: string; px?: number; hex?: string }) => string | null;
   summaryFor: (
-    marks: { tool: string; note?: string; dest?: string }[],
+    marks: { tool: string; note?: string; dest?: string; px?: number; hex?: string }[],
     mode: string,
     text: string,
     surface: Surface,
@@ -44,7 +46,7 @@ type ToolbarHelpers = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf };`,
   context,
 );
 const {
@@ -59,6 +61,8 @@ const {
   MODES,
   summaryFor,
   screenAt,
+  spanOf,
+  detailOf,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -316,5 +320,71 @@ describe("what the agent is actually sent", () => {
     expect(summaryFor([{ tool: "box" }], "plan", "", null)).toContain(
       "One thing marked on screen:",
     );
+  });
+});
+
+describe("the two tools that know a number", () => {
+  const screen = { width: 1920, height: 1080 };
+
+  test("a span is the distance on the screen, not in the overlay's fractions", () => {
+    // The overlay thinks in fractions so a mark survives the rail moving to another
+    // display. A fraction is not an answer to "how big is this gap".
+    expect(
+      spanOf(
+        [
+          { x: 0.1, y: 0.5 },
+          { x: 0.2, y: 0.5 },
+        ],
+        screen,
+      ),
+    ).toBe(192);
+    expect(
+      spanOf(
+        [
+          { x: 0.5, y: 0.1 },
+          { x: 0.5, y: 0.2 },
+        ],
+        screen,
+      ),
+    ).toBe(108);
+    // Diagonals are the distance somebody would measure, not the sum of the sides.
+    expect(
+      spanOf(
+        [
+          { x: 0, y: 0 },
+          { x: 0.1, y: 0.1 },
+        ],
+        screen,
+      ),
+    ).toBe(Math.round(Math.hypot(192, 108)));
+  });
+
+  test("a span of one point or none is no distance rather than a crash", () => {
+    expect(spanOf([{ x: 0.5, y: 0.5 }], screen)).toBe(0);
+    expect(spanOf([], screen)).toBe(0);
+  });
+
+  test("only the marks that know something exact carry a detail", () => {
+    expect(detailOf({ tool: "measure", px: 148 })).toBe("148px apart");
+    expect(detailOf({ tool: "colour", hex: "#3b82f6" })).toBe("#3b82f6");
+    // A region says everything in its picture; there is nothing to add.
+    expect(detailOf({ tool: "box" })).toBeNull();
+    // And a tool that should know one but does not says nothing rather than guessing.
+    expect(detailOf({ tool: "measure" })).toBeNull();
+    expect(detailOf({ tool: "colour" })).toBeNull();
+  });
+
+  test("the detail reaches the agent between the picture and the note", () => {
+    const said = summaryFor(
+      [
+        { tool: "measure", px: 13, note: "should be on the 8px grid" },
+        { tool: "colour", hex: "#3b82f6" },
+      ],
+      "plan",
+      "",
+      { app: "Figma", connector: null },
+    );
+    expect(said).toContain("1. Measure (mark-1.png) — 13px apart — should be on the 8px grid");
+    expect(said).toContain("2. Colour (mark-2.png) — #3b82f6");
   });
 });

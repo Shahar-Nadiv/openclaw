@@ -175,6 +175,9 @@ pub(crate) fn drawn_as(mark: &Mark) -> Option<&'static str> {
     if matches!(mark.tool.as_str(), "screenshot" | "wireframe") {
         return None;
     }
+    if mark.tool == "measure" {
+        return Some("span");
+    }
     match mark.region.as_ref().map(|region| region.shape.as_str()) {
         Some("ellipse") => Some("ellipse"),
         Some(_) => Some("box"),
@@ -248,6 +251,8 @@ pub(crate) struct Taken {
     pub thumb: String,
     pub width: i32,
     pub height: i32,
+    /// What colour was under the point, for the one tool that asks.
+    pub hex: Option<String>,
 }
 
 /// Photograph what a mark is about.
@@ -282,6 +287,11 @@ pub(crate) async fn colai_capture_mark(
 
     // GDK belongs to the main thread. The page has already made itself invisible and is
     // waiting on this, so the hop is the only thing between the two.
+    // Where to read a colour from, if this mark is asking for one: the point it was
+    // made at, in the picture's own coordinates.
+    let sampled = (mark.tool == "colour")
+        .then(|| within.first().copied())
+        .flatten();
     let (done, wait) = std::sync::mpsc::channel();
     app.run_on_main_thread(move || {
         let _ = done.send(picture_of(
@@ -289,10 +299,11 @@ pub(crate) async fn colai_capture_mark(
             &within,
             drawn.as_deref(),
             &accent,
+            sampled,
         ));
     })
     .map_err(|error| format!("Could not reach the display: {error}"))?;
-    let png = wait
+    let (png, hex) = wait
         .recv()
         .map_err(|_| "The display did not answer.".to_string())??;
 
@@ -308,6 +319,7 @@ pub(crate) async fn colai_capture_mark(
         thumb,
         width: crop.width,
         height: crop.height,
+        hex,
     })
 }
 
@@ -326,7 +338,8 @@ fn picture_of(
     within: &[(f64, f64)],
     drawn: Option<&str>,
     accent: &str,
-) -> Result<Vec<u8>, String> {
+    sampled: Option<(f64, f64)>,
+) -> Result<(Vec<u8>, Option<String>), String> {
     use gdk::cairo;
     use gdk::prelude::*;
 
@@ -338,8 +351,12 @@ fn picture_of(
         .pixbuf(x, y, width, height)
         .ok_or_else(|| "The display would not give up that region.".to_string())?;
 
+    // Read before anything is drawn on it. A mark painted over the very pixel being
+    // asked about would answer with the colour of the mark.
+    let hex = sampled.and_then(|(x, y)| pixel_at(&taken, x, y));
+
     let Some(drawn) = drawn else {
-        return encode(&shrunk(&taken)?);
+        return Ok((encode(&shrunk(&taken)?)?, hex));
     };
 
     let surface = cairo::ImageSurface::create(cairo::Format::Rgb24, width, height)
@@ -354,7 +371,28 @@ fn picture_of(
 
     let marked = gdk::pixbuf_get_from_surface(&surface, 0, 0, width, height)
         .ok_or_else(|| "Could not read the marked picture back.".to_string())?;
-    encode(&shrunk(&marked)?)
+    Ok((encode(&shrunk(&marked)?)?, hex))
+}
+
+/// The colour of one pixel, as the six digits somebody would paste into a stylesheet.
+///
+/// Straight out of the picture already taken rather than a second look at the screen:
+/// two reads a moment apart can disagree, and the answer has to be the colour that is
+/// in the image the agent is being shown.
+#[cfg(target_os = "linux")]
+fn pixel_at(pixbuf: &gdk::gdk_pixbuf::Pixbuf, x: f64, y: f64) -> Option<String> {
+    let (across, down) = (x.round() as i32, y.round() as i32);
+    if across < 0 || down < 0 || across >= pixbuf.width() || down >= pixbuf.height() {
+        return None;
+    }
+    let channels = pixbuf.n_channels();
+    if channels < 3 {
+        return None;
+    }
+    let bytes = pixbuf.read_pixel_bytes();
+    let at = (down * pixbuf.rowstride() + across * channels) as usize;
+    let pixel = bytes.get(at..at + 3)?;
+    Some(format!("#{:02x}{:02x}{:02x}", pixel[0], pixel[1], pixel[2]))
 }
 
 /// Put the mark on the picture, twice.
@@ -388,6 +426,20 @@ fn draw_mark(
         "pin" => {
             let (x, y) = within[0];
             ink.arc(x, y, 13.0, 0.0, std::f64::consts::TAU);
+        }
+        "span" => {
+            // Here the ticks are worth drawing: this is real pixels, not the unit
+            // square the page draws into, so square to the line really is square.
+            let [(x0, y0), (x1, y1)] = [within[0], within[within.len() - 1]];
+            let (dx, dy) = (x1 - x0, y1 - y0);
+            let long = dx.hypot(dy).max(1.0);
+            let (tx, ty) = (-dy / long * 7.0, dx / long * 7.0);
+            ink.move_to(x0, y0);
+            ink.line_to(x1, y1);
+            ink.move_to(x0 - tx, y0 - ty);
+            ink.line_to(x0 + tx, y0 + ty);
+            ink.move_to(x1 - tx, y1 - ty);
+            ink.line_to(x1 + tx, y1 + ty);
         }
         _ => {
             for (at, (x, y)) in within.iter().enumerate() {
@@ -497,7 +549,8 @@ fn picture_of(
     _within: &[(f64, f64)],
     _drawn: Option<&str>,
     _accent: &str,
-) -> Result<Vec<u8>, String> {
+    _sampled: Option<(f64, f64)>,
+) -> Result<(Vec<u8>, Option<String>), String> {
     Err("Marking the screen is only built for Linux so far.".to_string())
 }
 
