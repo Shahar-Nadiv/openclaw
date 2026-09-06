@@ -20,6 +20,9 @@ commands.allow = [
   "colai_agents",
   "colai_sessions",
   "colai_threads",
+  "colai_capture_mark",
+  "colai_forget_marks",
+  "colai_send",
   "colai_release",
   "colai_open_settings",
 ]

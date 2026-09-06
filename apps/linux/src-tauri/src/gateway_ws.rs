@@ -249,6 +249,8 @@ pub(crate) struct GatewaySessionSummary {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CatalogThread {
     pub thread_id: String,
+    /// Which agent the host says owns it, when it says.
+    pub agent_id: Option<String>,
     pub name: Option<String>,
     pub cwd: Option<String>,
     pub git_branch: Option<String>,
@@ -258,15 +260,38 @@ pub(crate) struct CatalogThread {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CatalogHost {
+    pub host_id: String,
     #[serde(default)]
     pub sessions: Vec<CatalogThread>,
 }
 
 #[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct SessionCatalog {
+    pub id: String,
     pub label: String,
     #[serde(default)]
     pub hosts: Vec<CatalogHost>,
+}
+
+/// Everything needed to name one conversation held in another agent.
+///
+/// The toolbar has to carry all of it, not just the thread id: continuing a thread is
+/// addressed by catalog, host and thread together, and an id on its own names nothing.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ThreadLocator {
+    pub catalog_id: String,
+    pub host_id: String,
+    pub thread_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CatalogContinueResult {
+    pub session_key: String,
 }
 
 #[derive(Clone, Deserialize)]
@@ -295,6 +320,26 @@ struct ChatSendParams {
     agent_id: Option<String>,
     message: String,
     idempotency_key: String,
+    /// Omitted entirely when there is nothing to carry, because an empty list is a
+    /// different claim from no list at all.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    attachments: Vec<ChatAttachment>,
+}
+
+/// A picture carried alongside a message.
+///
+/// The Gateway takes base64 in `content` and does its own normalizing from there, so
+/// this is the whole contract — no upload step, no second round trip.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatAttachment {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub mime_type: String,
+    pub file_name: String,
+    pub content: String,
+    pub width: i32,
+    pub height: i32,
 }
 
 #[derive(Deserialize)]
@@ -359,6 +404,7 @@ enum GatewayRequest {
     AgentsList,
     SessionsList,
     SessionsCatalogList,
+    SessionsCatalogContinue(ThreadLocator),
     ChatSend(ChatSendParams),
     RefreshCanvasSurface {
         observed_url: Option<String>,
@@ -377,6 +423,7 @@ enum GatewayResponse {
     AgentsList(AgentsListResult),
     SessionsList(SessionsListResult),
     SessionsCatalogList(SessionsCatalogListResult),
+    SessionsCatalogContinue(CatalogContinueResult),
     ChatSend(ChatSendAck),
     CanvasSurface(Option<String>),
     #[cfg(target_os = "linux")]
@@ -683,6 +730,59 @@ impl GatewayClient {
         Ok(result)
     }
 
+    /// Adopt a conversation held elsewhere, and learn the session key it now answers to.
+    ///
+    /// This is a real handover: the thread stops being something a terminal drives and
+    /// becomes a Gateway session. Whoever calls this has already said so out loud.
+    pub async fn catalog_continue(&self, locator: ThreadLocator) -> Result<String, String> {
+        let response = self
+            .request(GatewayRequest::SessionsCatalogContinue(locator))
+            .await?;
+        let GatewayResponse::SessionsCatalogContinue(result) = response else {
+            return Err(
+                "Gateway returned the wrong response for sessions.catalog.continue.".to_string(),
+            );
+        };
+        Ok(result.session_key)
+    }
+
+    /// Where a message to this agent should land, by the app's own routing rules.
+    pub async fn target_for_agent(&self, agent_id: &str) -> Result<ChatRoutingTarget, String> {
+        let catalog = self.agents_list().await?;
+        Ok(routing_target(&catalog.scope, agent_id, &catalog.main_key))
+    }
+
+    /// Send to a session key that is already known, with pictures attached.
+    ///
+    /// Beside `chat_send` rather than replacing it: Quick Chat picks an agent and lets
+    /// routing work the key out, while the toolbar has resolved a receiver to an exact
+    /// session and must not have that decision made again underneath it.
+    pub async fn chat_send_to(
+        &self,
+        target: ChatRoutingTarget,
+        message: String,
+        attachments: Vec<ChatAttachment>,
+        idempotency_key: &str,
+    ) -> Result<ChatSendResult, String> {
+        let response = self
+            .request(GatewayRequest::ChatSend(ChatSendParams {
+                session_key: target.session_key.clone(),
+                agent_id: target.agent_id.clone(),
+                message,
+                idempotency_key: idempotency_key.to_string(),
+                attachments,
+            }))
+            .await?;
+        let GatewayResponse::ChatSend(ack) = response else {
+            return Err("Gateway returned the wrong response for chat.send.".to_string());
+        };
+        classify_chat_ack(&ack)?;
+        Ok(ChatSendResult {
+            target,
+            run_id: ack.run_id,
+        })
+    }
+
     pub async fn chat_send(
         &self,
         message: String,
@@ -698,6 +798,7 @@ impl GatewayClient {
                 agent_id: target.agent_id.clone(),
                 message,
                 idempotency_key: idempotency_key.to_string(),
+                attachments: Vec::new(),
             }))
             .await?;
         let GatewayResponse::ChatSend(ack) = response else {
@@ -1605,6 +1706,28 @@ where
                 .map_err(|error| {
                     RequestFailure::transport(format!(
                         "Invalid sessions.catalog.list response: {error}"
+                    ))
+                })
+        }
+        GatewayRequest::SessionsCatalogContinue(locator) => {
+            let params = serde_json::to_value(locator).map_err(|error| {
+                RequestFailure::transport(format!(
+                    "Could not encode sessions.catalog.continue: {error}"
+                ))
+            })?;
+            let payload = request_on_socket(
+                socket,
+                "sessions.catalog.continue",
+                params,
+                budget,
+                dispatch,
+            )
+            .await?;
+            serde_json::from_value(payload)
+                .map(GatewayResponse::SessionsCatalogContinue)
+                .map_err(|error| {
+                    RequestFailure::transport(format!(
+                        "Invalid sessions.catalog.continue response: {error}"
                     ))
                 })
         }
@@ -2790,6 +2913,7 @@ esac
             agent_id: None,
             message: "hello".to_string(),
             idempotency_key: "idempotency-1".to_string(),
+            attachments: Vec::new(),
         };
         assert_eq!(
             request_frame(

@@ -641,6 +641,9 @@ pub(crate) struct ToolbarThread {
     pub title: String,
     pub where_at: Option<String>,
     pub receiving: bool,
+    /// Carried so the thread can be continued later. An id alone names nothing: a
+    /// conversation is addressed by its catalog, its host and its thread together.
+    pub locator: crate::gateway_ws::ThreadLocator,
 }
 
 /// The folder a set of those conversations belongs to.
@@ -700,6 +703,12 @@ pub(crate) async fn colai_threads(
                     id: thread.thread_id.clone(),
                     title: thread_title(thread),
                     where_at: named(thread.git_branch.as_deref()),
+                    locator: crate::gateway_ws::ThreadLocator {
+                        catalog_id: catalog.id.clone(),
+                        host_id: host.host_id.clone(),
+                        thread_id: thread.thread_id.clone(),
+                        agent_id: thread.agent_id.clone(),
+                    },
                 });
             }
         }
@@ -835,6 +844,7 @@ mod tests {
     fn thread(id: &str) -> crate::gateway_ws::CatalogThread {
         crate::gateway_ws::CatalogThread {
             thread_id: id.to_string(),
+            agent_id: None,
             name: None,
             cwd: None,
             git_branch: None,

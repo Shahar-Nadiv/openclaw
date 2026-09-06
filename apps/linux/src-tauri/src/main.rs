@@ -1,5 +1,7 @@
 mod cli;
 mod colai;
+mod colai_capture;
+mod colai_send;
 mod discovery;
 mod gateway;
 mod gateway_device_identity;
@@ -1438,12 +1440,17 @@ fn main() {
         colai::colai_agents,
         colai::colai_sessions,
         colai::colai_threads,
+        colai_capture::colai_capture_mark,
+        colai_capture::colai_forget_marks,
+        colai_send::colai_send,
         colai::colai_summon,
         colai::colai_release,
         colai::colai_open_settings
     ]);
 
-    let builder = builder.manage(colai::ShapeState::default());
+    let builder = builder
+        .manage(colai::ShapeState::default())
+        .manage(colai_capture::MarkShots::default());
 
     let app = builder
         .on_window_event(|window, event| {
