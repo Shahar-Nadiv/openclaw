@@ -107,6 +107,11 @@ body {
   margin: 4px 0;
 }
 
+/* `all: unset` below throws away the browser's own `[hidden] { display: none }`, so a
+   folded key would stay on the rail while claiming to be hidden. Stated back. */
+.key[hidden] {
+  display: none;
+}
 .key {
   all: unset;
   box-sizing: border-box;
@@ -531,6 +536,62 @@ body {
 .chip:hover {
   color: #f7f7f8;
 }
+/* ── the automation panel ─────────────────────────────────────────────────── */
+
+/* A chip row that names what it is choosing between. The label is not a chip, so it
+   does not take a share of the row the way `flex: 1` would give it one. */
+.chip-label {
+  flex: 0 0 auto;
+  align-self: center;
+  padding-right: 4px;
+  color: #8e8e93;
+  font-size: 11px;
+}
+.cron-line {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0 8px;
+}
+.cron-line .popup-note {
+  margin: 0;
+}
+.cron-line .mode-row {
+  flex: 1;
+  padding: 0;
+}
+.cron-amount {
+  flex: 0 0 68px;
+  width: 68px;
+  text-align: center;
+}
+/* What the schedule comes to, said back. Quiet until it is a schedule, then lit — the
+   one line in the panel that changes as somebody types. */
+.cron-summary {
+  margin: 6px 8px 2px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 5%);
+  color: #8e8e93;
+  font-size: 11.5px;
+}
+.cron-summary[data-ready="true"] {
+  color: #f7f7f8;
+  background: color-mix(in srgb, var(--accent, #ff6b6b) 14%, transparent);
+}
+/* A fact about how automations work, not a warning about this one. Said quietly, in
+   the margin, where the rest of the panel's small print would be if it had any. */
+.cron-bare {
+  margin: 8px 8px 0;
+  color: #8e8e93;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.flyout-send > .cron-summary,
+.flyout-send > .cron-line {
+  width: auto;
+}
+
 /* Four words where the mode chips have one each. Smaller and given room to breathe,
    rather than four labels touching their own edges. */
 .design-row .chip {
@@ -538,6 +599,17 @@ body {
   font-size: 10.5px;
   letter-spacing: 0.1px;
 }
+/* The way back onto the rail, at the foot of the folded group's menu. A row, but not
+   a tool — quieter, so it does not read as a seventh thing to pick. */
+.row-quiet {
+  justify-content: center;
+  color: #8e8e93;
+  font-size: 11.5px;
+}
+.row-quiet:hover {
+  color: #f7f7f8;
+}
+
 .chip[aria-pressed="true"] {
   background: var(--accent, #ff6b6b);
   color: #1c1c1e;

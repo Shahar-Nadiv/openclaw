@@ -1452,6 +1452,7 @@ fn main() {
         colai_send::colai_send,
         colai_send::colai_unwatch,
         colai_send::colai_start_here,
+        colai_send::colai_automate,
         colai_files::colai_describe_files,
         colai_files::colai_pick_files,
         colai_watch::colai_watch_start,

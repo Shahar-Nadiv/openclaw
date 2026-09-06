@@ -309,6 +309,37 @@ pub(crate) struct CatalogContinueResult {
     pub session_key: String,
 }
 
+/// An automation, as the toolbar asks for one.
+///
+/// The Gateway's own `cron.add` shape, narrowed to what a panel on an overlay offers:
+/// a name, when it runs, where it runs, and what it says. Triggers, wake mode,
+/// timeouts, delivery routes and tool allowances are the Control UI's Advanced fold
+/// and stay there — every one of them is a decision somebody should make sitting down.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CronAdd {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_key: Option<String>,
+    pub schedule: Value,
+    /// `main` posts into the agent's own timeline; `isolated` runs a turn of its own.
+    pub session_target: String,
+    pub wake_mode: String,
+    pub payload: Value,
+}
+
+/// What came back, as much of it as is worth saying.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CronAdded {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+}
+
 #[derive(Clone, Deserialize)]
 pub(crate) struct SessionsCatalogListResult {
     #[serde(default)]
@@ -425,6 +456,7 @@ enum GatewayRequest {
         watching: bool,
     },
     StartHere(StartHere),
+    CronAdd(CronAdd),
     ChatSend(ChatSendParams),
     RefreshCanvasSurface {
         observed_url: Option<String>,
@@ -444,6 +476,7 @@ enum GatewayResponse {
     SessionsList(SessionsListResult),
     SessionsCatalogList(SessionsCatalogListResult),
     SessionsCatalogContinue(CatalogContinueResult),
+    CronAdd(CronAdded),
     ChatSend(ChatSendAck),
     CanvasSurface(Option<String>),
     #[cfg(target_os = "linux")]
@@ -755,6 +788,14 @@ impl GatewayClient {
     /// The other half of routing: when what is in front has no conversation worth
     /// joining, the answer is a new one where the work is, rather than an agent that
     /// has to be told where the work is.
+    /// Make an automation: the same request, on a schedule the Gateway keeps.
+    pub async fn cron_add(&self, asked: CronAdd) -> Result<CronAdded, String> {
+        match self.request(GatewayRequest::CronAdd(asked)).await? {
+            GatewayResponse::CronAdd(made) => Ok(made),
+            _ => Err("The Gateway answered something else.".to_string()),
+        }
+    }
+
     pub async fn start_here(&self, asked: StartHere) -> Result<(), String> {
         self.request(GatewayRequest::StartHere(asked))
             .await
@@ -1802,6 +1843,18 @@ where
                         "Invalid sessions.catalog.continue response: {error}"
                     ))
                 })
+        }
+        GatewayRequest::CronAdd(asked) => {
+            let params = serde_json::to_value(asked).map_err(|error| {
+                RequestFailure::transport(format!("Could not encode cron.add: {error}"))
+            })?;
+            let payload = request_on_socket(socket, "cron.add", params, budget, dispatch).await?;
+            // Read loosely on purpose. Creating the job is the outcome; its name and id
+            // are only there so the receipt can say which one, and a shape this does not
+            // recognise must not turn a job that was made into an error saying it was not.
+            Ok(GatewayResponse::CronAdd(
+                serde_json::from_value(payload).unwrap_or_default(),
+            ))
         }
         GatewayRequest::ChatSend(params) => {
             let params = serde_json::to_value(params).map_err(|error| {

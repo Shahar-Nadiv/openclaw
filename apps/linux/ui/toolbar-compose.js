@@ -78,7 +78,7 @@ function drawPopup() {
       chip.type = "button";
       chip.className = "chip";
       chip.setAttribute("aria-pressed", String((mark.design || DESIGN_FIRST) === id));
-      chip.textContent = kind.label;
+      chip.textContent = kind.chip || kind.label;
       chip.addEventListener("click", () => {
         mark.design = id;
         // The home moves with the kind, unless somebody has typed over it. A redline
@@ -91,7 +91,7 @@ function drawPopup() {
     }
     rows.push(kinds);
 
-    const kind = DESIGNS[mark.design] || DESIGNS[DESIGN_FIRST];
+    const kind = kindOf(mark);
     const where = document.createElement("input");
     where.className = "popup-note popup-dest";
     where.type = "text";
@@ -280,6 +280,219 @@ function bringFiles(brought) {
   // and something that vanishes on arrival reads as a drop that failed.
   state.open = "send";
   render();
+}
+
+/**
+ * The automation panel: the same request, on a schedule.
+ *
+ * Built out of the pieces the composer already uses — chips for a choice between a few,
+ * the note field's own input for anything typed — so it reads as another face of the
+ * send key rather than a settings page that wandered onto the desktop.
+ *
+ * What is not here is the point. OpenClaw's own form folds triggers, wake mode,
+ * timeouts, delivery routes and tool allowances behind "Advanced"; on an overlay they
+ * are not folded, they are absent. Somebody who needs them is somebody who should be
+ * sitting in the Control UI.
+ */
+function drawAutomation() {
+  const rows = [];
+  const cron = state.cron;
+
+  const title = document.createElement("p");
+  title.className = "agents-title";
+  title.textContent = "Create an automation";
+  rows.push(title);
+
+  const name = document.createElement("input");
+  name.className = "popup-note";
+  name.type = "text";
+  name.value = cron.name;
+  name.placeholder = nameFor(state.marks, state.text, state.surface);
+  name.setAttribute("aria-label", "What this automation is called");
+  name.addEventListener("input", () => {
+    cron.name = name.value;
+  });
+  rows.push(name);
+
+  rows.push(
+    chips("How often", REPEATS, cron.repeat, (id) => {
+      cron.repeat = id;
+      render();
+    }),
+  );
+
+  if (cron.repeat === "every") {
+    const line = document.createElement("div");
+    line.className = "cron-line";
+    const amount = document.createElement("input");
+    amount.className = "popup-note cron-amount";
+    amount.type = "number";
+    amount.min = "1";
+    amount.value = cron.amount;
+    amount.setAttribute("aria-label", "How many");
+    amount.addEventListener("input", () => {
+      cron.amount = amount.value;
+      drawSchedule();
+    });
+    line.append(amount);
+    line.append(chips(null, UNITS, cron.unit, (id) => {
+      cron.unit = id;
+      render();
+    }));
+    rows.push(line);
+  } else if (cron.repeat === "at") {
+    rows.push(
+      field("datetime-local", cron.at, "When it runs", (value) => {
+        cron.at = value;
+      }),
+    );
+  } else {
+    rows.push(
+      field("text", cron.expr, "Cron expression", (value) => {
+        cron.expr = value;
+      }, "0 9 * * *"),
+    );
+    rows.push(
+      field("text", cron.tz, "Timezone", (value) => {
+        cron.tz = value;
+      }, "Leave blank for this machine's"),
+    );
+  }
+
+  // Said back before it is agreed to. "Every 30" is a setting; "Runs every 30 minutes"
+  // is a promise, and the difference is whether anybody notices they typed 30 into the
+  // days field.
+  const summary = document.createElement("p");
+  summary.className = "cron-summary";
+  summary.id = "cron-summary";
+  rows.push(summary);
+
+  rows.push(
+    chips("Runs in", { isolated: { label: "Its own session" }, main: { label: "Main session" } },
+      cron.where, (id) => {
+        cron.where = id;
+        render();
+      }),
+  );
+
+  // The one thing this cannot do, said where it matters rather than discovered later.
+  const bare = document.createElement("p");
+  bare.className = "cron-bare";
+  bare.textContent = "Carries your words, not the pictures — a scheduled run goes and looks for itself.";
+  rows.push(bare);
+
+  const foot = document.createElement("div");
+  foot.className = "popup-foot";
+  const to = document.createElement("button");
+  to.type = "button";
+  to.className = "popup-to";
+  to.textContent = state.receiving.name || "Choose who receives";
+  to.title = "Change who this runs as";
+  to.addEventListener("click", () => flyout("agents"));
+  const make = document.createElement("button");
+  make.type = "button";
+  make.className = "popup-do popup-go";
+  make.disabled = state.sending || scheduleOf(cron) === null;
+  make.textContent = state.sending ? "Creating…" : "Create";
+  make.addEventListener("click", () => void createAutomation());
+  foot.append(to, make);
+  rows.push(foot);
+
+  el.flyAutomate.replaceChildren(...rows);
+  drawSchedule();
+}
+
+/** The sentence under the schedule, redrawn on its own so typing does not rebuild the panel. */
+function drawSchedule() {
+  const summary = document.getElementById("cron-summary");
+  if (!summary) return;
+  const says = scheduleSays(state.cron);
+  summary.textContent = says || "Not a schedule yet.";
+  summary.dataset.ready = String(says !== null);
+  const make = el.flyAutomate.querySelector(".popup-go");
+  if (make) make.disabled = state.sending || says === null;
+}
+
+/** A row of chips over a table of choices, the way the modes are drawn. */
+function chips(label, table, chosen, pick) {
+  const row = document.createElement("div");
+  row.className = "mode-row";
+  if (label) {
+    const said = document.createElement("span");
+    said.className = "chip-label";
+    said.textContent = label;
+    row.append(said);
+  }
+  for (const [id, entry] of Object.entries(table)) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.setAttribute("aria-pressed", String(chosen === id));
+    chip.textContent = entry.label;
+    chip.addEventListener("click", () => pick(id));
+    row.append(chip);
+  }
+  return row;
+}
+
+/** One typed field, in the note's own clothes. */
+function field(type, value, label, onInput, placeholder) {
+  const input = document.createElement("input");
+  input.className = "popup-note";
+  input.type = type;
+  input.value = value || "";
+  if (placeholder) input.placeholder = placeholder;
+  input.setAttribute("aria-label", label);
+  input.addEventListener("input", () => {
+    onInput(input.value);
+    drawSchedule();
+  });
+  return input;
+}
+
+/**
+ * Make the job.
+ *
+ * The marks stay. An automation is not a send — nothing has gone anywhere yet — and
+ * clearing the tray because somebody scheduled something would lose the work they were
+ * still holding.
+ */
+async function createAutomation() {
+  const schedule = scheduleOf(state.cron);
+  if (!schedule || state.sending) return;
+  const who = receiverNow();
+  if (!who) {
+    state.trouble = "Nobody is receiving. Choose an agent or a conversation first.";
+    render();
+    return;
+  }
+  state.sending = true;
+  render();
+  try {
+    const made = await invoke("colai_automate", {
+      receiver: who,
+      asked: {
+        name: state.cron.name.trim() || nameFor(state.marks, state.text, state.surface),
+        schedule,
+        sessionTarget: state.cron.where,
+        // Immediately when its time comes, rather than at the next heartbeat. The
+        // Control UI keeps this choice under Advanced and defaults it the same way.
+        wakeMode: "now",
+        payload: {
+          kind: "agentTurn",
+          message: automationFor(state.marks, state.mode, state.text, state.surface),
+        },
+      },
+    });
+    if (who.kind === "thread") state.adopted = [...state.adopted, who.id];
+    state.open = null;
+    state.trouble = `Automation created${made && made.name ? ` — ${made.name}` : ""}.`;
+  } catch (error) {
+    state.trouble = `Could not create that — ${error && error.message ? error.message : String(error)}`;
+  } finally {
+    state.sending = false;
+    render();
+  }
 }
 
 function drawComposer() {

@@ -96,12 +96,41 @@ type ToolbarHelpers = {
   ANSWER_AWAY: number;
   DESIGNS: Record<
     string,
-    { label: string; home: string | null; says: (file: string, home: string) => string }
+    {
+      label: string;
+      chip?: string;
+      home: string | null;
+      says: (file: string, home: string) => string;
+    }
   >;
   DESIGN_FIRST: string;
   labelOf: (mark: { tool: string; design?: string }) => string;
   homeOf: (mark: { design?: string; dest?: string }) => string;
   WHOLE_DISPLAY: string[];
+  scheduleOf: (cron: Cron) => Record<string, unknown> | null;
+  scheduleSays: (cron: Cron) => string | null;
+  nameFor: (marks: { note?: string }[], text: string, surface: Surface) => string;
+  automationFor: (
+    marks: { tool: string; note?: string }[],
+    mode: string,
+    text: string,
+    surface: Surface,
+  ) => string;
+  AUTOMATION_FIRST: Cron;
+  UNITS: Record<string, { label: string; ms: number }>;
+  REPEATS: Record<string, { label: string }>;
+};
+
+/** The automation being written, as the panel holds it. */
+type Cron = {
+  name: string;
+  repeat: string;
+  amount: string;
+  unit: string;
+  at: string;
+  expr: string;
+  tz: string;
+  where: string;
 };
 
 /** A file or folder somebody dropped on the toolbar, as the page holds it. */
@@ -109,7 +138,7 @@ type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS };`,
   context,
 );
 const {
@@ -140,6 +169,13 @@ const {
   labelOf,
   homeOf,
   WHOLE_DISPLAY,
+  scheduleOf,
+  scheduleSays,
+  nameFor,
+  automationFor,
+  AUTOMATION_FIRST,
+  UNITS,
+  REPEATS,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -872,7 +908,7 @@ describe("the design family", () => {
     // One key with four meanings rather than four keys: they take the same picture of
     // the same region and differ only in the sentence that goes with it, and a rail
     // with four near-identical eyes on it is a rail nobody can read.
-    expect(Object.keys(DESIGNS)).toEqual(["wireframe", "redline", "component", "tokens"]);
+    expect(Object.keys(DESIGNS)).toEqual(["wireframe", "redline", "component", "system", "tokens"]);
     expect(TOOLS.design!.writes).toBe(false);
     expect(TOOLS.wireframe).toBeUndefined();
     expect(DESIGNS[DESIGN_FIRST]).toBeDefined();
@@ -887,6 +923,20 @@ describe("the design family", () => {
       expect(line.length).toBeGreaterThan(80);
     }
     expect(new Set(said).size).toBe(said.length);
+  });
+
+  test("a label too long for a chip is short on the chip and long everywhere else", () => {
+    // The message and the popup title have room for "Design system"; a chip beside four
+    // others does not, and truncating it there would lose the word that says which one.
+    expect(DESIGNS.system!.label).toBe("Design system");
+    expect(DESIGNS.system!.chip).toBe("System");
+    expect(labelOf({ tool: "design", design: "system" })).toBe("Design system");
+    // Every other kind is short enough to say the same thing twice.
+    for (const [id, kind] of Object.entries(DESIGNS)) {
+      if (id !== "system") {
+        expect(kind.chip).toBeUndefined();
+      }
+    }
   });
 
   test("a component has no home, because only the repository knows where they live", () => {
@@ -952,5 +1002,111 @@ describe("the design family", () => {
     // survive being asked for with a click.
     expect(WHOLE_DISPLAY).toContain("design");
     expect(WHOLE_DISPLAY).toContain("screenshot");
+  });
+});
+
+describe("scheduling what was marked", () => {
+  const cron = (over: Partial<Cron> = {}): Cron => ({ ...AUTOMATION_FIRST, ...over });
+
+  test("it starts as something that would work if you pressed Create", () => {
+    // A panel that opens invalid makes somebody solve a puzzle before they can do the
+    // obvious thing. Every thirty minutes, in a session of its own, is the obvious thing.
+    expect(scheduleOf(cron())).toEqual({ kind: "every", everyMs: 30 * 60_000 });
+    expect(AUTOMATION_FIRST.where).toBe("isolated");
+  });
+
+  test("an interval is counted in whatever unit was picked", () => {
+    expect(scheduleOf(cron({ amount: "2", unit: "hours" }))).toEqual({
+      kind: "every",
+      everyMs: 2 * 3_600_000,
+    });
+    expect(scheduleOf(cron({ amount: "1", unit: "days" }))).toEqual({
+      kind: "every",
+      everyMs: 86_400_000,
+    });
+  });
+
+  test("half-written is not a schedule, and says so rather than guessing", () => {
+    // Null is what greys the Create button out. Posting a guess would come back as a
+    // Gateway rejection nobody can act on, one round trip later.
+    expect(scheduleOf(cron({ amount: "" }))).toBeNull();
+    expect(scheduleOf(cron({ amount: "0" }))).toBeNull();
+    expect(scheduleOf(cron({ amount: "-5" }))).toBeNull();
+    expect(scheduleOf(cron({ amount: "soon" }))).toBeNull();
+    expect(scheduleOf(cron({ repeat: "at", at: "" }))).toBeNull();
+    expect(scheduleOf(cron({ repeat: "cron", expr: "  " }))).toBeNull();
+    expect(scheduleSays(cron({ amount: "" }))).toBeNull();
+  });
+
+  test("a timezone is sent only when there is one", () => {
+    // An empty string is not "the host timezone", it is an empty string, and the
+    // schema would take it as one.
+    expect(scheduleOf(cron({ repeat: "cron", expr: "0 9 * * *", tz: "" }))).toEqual({
+      kind: "cron",
+      expr: "0 9 * * *",
+    });
+    expect(
+      scheduleOf(cron({ repeat: "cron", expr: "0 9 * * *", tz: " Europe/Amsterdam " })),
+    ).toEqual({ kind: "cron", expr: "0 9 * * *", tz: "Europe/Amsterdam" });
+  });
+
+  test("the schedule is said back as a sentence before it is agreed to", () => {
+    // "Every 30" is a setting; "Runs every 30 minutes" is a promise, and the difference
+    // is whether anybody notices they typed 30 into the days field.
+    expect(scheduleSays(cron())).toBe("Runs every 30 minutes");
+    expect(scheduleSays(cron({ amount: "1", unit: "hours" }))).toBe("Runs every hour");
+    expect(scheduleSays(cron({ amount: "1", unit: "days" }))).toBe("Runs every day");
+    expect(scheduleSays(cron({ repeat: "at", at: "2026-09-08T09:00" }))).toBe(
+      "Runs once at 2026-09-08T09:00",
+    );
+    expect(scheduleSays(cron({ repeat: "cron", expr: "0 9 * * *" }))).toBe(
+      "Cron schedule 0 9 * * *",
+    );
+  });
+
+  test("it borrows the Gateway's own words for the choices", () => {
+    // A job made here is listed beside jobs made in the Control UI. Calling the same
+    // thing something else on this surface would make them look like two features.
+    expect(Object.values(REPEATS).map((one) => one.label)).toEqual(["Interval", "Once", "Cron"]);
+    expect(Object.values(UNITS).map((one) => one.label)).toEqual(["Minutes", "Hours", "Days"]);
+  });
+
+  test("an automation is named after the work, not after the clock", () => {
+    // "Every 30 minutes" is what the schedule already says, and a list of jobs all
+    // called that is a list nobody can read.
+    expect(nameFor([], "Tell me if this goes red.", null)).toBe("Tell me if this goes red.");
+    expect(nameFor([{ note: "the build status" }], "", null)).toBe("the build status");
+    expect(nameFor([], "", { app: "Firefox", connector: null })).toBe("Check Firefox");
+    expect(nameFor([], "", null)).toBe("Check the screen");
+  });
+
+  test("a long first line is cut rather than sent whole", () => {
+    const said = nameFor([], "x".repeat(200), null);
+    expect(said.length).toBeLessThanOrEqual(60);
+    expect(said.endsWith("…")).toBe(true);
+  });
+
+  test("what runs never names a picture, because none of them travel", () => {
+    // The worst version of this bug is silent: an agent told to look at mark-1.png goes
+    // looking, finds nothing, and reports that something is broken.
+    const said = automationFor(
+      [{ tool: "box", note: "the build status" }],
+      "debug",
+      "Tell me if this goes red.",
+      { app: "Firefox", connector: null },
+    );
+    expect(said).not.toContain("mark-1.png");
+    expect(said).not.toContain(".png");
+    expect(said).toContain("Debug:");
+    expect(said).toContain("Tell me if this goes red.");
+    expect(said).toContain("About: the build status");
+    expect(said).toContain("on Firefox");
+    expect(said).toContain("No pictures travel");
+  });
+
+  test("marks with nothing written on them add nothing to it", () => {
+    const said = automationFor([{ tool: "box" }, { tool: "box" }], "ask", "Look here.", null);
+    expect(said).not.toContain("About:");
+    expect(said).toContain("Look here.");
   });
 });

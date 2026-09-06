@@ -103,6 +103,21 @@ const DESIGNS = {
       `they are tested — a component that is correct and unlike everything around it ` +
       `is a component somebody has to rewrite.`,
   },
+  system: {
+    label: "Design system",
+    // The one label too long for a chip beside four others. Said in full wherever
+    // there is room for it, which is everywhere except the chip itself.
+    chip: "System",
+    home: "docs/Design/",
+    says: (file, home) =>
+      `Build a design system out of ${file} and write it to ${home}. Cover the ` +
+      `foundations first — colour, type scale, spacing, radii, elevation — then the ` +
+      `components visible in it, then the patterns those components compose into. ` +
+      `Write it the way Claude's own design language is written: plain sentences, a ` +
+      `stated reason for each decision, and examples rather than rules. Where this ` +
+      `project already decided something, record what it decided rather than what you ` +
+      `would have chosen.`,
+  },
   tokens: {
     label: "Tokens",
     home: "docs/Design/",
@@ -118,7 +133,7 @@ const DESIGN_FIRST = "wireframe";
 
 /** Where a design mark's document goes: what somebody typed, or the kind's own home. */
 function homeOf(mark) {
-  const kind = DESIGNS[mark.design] || DESIGNS[DESIGN_FIRST];
+  const kind = kindOf(mark);
   // A component has no default, so an empty field is a real answer there — "wherever
   // this project keeps them" — and the sentence for that kind never asks about it.
   return (mark.dest || "").trim() || kind.home || "";
@@ -126,8 +141,13 @@ function homeOf(mark) {
 
 /** What a mark is called in the message: for a design mark, which kind it is. */
 function labelOf(mark) {
-  if (mark.tool === "design") return (DESIGNS[mark.design] || DESIGNS[DESIGN_FIRST]).label;
+  if (mark.tool === "design") return kindOf(mark).label;
   return TOOLS[mark.tool] ? TOOLS[mark.tool].label : mark.tool;
+}
+
+/** Which kind of design a mark is asking for, whatever it says or fails to say. */
+function kindOf(mark) {
+  return DESIGNS[mark.design] || DESIGNS[DESIGN_FIRST];
 }
 
 /**
@@ -153,6 +173,139 @@ const RECORD_LENGTHS = [2, 5, 10, 15];
  * back as the panel rather than as a red rectangle somebody drew around it.
  */
 const RECORD_CLEAR = 16;
+
+/*
+ * ── automations ──────────────────────────────────────────────────────────────
+ *
+ * A send happens once. An automation is the same request on a schedule, and the
+ * Gateway already has the machinery for it — this borrows its vocabulary rather than
+ * inventing a second one, so a job made here reads the same in the Control UI as one
+ * made there.
+ *
+ * Only what somebody has to decide. OpenClaw's own form keeps triggers, wake mode,
+ * timeouts, delivery routes and tool allowances behind an "Advanced" fold; none of
+ * that belongs on an overlay, and a panel that asked for it would be a settings page
+ * standing on somebody's desktop.
+ *
+ * The one thing an automation cannot carry is the pictures. A scheduled job takes a
+ * message and nothing else, so the words go and the photographs do not — which is said
+ * out loud in the panel and written into the message, because an agent told to look at
+ * `mark-1.png` that never arrives is worse off than one told there is no picture.
+ */
+
+/** How often an automation can repeat, in the Gateway's own words. */
+const REPEATS = {
+  every: { label: "Interval" },
+  at: { label: "Once" },
+  cron: { label: "Cron" },
+};
+
+/** The units an interval is offered in, and what each is worth. */
+const UNITS = {
+  minutes: { label: "Minutes", ms: 60_000 },
+  hours: { label: "Hours", ms: 3_600_000 },
+  days: { label: "Days", ms: 86_400_000 },
+};
+
+/** How an automation starts out: every thirty minutes, in a session of its own. */
+const AUTOMATION_FIRST = {
+  name: "",
+  repeat: "every",
+  amount: "30",
+  unit: "minutes",
+  at: "",
+  expr: "0 9 * * *",
+  tz: "",
+  where: "isolated",
+};
+
+/**
+ * The schedule an automation would be created with, or null if it is not one yet.
+ *
+ * Null rather than a guess: a blank interval and a half-typed cron expression are both
+ * "not ready", and the panel would rather grey out its own button than post something
+ * the Gateway will reject with a sentence nobody can act on.
+ */
+function scheduleOf(cron) {
+  if (cron.repeat === "at") {
+    const at = (cron.at || "").trim();
+    return at ? { kind: "at", at } : null;
+  }
+  if (cron.repeat === "cron") {
+    const expr = (cron.expr || "").trim();
+    if (!expr) return null;
+    const tz = (cron.tz || "").trim();
+    return tz ? { kind: "cron", expr, tz } : { kind: "cron", expr };
+  }
+  const amount = Number(cron.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  const unit = UNITS[cron.unit] || UNITS.minutes;
+  return { kind: "every", everyMs: Math.round(amount * unit.ms) };
+}
+
+/**
+ * What the schedule comes to, in a sentence.
+ *
+ * Written where somebody can read it before they commit to it. "Every 30 minutes" is
+ * a setting; "Runs every 30 minutes" is a promise, and the difference is whether
+ * anybody notices they typed 30 into the days field.
+ */
+function scheduleSays(cron) {
+  const schedule = scheduleOf(cron);
+  if (!schedule) return null;
+  if (schedule.kind === "at") return `Runs once at ${schedule.at}`;
+  if (schedule.kind === "cron") {
+    return schedule.tz
+      ? `Cron schedule ${schedule.expr} (${schedule.tz})`
+      : `Cron schedule ${schedule.expr}`;
+  }
+  const amount = Number(cron.amount);
+  const unit = (UNITS[cron.unit] || UNITS.minutes).label.toLowerCase();
+  return amount === 1 ? `Runs every ${unit.replace(/s$/, "")}` : `Runs every ${amount} ${unit}`;
+}
+
+/**
+ * What an automation is called when nobody has named it.
+ *
+ * From the work rather than from the clock: "Every 30 minutes" is what the schedule
+ * already says, and a list of jobs all called that is a list nobody can read.
+ */
+function nameFor(marks, text, surface) {
+  const said = (text || "").trim() || (marks.find((mark) => (mark.note || "").trim()) || {}).note;
+  const from = (said || "").trim().split("\n")[0];
+  if (from) return from.length > 60 ? `${from.slice(0, 57)}…` : from;
+  return surface && surface.app ? `Check ${surface.app}` : "Check the screen";
+}
+
+/**
+ * What the agent reads every time the automation runs.
+ *
+ * Not the send message. That one names the pictures attached to it, and an automation
+ * has none — a scheduled job carries a message and nothing more. Naming files that
+ * will not arrive is the worst of both: the agent goes looking, finds nothing, and
+ * reports that something is broken.
+ */
+function automationFor(marks, mode, text, surface) {
+  const said = [];
+  const asked = MODES[mode] || MODES.plan;
+  said.push(`${asked.label}: ${asked.says}`);
+  const own = (text || "").trim();
+  if (own) {
+    said.push("");
+    said.push(own);
+  }
+  const notes = marks.map((mark) => (mark.note || "").trim()).filter(Boolean);
+  if (notes.length) {
+    said.push("");
+    said.push(notes.length === 1 ? `About: ${notes[0]}` : `About: ${notes.join("; ")}`);
+  }
+  said.push("");
+  said.push(
+    `Set up from the colai toolbar${surface && surface.app ? ` on ${surface.app}` : ""}. ` +
+      `No pictures travel with a scheduled run — go and look at what you need.`,
+  );
+  return said.join("\n");
+}
 
 /** How far an opened answer sits from the pin it belongs to, on whichever side it fits. */
 const ANSWER_AWAY = 18;
@@ -334,7 +487,7 @@ function summaryFor(marks, mode, text, surface, files) {
     // one with two names — and they can be two different kinds.
     marks.forEach((mark, at) => {
       if (mark.tool !== "design") return;
-      const kind = DESIGNS[mark.design] || DESIGNS[DESIGN_FIRST];
+      const kind = kindOf(mark);
       said.push("");
       said.push(kind.says(`mark-${at + 1}.png`, homeOf(mark)));
     });

@@ -17,7 +17,7 @@ use tauri::State;
 
 use crate::colai_capture::MarkShots;
 use crate::gateway_ws::{
-    ChatAttachment, ChatRoutingTarget, GatewayClient, StartHere, ThreadLocator,
+    ChatAttachment, ChatRoutingTarget, CronAdd, CronAdded, GatewayClient, StartHere, ThreadLocator,
 };
 
 /// Who is getting this, as the page knows them.
@@ -162,6 +162,41 @@ fn attach(shots: &MarkShots, mark_ids: &[String]) -> Result<Vec<ChatAttachment>,
         }
     }
     Ok(carried)
+}
+
+/// Make an automation out of what was marked.
+///
+/// The same request, on a schedule, and the schedule is the Gateway's own — a job made
+/// here is a job the Control UI can list, edit and stop, rather than a second idea of
+/// what a recurring task is.
+///
+/// It carries words and no pictures, which is not a shortcut: a scheduled job takes a
+/// message and nothing else. The page composes the message knowing that, and says so
+/// where somebody can read it before agreeing to it.
+#[tauri::command]
+pub(crate) async fn colai_automate(
+    gateway: State<'_, GatewayClient>,
+    receiver: Receiver,
+    asked: CronAdd,
+) -> Result<CronAdded, String> {
+    if asked.name.trim().is_empty() {
+        return Err("An automation needs a name.".to_string());
+    }
+    // Resolved the same way a send is, so "who receives this" means one thing on this
+    // surface. A thread is the only kind that costs anything, and the page has already
+    // asked before it gets here.
+    let target = resolve(&gateway, &receiver).await?;
+    // Where the job belongs, said the way the receiver said it. An agent names an
+    // agent; a conversation names its session and lets the Gateway work out whose it
+    // is. Left off entirely, the job would run against whatever default the Gateway
+    // picks — quietly somewhere other than where it was set up.
+    gateway
+        .cron_add(CronAdd {
+            agent_id: target.agent_id.clone(),
+            session_key: target.agent_id.is_none().then_some(target.session_key),
+            ..asked
+        })
+        .await
 }
 
 /// Stop listening to a conversation.
