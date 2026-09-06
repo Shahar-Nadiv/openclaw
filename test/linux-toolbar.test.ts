@@ -160,7 +160,10 @@ type ToolbarHelpers = {
   agoSaid: (at: number, now: number) => string;
   GOING_BACK: Record<string, { label: string; says: string; fork: boolean }>;
   KEEPS_MARKING: string[];
-  numberOf: (marks: unknown[] | undefined, mark: unknown) => number | null;
+  numberOf: (
+    marks: { tool?: string; chosen?: boolean }[] | undefined,
+    mark: { tool?: string; chosen?: boolean } | null | undefined,
+  ) => number | null;
 };
 
 /** A run the toolbar believes is underway. */
@@ -1955,5 +1958,24 @@ describe("marking several things before saying anything", () => {
     expect(numberOf([{ tool: "box" }], { tool: "circle" })).toBeNull();
     expect(numberOf([], { tool: "box" })).toBeNull();
     expect(numberOf(undefined, { tool: "box" })).toBeNull();
+  });
+
+  test("the number is what the agent will call it, so unticking renumbers", () => {
+    // The message numbers what is sent. A mark left out is not going anywhere and the
+    // agent will never call it anything, so it wears no number — and the ones that are
+    // going close up behind it rather than leaving a hole somebody has to map across.
+    const kept = { tool: "box", chosen: true };
+    const left = { tool: "pointAt", chosen: false };
+    const also = { tool: "circle", chosen: true };
+    const marks = [kept, left, also];
+    expect(numberOf(marks, kept)).toBe(1);
+    expect(numberOf(marks, left)).toBeNull();
+    expect(numberOf(marks, also)).toBe(2);
+
+    // And that is exactly what the message says, because only the chosen ones are sent.
+    const said = summaryFor([kept, also], "ask", "", null);
+    expect(said).toContain("1. Box");
+    expect(said).toContain("2. Circle");
+    expect(said).not.toContain("Point at");
   });
 });

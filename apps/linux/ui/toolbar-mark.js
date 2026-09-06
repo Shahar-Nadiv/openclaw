@@ -349,13 +349,14 @@ function drawMarks() {
   const drawnPins = state.marks
     .map((mark) => {
       const spot = badgeAt(mark);
-      if (!spot) return null;
+      const number = numberOf(state.marks, mark);
+      if (!spot || number === null) return null;
       const pin = document.createElement("span");
       pin.className = "pin";
       pin.dataset.pointing = String(mark.tool === "pointAt");
       pin.style.left = `${spot.x * 100}%`;
       pin.style.top = `${spot.y * 100}%`;
-      pin.textContent = String(numberOf(state.marks, mark));
+      pin.textContent = String(number);
       return pin;
     })
     .filter(Boolean);

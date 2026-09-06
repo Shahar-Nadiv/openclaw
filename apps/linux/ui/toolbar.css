@@ -578,9 +578,61 @@ body {
 }
 
 /* A mark waiting to be sent, and the tick that decides whether it goes this time. */
+/*
+ * A mark waiting to be sent, and what somebody wants said about it.
+ *
+ * Two lines, because they are two different questions — whether it goes, and what it is
+ * for — and one line of a three-hundred-pixel panel cannot hold both without the note
+ * ending up too narrow to write in.
+ */
 .mark-row {
-  cursor: pointer;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  height: auto;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  cursor: default;
+}
+.mark-pick {
+  display: flex;
+  align-items: center;
   gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+/* The same number it wears on the glass and carries in the message. */
+.mark-number {
+  flex-shrink: 0;
+  min-width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  background: var(--accent, #ff6b6b);
+  color: #1c1c1e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}
+.mark-number:empty {
+  display: none;
+}
+.mark-note {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: rgb(255 255 255 / 5%);
+  color: #f7f7f8;
+  font-size: 12px;
+}
+.mark-note::placeholder {
+  color: #6d6d72;
+}
+.mark-note:focus {
+  background: rgb(255 255 255 / 9%);
+  box-shadow: 0 0 0 1px var(--accent, #ff6b6b) inset;
 }
 .mark-tick {
   flex-shrink: 0;

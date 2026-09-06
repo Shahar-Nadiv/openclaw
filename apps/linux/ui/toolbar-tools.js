@@ -871,7 +871,12 @@ const KEEPS_MARKING = ["pointAt", "box", "circle", "draw"];
  * the difference between a readable screen and a pile of red rectangles.
  */
 function numberOf(marks, mark) {
-  const at = (marks || []).indexOf(mark);
+  // Among the ones actually going, because that is what the message numbers. A mark
+  // somebody has unticked is not going anywhere and the agent will never call it
+  // anything, so it wears no number — which is also the plainest way of saying it has
+  // been left out.
+  if (!mark || mark.chosen === false) return null;
+  const at = (marks || []).filter((one) => one.chosen !== false).indexOf(mark);
   return at < 0 ? null : at + 1;
 }
 

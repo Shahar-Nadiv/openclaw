@@ -697,8 +697,15 @@ function drawComposer() {
     rows.push(none);
   }
   for (const mark of state.marks) {
-    const row = document.createElement("label");
+    const row = document.createElement("div");
     row.className = "row mark-row";
+
+    // The tick, the picture and the name toggle together, because they are all the same
+    // question — is this one going? The note beside them is not, which is why it sits
+    // outside the label rather than inside it: a click meant for the words somebody is
+    // about to change must not untick the mark they are changing them on.
+    const pick = document.createElement("label");
+    pick.className = "mark-pick";
     const tick = document.createElement("input");
     tick.type = "checkbox";
     tick.className = "mark-tick";
@@ -715,14 +722,34 @@ function drawComposer() {
       picture.alt = "";
       shot.append(picture);
     }
+    // Numbered the way the glass numbers it and the way the message will, so all three
+    // agree about which one is being talked about.
+    const number = document.createElement("span");
+    number.className = "mark-number";
+    const called = numberOf(state.marks, mark);
+    number.textContent = called === null ? "" : String(called);
     const said = document.createElement("span");
     said.className = "agent-name";
     // Named the way the message will name it, so what somebody ticks in the tray and
     // what the agent reads are the same word.
-    const tool = labelOf(mark);
-    said.textContent = mark.note ? `${tool} — ${mark.note}` : tool;
+    said.textContent = labelOf(mark);
     said.title = said.textContent;
-    row.append(tick, shot, said);
+    pick.append(tick, shot, number, said);
+
+    // Its note, here as well as in the popup. Marks travel in groups now, and the popup
+    // reaches whichever one is newest — going back to change what you wrote on the first
+    // of four meant discarding three and starting again.
+    const note = document.createElement("input");
+    note.type = "text";
+    note.className = "mark-note";
+    note.value = mark.note || "";
+    note.placeholder = "What about it?";
+    note.setAttribute("aria-label", `What about ${said.textContent}`);
+    note.addEventListener("input", () => {
+      mark.note = note.value;
+    });
+
+    row.append(pick, note);
     rows.push(row);
   }
 
