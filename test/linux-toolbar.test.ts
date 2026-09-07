@@ -153,7 +153,7 @@ type ToolbarHelpers = {
   RUN_QUIET: number;
   sheeted: (mark: { tool: string; frames?: number }) => boolean;
   asksSomething: (said: string) => boolean;
-  rewindRefused: (said: unknown) => string;
+  rewindRefused: (said: unknown, sessionKey?: string) => string;
   canGoBack: (
     row: { kind: string; id?: string; sessionKey?: string } | null,
     allowed: string[] | undefined,
@@ -1872,28 +1872,38 @@ describe("taking a conversation back", () => {
     expect(canGoBack({ kind: "session", id: "s1", sessionKey: "s1" }, admin).can).toBe(true);
   });
 
-  test("a conversation another agent owns cannot, sent to or not", () => {
-    /*
-     * Sending to a thread gives it a session key here, which was read as "so it can be
-     * rewound now". It cannot: the agent that started it owns that history, and the
-     * Gateway refuses to cut it in place — "session history changes are unavailable
-     * because this session is owned by an external agent harness". So the toolbar
-     * offered an action that always failed, which is the exact thing this gate exists
-     * to prevent.
-     */
-    for (const row of [
-      { kind: "thread", id: "t1" },
-      { kind: "thread", id: "t1", sessionKey: "s9" },
-    ]) {
-      const said = canGoBack(row, admin);
-      expect(said.can, JSON.stringify(row)).toBe(false);
-      // And not a dead end: rewind is not missing, it is in the application that owns
-      // the transcript, which is where it has to happen.
-      expect(said.why).toContain("rewind it there");
-    }
+  test("a thread cannot, until it has been sent to once", () => {
+    const cold = canGoBack({ kind: "thread", id: "t1" }, admin);
+    expect(cold.can).toBe(false);
+    expect(cold.why).toContain("Send to this conversation once");
+    expect(canGoBack({ kind: "thread", id: "t1", sessionKey: "s9" }, admin).can).toBe(true);
   });
 
-  test("the Gateway's refusal is said in words somebody can act on", () => {
+  test("a conversation the Gateway has refused is not offered again", () => {
+    /*
+     * Whether a conversation's history is owned by the agent that started it is not
+     * something this side can see — on this machine the two that are arrive in the list
+     * as ordinary sessions. Guessing from the shape of a row got it exactly backwards:
+     * it refused conversations that rewind fine and offered the two that cannot.
+     *
+     * So it is asked by trying, once, and the answer is kept.
+     */
+    const row = { kind: "session", id: "held", sessionKey: "held" };
+    expect(canGoBack(row, admin).can).toBe(true);
+    rewindRefused(
+      new Error(
+        "Session history changes are unavailable because this session is owned by an external agent harness.",
+      ),
+      "held",
+    );
+    const now = canGoBack(row, admin);
+    expect(now.can).toBe(false);
+    expect(now.why).toContain("rewind it there");
+    // And only that one: nothing else is tarred with it.
+    expect(canGoBack({ kind: "session", id: "other", sessionKey: "other" }, admin).can).toBe(true);
+  });
+
+  test("older refusals still read plainly", () => {
     // What it actually says is true and addressed to nobody. The toolbar knows what it
     // means and can say the useful half.
     const refused = rewindRefused(

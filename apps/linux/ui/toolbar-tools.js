@@ -711,15 +711,32 @@ function canGoBack(row, allowed) {
   if (!allowed.includes("operator.admin")) {
     return { can: false, why: "This machine is not allowed to rewind conversations." };
   }
+  // Refused once for a reason that will not change while this is open. Asked and
+  // answered: the Gateway is the only thing that knows a conversation's history is owned
+  // elsewhere, so the answer is remembered rather than guessed at again.
+  const key = row.sessionKey || (row.kind === "session" ? row.id : null);
+  if (key && REFUSED.has(key)) return { can: false, why: REFUSED.get(key) };
   if (row.kind === "session" && row.id) return { can: true, why: null };
-  // A conversation held by another agent — a Claude Code thread, and whatever else
-  // registers a catalog later. Sending to one gives it a session key here, which used to
-  // be read as "so it can be rewound now", and it cannot: the other agent owns that
-  // history and the Gateway refuses to cut it in place. Offering it anyway meant an
-  // action that always failed, which teaches somebody the toolbar is broken.
-  if (row.kind === "thread") return { can: false, why: HELD_ELSEWHERE };
+  if (row.kind === "thread") {
+    return row.sessionKey
+      ? { can: true, why: null }
+      : { can: false, why: "Send to this conversation once and it can be rewound after that." };
+  }
   return { can: false, why: "An agent is not a conversation — pick one of its conversations." };
 }
+
+/**
+ * Conversations the Gateway has already refused, and what it said.
+ *
+ * Whether a conversation's history is owned by the agent that started it is not
+ * something this side can see: the two that are, on this machine, arrive in the list as
+ * ordinary sessions. Guessing from the shape of a row got it exactly backwards — it
+ * refused conversations that rewind fine and offered the two that cannot.
+ *
+ * So it is asked, once, by trying; and the answer is kept so nobody is walked into the
+ * same wall twice.
+ */
+const REFUSED = new Map();
 
 /**
  * Why a conversation somebody else's agent owns cannot be taken back from here.
@@ -738,11 +755,18 @@ const HELD_ELSEWHERE =
  * external agent harness", which is true and is not addressed to anybody. The toolbar
  * knows what that means and can say the useful half.
  */
-function rewindRefused(said) {
+function rewindRefused(said, sessionKey) {
   const words = String((said && said.message) || said || "");
-  if (/external agent harness|owned by/i.test(words)) return HELD_ELSEWHERE;
+  if (/external agent harness|owned by/i.test(words)) {
+    // A permanent fact about that conversation, so it is worth keeping: the next look at
+    // its menu says so instead of offering the same failure again.
+    if (sessionKey) REFUSED.set(sessionKey, HELD_ELSEWHERE);
+    return HELD_ELSEWHERE;
+  }
   if (/archived/i.test(words)) {
-    return "This conversation is archived, and an archived conversation cannot be taken back.";
+    const archived = "This conversation is archived, and an archived conversation cannot be taken back.";
+    if (sessionKey) REFUSED.set(sessionKey, archived);
+    return archived;
   }
   return `Could not go back — ${words || "the Gateway did not say why."}`;
 }

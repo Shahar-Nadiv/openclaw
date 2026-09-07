@@ -539,7 +539,7 @@ async function goBack(point) {
     state.trouble = `${about.name} is back to just before “${(point.said || "that prompt").slice(0, 40)}”. The files are as they were.`;
     void loadWho();
   } catch (error) {
-    state.trouble = rewindRefused(error);
+    state.trouble = rewindRefused(error, about.sessionKey);
   } finally {
     state.sending = false;
     render();
