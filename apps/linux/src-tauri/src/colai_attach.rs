@@ -25,7 +25,36 @@ use tauri::{AppHandle, Emitter as _, Manager as _, Runtime};
 ///
 /// Fast enough that switching application feels like the marks were never there, slow
 /// enough to be free. Each look is three X round trips on a local socket.
-const LOOK_EVERY: std::time::Duration = std::time::Duration::from_millis(120);
+/// How often the front window is looked at while something is moving.
+///
+/// Faster than any display refreshes, because a mark that updates on its own slower
+/// clock trails the window it is drawn on — and a dot lagging a hand's-width behind a
+/// dragged window reads as broken rather than as attached.
+const WHILE_MOVING: std::time::Duration = std::time::Duration::from_millis(8);
+
+/// And while nothing is happening, which is nearly always.
+const WHEN_STILL: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// How long after the last change to keep looking quickly.
+///
+/// Long enough to cover the pauses inside a drag — a hand stops for a moment mid-move
+/// far more often than it finishes — so the whole gesture is smooth rather than smooth
+/// in bursts.
+const STAYS_LIVELY: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// How soon to look again, given how long ago anything last moved.
+///
+/// A plain function so the pacing is a decision with a test on it rather than a number
+/// buried in a loop. Idle is the case that has to stay cheap: ten looks a second, of
+/// three small round trips each, against a hundred and twenty-five while a window is
+/// actually under somebody's hand.
+fn how_soon(since_change: std::time::Duration) -> std::time::Duration {
+    if since_change < STAYS_LIVELY {
+        WHILE_MOVING
+    } else {
+        WHEN_STILL
+    }
+}
 
 /// The event the page listens for.
 pub(crate) const FRONT_EVENT: &str = "colai:front";
@@ -76,16 +105,24 @@ pub(crate) fn watch_the_front<R: Runtime>(app: &AppHandle<R>) {
                 return;
             };
             let mut said: Option<InFront> = None;
+            let mut moved = std::time::Instant::now();
             while running.load(Ordering::Relaxed) {
                 let now = eyes.in_front();
                 if let Ok(mut held) = LAST_LOOK.lock() {
                     held.clone_from(&now);
                 }
                 if changed(said.as_ref(), now.as_ref()) {
+                    // Only a window that actually moved earns the fast rate. A title
+                    // that ticks — a terminal with a clock in it, a tab counting
+                    // notifications — changes the answer every look, and treating that
+                    // as motion would hold the quick rate for as long as the clock ran.
+                    if shifted(said.as_ref(), now.as_ref()) {
+                        moved = std::time::Instant::now();
+                    }
                     let _ = app.emit_to(crate::colai::OVERLAY_LABEL, FRONT_EVENT, now.clone());
                     said = now;
                 }
-                std::thread::sleep(LOOK_EVERY);
+                std::thread::sleep(how_soon(moved.elapsed()));
             }
         });
     }
@@ -110,6 +147,15 @@ fn changed(said: Option<&InFront>, now: Option<&InFront>) -> bool {
         (Some(said), Some(now)) => said != now,
         _ => true,
     }
+}
+
+/// Whether the window in front is in a different place from the one before it.
+///
+/// The reason to look quickly, and only this. Everything else about a window can change
+/// without anything needing to move on the screen.
+fn shifted(said: Option<&InFront>, now: Option<&InFront>) -> bool {
+    let place = |front: Option<&InFront>| front.map(|front| (front.id.clone(), front.at));
+    place(said) != place(now)
 }
 
 #[cfg(target_os = "linux")]
@@ -165,7 +211,6 @@ mod x11 {
         fn XSetErrorHandler(
             handler: Option<unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int>,
         ) -> *mut c_void;
-        fn XSync(display: *mut c_void, discard: c_int) -> c_int;
     }
 
     /// Xlib kills the process on a protocol error unless something says otherwise.
@@ -186,6 +231,9 @@ mod x11 {
         utf8: c_ulong,
         pid: c_ulong,
         ours: u32,
+        /// The window the answer below was worked out for.
+        asked: c_ulong,
+        mine: bool,
     }
 
     impl Eyes {
@@ -210,6 +258,8 @@ mod x11 {
                 utf8: atom("UTF8_STRING"),
                 pid: atom("_NET_WM_PID"),
                 ours: std::process::id(),
+                asked: 0,
+                mine: false,
                 display,
             })
         }
@@ -225,16 +275,19 @@ mod x11 {
             if window == 0 {
                 return Some(InFront::default());
             }
-            let front = InFront {
+            // Whose window it is, asked once per window rather than once per look. A
+            // window cannot change process under its own id, and this runs a hundred
+            // times a second while somebody drags something.
+            if self.asked != window {
+                self.asked = window;
+                self.mine = self.one_number(window, self.pid) == Some(self.ours as c_ulong);
+            }
+            Some(InFront {
                 id: format!("0x{window:x}"),
                 title: self.text(window, self.name),
                 at: self.rect(window),
-                ours: self.one_number(window, self.pid) == Some(self.ours as c_ulong),
-            };
-            // Errors are ignored rather than fatal, which means a read can silently have
-            // failed; syncing here keeps a stale answer from being reported as current.
-            unsafe { XSync(self.display, 0) };
-            Some(front)
+                ours: self.mine,
+            })
         }
 
         fn one_number(&self, window: c_ulong, property: c_ulong) -> Option<c_ulong> {
@@ -384,6 +437,54 @@ mod tests {
             }),
             ours: false,
         }
+    }
+
+    #[test]
+    fn only_a_window_that_moved_earns_the_quick_rate() {
+        // A title that ticks — a terminal with a clock in it, a tab counting
+        // notifications — changes the answer on every look. Treating that as motion
+        // would hold the quick rate for as long as the clock ran, which is a hundred
+        // and twenty-five looks a second for nothing.
+        let was = front("0x1", "Prices — Shop");
+        let ticking = front("0x1", "(3) Prices — Shop");
+        assert!(
+            changed(Some(&was), Some(&ticking)),
+            "still worth telling the page"
+        );
+        assert!(!shifted(Some(&was), Some(&ticking)), "but nothing moved");
+
+        let mut dragged = was.clone();
+        dragged.at = Some(crate::colai::Rect {
+            x: 420,
+            y: 100,
+            width: 800,
+            height: 600,
+        });
+        assert!(shifted(Some(&was), Some(&dragged)));
+        // Another window in front is a different place even at the same rectangle.
+        assert!(shifted(Some(&was), Some(&front("0x2", "Prices — Shop"))));
+    }
+
+    #[test]
+    fn it_keeps_up_with_a_hand_and_costs_nothing_the_rest_of_the_time() {
+        // A mark that updates on its own slower clock trails the window it is drawn on,
+        // and a dot lagging behind a dragged window reads as broken rather than
+        // attached. So while anything is moving it looks faster than any display
+        // refreshes.
+        assert_eq!(how_soon(std::time::Duration::ZERO), WHILE_MOVING);
+        assert!(WHILE_MOVING.as_millis() <= 8, "faster than a frame");
+
+        // And a pause inside a drag — a hand stops far more often than it finishes — is
+        // still part of the drag.
+        assert_eq!(how_soon(STAYS_LIVELY / 2), WHILE_MOVING);
+
+        // Nothing has happened for a while: back to a rate nobody pays for.
+        assert_eq!(how_soon(STAYS_LIVELY), WHEN_STILL);
+        assert_eq!(how_soon(std::time::Duration::from_secs(60)), WHEN_STILL);
+        assert!(
+            WHEN_STILL > WHILE_MOVING * 4,
+            "idle is meaningfully cheaper"
+        );
     }
 
     #[test]

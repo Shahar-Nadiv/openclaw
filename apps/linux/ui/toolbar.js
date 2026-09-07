@@ -308,6 +308,28 @@ function render() {
   shape();
 }
 
+/**
+ * Redraw the marks on the next frame, however many answers arrived before it.
+ *
+ * The watcher looks faster than the screen refreshes while a window is being dragged, on
+ * purpose — a mark that updates on its own slower clock trails the window it is drawn on.
+ * But drawing once per answer would mean drawing several times over for one frame nobody
+ * sees, so the answers are kept and the drawing happens once, at the rate the display
+ * actually has.
+ */
+let redrawing = 0;
+function redrawMarksSoon() {
+  if (redrawing) return;
+  redrawing = requestAnimationFrame(() => {
+    redrawing = 0;
+    drawMarks();
+    // Almost always a no-op: the marks are not part of the clickable region, and this is
+    // memoised on the rectangles so it only crosses to Rust when they genuinely differ.
+    // Left in because a popup open over a moving window is not a no-op.
+    shape();
+  });
+}
+
 function drawTrouble() {
   el.trouble.hidden = !state.trouble;
   el.trouble.textContent = state.trouble || "";
@@ -568,8 +590,7 @@ async function start() {
 
   void listen("colai:front", (event) => {
     state.front = (event && event.payload) || null;
-    drawMarks();
-    shape();
+    redrawMarksSoon();
   }).catch(() => {});
 
   void listen("colai:ended", (event) => {
