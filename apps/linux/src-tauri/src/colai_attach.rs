@@ -16,7 +16,7 @@
 //! answer changed, and that is the part with a test on it.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter as _, Manager as _, Runtime};
@@ -34,7 +34,8 @@ pub(crate) const FRONT_EVENT: &str = "colai:front";
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InFront {
-    /// The X window id, as the same hex string a mark's address already carries.
+    /// The X window id, as the same hex string a mark's address already carries. Empty
+    /// when nothing is in front, which is an answer rather than the lack of one.
     pub id: String,
     pub title: Option<String>,
     /// Where it is now. A mark is drawn from this rather than from the rectangle the
@@ -44,6 +45,21 @@ pub(crate) struct InFront {
     /// every mark would vanish the instant somebody reached for the toolbar — including
     /// the one whose popup they just opened.
     pub ours: bool,
+}
+
+/// The last look, kept so it can be asked for.
+///
+/// The watcher only speaks when the answer changes, which means the first thing it says
+/// is said at startup — before the page exists to hear it. Without somewhere to ask, a
+/// toolbar opened onto a desktop nobody then touches never learns which window is in
+/// front, and every mark stays pinned to the screen exactly as it did before any of this
+/// was written. That was the bug: not the tracking, the not-knowing.
+static LAST_LOOK: Mutex<Option<InFront>> = Mutex::new(None);
+
+/// What is in front right now, as far as the watcher has seen.
+#[tauri::command]
+pub(crate) fn colai_in_front() -> Option<InFront> {
+    LAST_LOOK.lock().ok().and_then(|held| held.clone())
 }
 
 /// Start watching, once, for the life of the app.
@@ -62,6 +78,9 @@ pub(crate) fn watch_the_front<R: Runtime>(app: &AppHandle<R>) {
             let mut said: Option<InFront> = None;
             while running.load(Ordering::Relaxed) {
                 let now = eyes.in_front();
+                if let Ok(mut held) = LAST_LOOK.lock() {
+                    held.clone_from(&now);
+                }
                 if changed(said.as_ref(), now.as_ref()) {
                     let _ = app.emit_to(crate::colai::OVERLAY_LABEL, FRONT_EVENT, now.clone());
                     said = now;
@@ -196,11 +215,15 @@ mod x11 {
         }
 
         pub(super) fn in_front(&mut self) -> Option<InFront> {
-            let window = self.one_number(self.root, self.active)?;
-            // 0 is what X reports when nothing has focus — a locked screen, or the
-            // moment between one window closing and the next taking it.
+            let window = self.one_number(self.root, self.active).unwrap_or(0);
+            // 0 is what X reports when nothing has focus — a minimised window, a locked
+            // screen, the moment between one window closing and the next taking over.
+            //
+            // Reported as a window with no id rather than as no answer, because those
+            // are different things to the page: "nothing is in front" hides every mark
+            // that belongs to an application, and "I could not tell" leaves them alone.
             if window == 0 {
-                return None;
+                return Some(InFront::default());
             }
             let front = InFront {
                 id: format!("0x{window:x}"),

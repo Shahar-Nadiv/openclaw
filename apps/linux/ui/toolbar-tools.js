@@ -290,9 +290,16 @@ function asDrawn(mark, front, screen) {
 function showingNow(mark, front) {
   if (!FOLLOWS_WINDOW.includes(mark.tool)) return true;
   const on = mark.on;
-  if (!on || !front || front.ours) return true;
+  if (!on || front === undefined || front === null) return true;
+  // The toolbar is not something else. Opening a popup makes the overlay the active
+  // window, so without this every mark would go the instant anybody reached for it.
+  if (front.ours) return true;
+  // Nothing in front at all — a minimised window, a cleared desktop, the moment between
+  // one window closing and the next taking over. Said as a window with no id, and it has
+  // to mean *hide*: treating it as "cannot tell" is what put marks back on the bare
+  // desktop after somebody minimised the browser they had marked.
+  if (!front.id) return false;
   if (front.id !== on.id) return false;
-  if (front.gone) return false;
   // Tabs. One browser window keeps one id across every tab it holds, so the id alone
   // cannot see the change that half of this is about. A URL says it exactly, where the
   // desktop serves one; a title says it bluntly, and blunt fails toward hiding — which

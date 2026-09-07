@@ -102,7 +102,8 @@ const state = {
   // The library window, while it is open, and which mark it will answer.
   library: null,
   // The window somebody is looking at, as the watcher last reported it. Null until it
-  // has spoken, which is a reason to leave every mark alone rather than to hide them.
+  // has spoken, which is a reason to leave every mark alone rather than to hide them —
+  // a window with an empty id is the other thing, and means nothing is in front.
   front: null,
   // The catalogues this build knows how to read, so the library window can say which.
   libraries: [],
@@ -549,8 +550,22 @@ async function start() {
   // work coming out — and only what an agent finally said back is an answer to what was
   // pointed at.
   // A run saying it is over, or has fallen over.
-  // Which window is in front, as it changes. A mark belongs to the application it was
-  // made on, so this is what decides where — and whether — each one is drawn.
+  // Which window is in front. Asked once, then listened for.
+  //
+  // Both halves are needed. The watcher only speaks when the answer changes, and the
+  // first change it sees is at startup — before this page exists to hear it. Waiting for
+  // the second one meant a toolbar opened onto a desktop nobody then switched away from
+  // never learned which window was in front, so every mark stayed pinned to the screen
+  // exactly as it had before any of this was written.
+  void invoke("colai_in_front")
+    .then((front) => {
+      // Only if nothing has been heard since: an event that arrived while this was in
+      // flight is newer than this answer.
+      if (state.front === null) state.front = front || null;
+      render();
+    })
+    .catch(() => {});
+
   void listen("colai:front", (event) => {
     state.front = (event && event.payload) || null;
     drawMarks();

@@ -254,7 +254,6 @@ type InFront = {
   /** Where that window is now, which is what a mark is drawn from. */
   at?: Rect | null;
   ours?: boolean;
-  gone?: boolean;
 };
 
 /** What somebody picked out of a catalogue, as the mark carries it. */
@@ -2083,14 +2082,24 @@ describe("a mark belongs to what it was marked on", () => {
       expect(showingNow(withUrl, { id: "0x1", title: "Prices — Shop" })).toBe(true);
     });
 
-    test("a window that has gone takes its marks off the screen", () => {
-      expect(showingNow(pin, { id: "0x1", title: "Prices — Shop", gone: true })).toBe(false);
+    test("nothing in front takes them off the screen", () => {
+      /*
+       * Minimise the window you marked and X reports no active window at all. Read as
+       * "cannot tell" that put every mark back on the bare desktop, which is exactly
+       * what it looks like when the tracking has failed — and was the report.
+       *
+       * So the watcher says it as a window with no id, which is an answer, and an answer
+       * means hide.
+       */
+      expect(showingNow(pin, { id: "" })).toBe(false);
+      expect(showingNow(pin, {})).toBe(false);
     });
 
-    test("what is not known is left alone rather than taken away", () => {
-      // Before the first answer, and for a mark made when the desktop could not say which
-      // window it was on. Hiding somebody's mark for want of information is worse than
-      // the thing this fixes.
+    test("what has not been heard yet is left alone rather than taken away", () => {
+      // The moment before the watcher has spoken, and marks made when the desktop could
+      // not say which window they were on. Hiding somebody's mark for want of
+      // information is worse than the thing this fixes — but it has to be told apart
+      // from being told there is nothing in front, which is the distinction above.
       expect(showingNow(pin, null)).toBe(true);
       expect(showingNow({ tool: "pointAt" }, { id: "0x9" })).toBe(true);
     });
