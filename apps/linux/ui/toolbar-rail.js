@@ -528,7 +528,7 @@ async function loadWho() {
   try {
     // Asked together, because the menu shows them together: two answers a second apart
     // would let the rail claim a receiver that the list below it does not offer.
-    const [agents, sessions, projects, allowed] = await Promise.all([
+    const [agents, sessions, projects, allowed, libraries] = await Promise.all([
       invoke("colai_agents", { receiving: pick("agent") }),
       invoke("colai_sessions", { receiving: pick("session") }),
       invoke("colai_threads", { receiving: pick("thread") }),
@@ -537,8 +537,12 @@ async function loadWho() {
       // is retried — so a single question at load is answered before there is anything
       // to answer it, and a menu would spend the session saying it was not allowed.
       invoke("colai_allowed"),
+      // Which catalogues this build can read, so the library window can name one rather
+      // than telling somebody to go and find out.
+      invoke("colai_libraries"),
     ]);
     state.allowed = allowed || [];
+    state.libraries = libraries || [];
     state.agents = agents || [];
     state.sessions = sessions || [];
     state.projects = projects || [];

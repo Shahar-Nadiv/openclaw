@@ -66,8 +66,10 @@ async function lookInLibrary() {
       sessionKey: state.receiving.kind === "agent" ? null : state.receiving.id,
     });
     if (asked !== asking || !state.library) return;
-    state.library.found = found;
-    state.library.trouble = found.trouble || null;
+    // An answer with nothing in it is not a crash to show somebody. Reading straight
+    // through it put "undefined is not an object" in the window where the results go.
+    state.library.found = found || { library: null, cards: [], connect: true, trouble: null };
+    state.library.trouble = state.library.found.trouble || null;
   } catch (error) {
     if (asked !== asking || !state.library) return;
     state.library.found = null;
@@ -200,13 +202,20 @@ function drawLibrary() {
     // The one state this window exists to handle well. Not an error: nothing is broken,
     // there is simply nothing connected yet, and the only useful thing to say is where
     // to go and connect one.
-    rows.push(
-      saying(
-        "No component library is connected to this agent yet. Add one in OpenClaw — " +
-          "settings, then MCP servers — and its components and design systems will show " +
-          "up here.",
-      ),
-    );
+    // Named exactly, and the server's name matters: a tool is addressed as
+    // `mcp__<server>__…`, so what somebody types in that field is what the toolbar has
+    // to look under. Saying "add an MCP server" and leaving them to pick a name is how
+    // this ends up genuinely connected and still reported as missing.
+    const known = state.libraries || [];
+    const told = known.length
+      ? known
+          .map(
+            (one) =>
+              `${one.label} — add it in OpenClaw under Settings → MCP, and name the server “${one.called}”.`,
+          )
+          .join(" ")
+      : "Add one in OpenClaw under Settings → MCP.";
+    rows.push(saying(`No component library is connected to this agent yet. ${told}`));
   } else if (open.trouble) {
     rows.push(saying(`Could not look — ${open.trouble}`));
   } else if (!found || found.cards.length === 0) {

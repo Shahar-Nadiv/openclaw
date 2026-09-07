@@ -28,8 +28,17 @@ use crate::gateway_ws::GatewayClient;
 struct Library {
     /// How the catalogue is named to a person.
     label: &'static str,
-    /// The free search, and the argument names it takes.
-    search: &'static str,
+    /// What the server should be called when it is added, so the empty state can say.
+    called: &'static str,
+    /// The free search, under every name the tool could plausibly have.
+    ///
+    /// A tool's wire name is `mcp__<server>__<tool>`, and the server half is whatever the
+    /// person adding it typed, with punctuation flattened to underscores. So the same
+    /// catalogue is `mcp__21st__search` or `mcp__21st_dev__search` depending on a free
+    /// text field somebody filled in once. Looking under only the first would mean a
+    /// library that is genuinely connected and reported as missing — the worst answer
+    /// this can give, because it sends somebody to fix a thing that is not broken.
+    searches: &'static [&'static str],
     /// What the search calls a component, and what it calls a design system.
     component: &'static str,
     theme: &'static str,
@@ -37,7 +46,13 @@ struct Library {
 
 const LIBRARIES: &[Library] = &[Library {
     label: "21st.dev",
-    search: "mcp__21st__search",
+    called: "21st",
+    searches: &[
+        "mcp__21st__search",
+        "mcp__21st_dev__search",
+        "mcp__21st-dev__search",
+        "mcp__twentyfirst__search",
+    ],
     component: "component",
     theme: "theme",
 }];
@@ -94,28 +109,53 @@ pub(crate) async fn colai_library_search(
         } else {
             library.component
         };
-        let answer = gateway
-            .invoke_tool(
-                library.search,
-                asked_for(wanted, &query, mine),
-                agent_id.clone(),
-                session_key.clone(),
-            )
-            .await?;
-        if answer.missing {
-            continue;
+        for search in library.searches {
+            let answer = gateway
+                .invoke_tool(
+                    search,
+                    asked_for(wanted, &query, mine),
+                    agent_id.clone(),
+                    session_key.clone(),
+                )
+                .await?;
+            if answer.missing {
+                continue;
+            }
+            return Ok(Found {
+                library: Some(library.label.to_string()),
+                cards: cards_in(&answer.output),
+                connect: false,
+                trouble: answer.trouble,
+            });
         }
-        return Ok(Found {
-            library: Some(library.label.to_string()),
-            cards: cards_in(&answer.output),
-            connect: false,
-            trouble: answer.trouble,
-        });
     }
     Ok(Found {
         connect: true,
         ..Found::default()
     })
+}
+
+/// What each catalogue is called, and what to name its server.
+///
+/// So the window can tell somebody how to connect one in the same words the lookup
+/// uses, instead of a sentence that drifts away from the code it is describing.
+#[tauri::command]
+pub(crate) fn colai_libraries() -> Vec<Named> {
+    LIBRARIES
+        .iter()
+        .map(|library| Named {
+            label: library.label.to_string(),
+            called: library.called.to_string(),
+        })
+        .collect()
+}
+
+/// A catalogue the toolbar could read, named twice: for a person, and for the field.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Named {
+    pub label: String,
+    pub called: String,
 }
 
 /// The search, as the catalogue is asked for it.
@@ -295,16 +335,34 @@ mod tests {
     }
 
     #[test]
+    fn a_catalogue_is_looked_for_under_every_name_its_server_could_have() {
+        for library in LIBRARIES {
+            assert!(!library.searches.is_empty(), "{}", library.label);
+            // The name the window tells somebody to type has to be one of the names this
+            // actually looks under, or the instructions do not work.
+            let told = format!("mcp__{}__search", library.called);
+            assert!(
+                library.searches.contains(&told.as_str()),
+                "{} says to call the server {} but never looks for {told}",
+                library.label,
+                library.called
+            );
+            for search in library.searches {
+                assert!(search.starts_with("mcp__"), "{search}");
+                assert!(search.ends_with("__search"), "{search}");
+            }
+        }
+    }
+
+    #[test]
     fn browsing_never_names_the_call_that_costs_money() {
         // The whole economy of this rests on it. Fetching a component's source is paid
         // and counted, and it belongs to the agent, once, on the thing somebody chose —
         // never to drawing a menu somebody is only looking at.
         for library in LIBRARIES {
-            assert!(
-                !library.search.contains("get_component"),
-                "{}",
-                library.label
-            );
+            for search in library.searches {
+                assert!(!search.contains("get_component"), "{}", library.label);
+            }
         }
     }
 

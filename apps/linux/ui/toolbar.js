@@ -101,6 +101,8 @@ const state = {
   runs: [],
   // The library window, while it is open, and which mark it will answer.
   library: null,
+  // The catalogues this build knows how to read, so the library window can say which.
+  libraries: [],
   // What every agent on this Gateway is doing, which is not the same question as what
   // this toolbar started. Null until the Gateway has answered once: no light is the
   // honest state before anything is known, and a green one would be a claim.
