@@ -107,10 +107,42 @@ function chooseFromLibrary(card) {
   render();
 }
 
+/** What the window is currently showing, so an unchanged render leaves it alone. */
+let shown = "";
+
 function drawLibrary() {
   const open = state.library;
   el.library.hidden = open === null;
-  if (!open) return;
+  if (!open) {
+    shown = "";
+    return;
+  }
+  /*
+   * Rebuilt only when what it says changed.
+   *
+   * Everything in here is thrown away and made again on every render, and the rail
+   * re-renders for reasons that have nothing to do with this window — an agent replying,
+   * the five-second look at what every agent is doing. A render landing between somebody
+   * pressing the close button and letting go replaces that button with a new one, and a
+   * click needs both halves on the *same* element: so the press did nothing, silently,
+   * and only sometimes. Leaving the DOM alone when nothing changed is what makes the
+   * button survive long enough to be clicked.
+   */
+  const asItStands = JSON.stringify([
+    open.kind,
+    open.mine,
+    open.loading,
+    open.trouble,
+    open.found && open.found.connect,
+    open.found && open.found.library,
+    open.found && open.found.cards.map((card) => card.id),
+  ]);
+  if (asItStands === shown) {
+    // Still placed: the screen it belongs on can change under it when the rail moves.
+    placeLibrary();
+    return;
+  }
+  shown = asItStands;
   const kind = DESIGNS[open.kind] || DESIGNS[DESIGN_FIRST];
 
   const head = document.createElement("div");

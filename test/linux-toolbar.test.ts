@@ -1971,6 +1971,29 @@ describe("a window lands on a screen, not across two", () => {
     expect(huge).toEqual({ x: 0, y: 0 });
   });
 
+  test("a render that changes nothing leaves the window's controls alone", () => {
+    /*
+     * The rail re-renders for reasons that have nothing to do with this window — an
+     * agent replying, the five-second look at what every agent is doing. Rebuilding the
+     * window on each of those replaces its close button with a new one, and a click
+     * needs its press and its release on the *same* element: so the press did nothing,
+     * silently, and only sometimes.
+     */
+    const library = readFileSync(
+      new URL("../apps/linux/ui/toolbar-library.js", import.meta.url),
+      "utf8",
+    );
+    const draw = library.slice(library.indexOf("function drawLibrary"));
+    const guard = draw.indexOf("=== shown");
+    const rebuild = draw.indexOf("replaceChildren");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(rebuild);
+    // And what somebody is typing is not part of that comparison: rebuilding on every
+    // keystroke would throw away the field they are typing into.
+    const signature = draw.slice(draw.indexOf("const asItStands"), guard);
+    expect(signature).not.toContain("query");
+  });
+
   test("a press outside the library closes it before anything can be drawn", () => {
     // Without this the glass underneath took the press and began another mark behind the
     // window, so pressing away from it did not dismiss it — it quietly drew.

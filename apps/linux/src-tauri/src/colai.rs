@@ -257,23 +257,34 @@ pub(crate) fn colai_shape(app: AppHandle, rects: Vec<Rect>) -> Result<(), String
         .map(|r| (r.x, r.y, r.width, r.height))
         .collect();
 
-    {
-        let state = app.state::<ShapeState>();
-        let mut held = state
-            .0
-            .lock()
-            .map_err(|_| "shape state poisoned".to_string())?;
-        if held.as_deref() == Some(key.as_slice()) {
-            return Ok(());
-        }
-        *held = Some(key.clone());
-    }
-
     let window = app
         .get_webview_window(OVERLAY_LABEL)
         .ok_or_else(|| "The overlay is not open.".to_string())?;
 
-    apply_shape(&window, &key)
+    /*
+     * The lock is held across the apply, not only across the comparison.
+     *
+     * Commands run on a thread pool, so two renders can be in here at once. Releasing
+     * the lock first let them record their shapes in one order and apply them in the
+     * other — leaving the window shaped to a set the page had already replaced. Whatever
+     * the stale set was missing is drawn and dead: the pointer falls straight through a
+     * panel that is plainly on screen, which is how the library window opened with a
+     * close button nothing could press.
+     *
+     * Recorded only once it is really applied, so a failure cannot make the next
+     * identical call believe there is nothing to do.
+     */
+    let state = app.state::<ShapeState>();
+    let mut held = state
+        .0
+        .lock()
+        .map_err(|_| "shape state poisoned".to_string())?;
+    if held.as_deref() == Some(key.as_slice()) {
+        return Ok(());
+    }
+    apply_shape(&window, &key)?;
+    *held = Some(key);
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
