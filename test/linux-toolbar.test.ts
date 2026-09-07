@@ -889,11 +889,11 @@ describe("where an answer opens", () => {
 });
 
 describe("the design family", () => {
-  test("four kinds, one tool", () => {
-    // One key with four meanings rather than four keys: they take the same picture of
+  test("three kinds, one tool", () => {
+    // One key with three meanings rather than three keys: they take the same picture of
     // the same region and differ only in the sentence that goes with it, and a rail
-    // with four near-identical eyes on it is a rail nobody can read.
-    expect(Object.keys(DESIGNS)).toEqual(["wireframe", "redline", "component", "system", "tokens"]);
+    // with three near-identical eyes on it is a rail nobody can read.
+    expect(Object.keys(DESIGNS)).toEqual(["wireframe", "component", "system"]);
     expect(TOOLS.design!.writes).toBe(false);
     expect(TOOLS.wireframe).toBeUndefined();
     expect(DESIGNS[DESIGN_FIRST]).toBeDefined();
@@ -952,9 +952,9 @@ describe("the design family", () => {
 
   test("a kind that writes a document has somewhere to put it", () => {
     expect(homeOf({ design: "wireframe" })).toBe("docs/Design/");
-    expect(homeOf({ design: "tokens" })).toBe("docs/Design/");
+    expect(homeOf({ design: "system" })).toBe("docs/Design/");
     // And what somebody typed beats it, for any kind.
-    expect(homeOf({ design: "redline", dest: " ui/spec.md " })).toBe("ui/spec.md");
+    expect(homeOf({ design: "system", dest: " ui/spec.md " })).toBe("ui/spec.md");
     expect(homeOf({ design: "component", dest: "src/ui/" })).toBe("src/ui/");
   });
 
@@ -969,18 +969,18 @@ describe("the design family", () => {
   test("the message calls a mark by its kind, not by the tool that made it", () => {
     // "1. Design" says nothing; the kind is the request. And the tray uses the same
     // word, so what somebody ticks and what the agent reads match.
-    expect(labelOf({ tool: "design", design: "redline" })).toBe("Redline");
+    expect(labelOf({ tool: "design", design: "system" })).toBe("Design system");
     const said = summaryFor(
       [
-        { tool: "design", design: "redline" },
-        { tool: "design", design: "tokens" },
+        { tool: "design", design: "system" },
+        { tool: "design", design: "component" },
       ],
       "ask",
       "",
       null,
     );
-    expect(said).toContain("1. Redline (mark-1.png)");
-    expect(said).toContain("2. Tokens (mark-2.png)");
+    expect(said).toContain("1. Design system (mark-1.png)");
+    expect(said).toContain("2. Component (mark-2.png)");
   });
 
   test("two design marks in one send are two documents, each said once", () => {

@@ -59,10 +59,10 @@ const MODES = {
 /**
  * What a design mark is asking for.
  *
- * One tool with four things it can mean, rather than four keys: they take the same
+ * One tool with three things it can mean, rather than three keys: they take the same
  * picture of the same region and differ only in the sentence that goes with it, and a
- * rail with four near-identical eyes on it is a rail nobody can read. The kind is
- * picked in the popup, where somebody is already looking at what they marked.
+ * rail with three near-identical eyes on it is a rail nobody can read. The kind is
+ * picked on the menu the design key opens.
  *
  * Data rather than branches, so the chips in the popup and the instruction in the
  * message are read from one place and cannot drift apart — the same reason `MODES` is
@@ -83,16 +83,6 @@ const DESIGNS = {
       `documents already there — the same <x-dc> wrapper and the shared _ds/ ` +
       `stylesheets they use.`,
   },
-  redline: {
-    label: "Redline",
-    glyph: "redline",
-    home: "docs/Design/",
-    says: (file, home) =>
-      `Measure ${file} and write the spec to ${home}: spacing between elements, type ` +
-      `sizes and weights, colours as hex, border radii, and the states you can see. ` +
-      `Where this project already has tokens for any of it, name the token rather ` +
-      `than the value.`,
-  },
   component: {
     label: "Component",
     glyph: "component",
@@ -105,8 +95,8 @@ const DESIGNS = {
   },
   system: {
     label: "Design system",
-    // The one label too long for a chip beside four others. Said in full wherever
-    // there is room for it, which is everywhere except the chip itself.
+    // The one label too long for a chip beside the others. Said in full wherever there
+    // is room for it, which is everywhere except the chip itself.
     chip: "System",
     glyph: "system",
     home: "docs/Design/",
@@ -118,15 +108,6 @@ const DESIGNS = {
       `stated reason for each decision, and examples rather than rules. Where this ` +
       `project already decided something, record what it decided rather than what you ` +
       `would have chosen.`,
-  },
-  tokens: {
-    label: "Tokens",
-    glyph: "tokens",
-    home: "docs/Design/",
-    says: (file, home) =>
-      `Pull the design tokens out of ${file} — colours, spacing steps, type scale, ` +
-      `radii — and reconcile them with the ones this project already defines. Write ` +
-      `what is new and what conflicts to ${home}; do not restate what already exists.`,
   },
 };
 

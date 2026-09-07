@@ -26,14 +26,10 @@ const GLYPHS = {
   circle: '<circle cx="12" cy="12" r="9"/>',
   wireframe:
     '<rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="3 2.5"/><path d="M7 8h10M7 12h6M7 16h8"/>',
-  redline:
-    '<rect x="3" y="7.5" width="18" height="13" rx="2"/><path d="M3 3.5h18M4.5 2v3M19.5 2v3"/>',
   component:
     '<rect x="2.5" y="2.5" width="8.5" height="8.5" rx="1.6"/><rect x="13" y="13" width="8.5" height="8.5" rx="1.6"/><path d="M11 6.75h4.25a2 2 0 0 1 2 2V13"/>',
   system:
     '<rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6" fill="currentColor" stroke="none"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/>',
-  tokens:
-    '<path d="M3 11.6V4.6A1.6 1.6 0 0 1 4.6 3h7L21 12.4 12.4 21z"/><circle cx="7.6" cy="7.6" r="1.5" fill="currentColor" stroke="none"/>',
   screenshot:
     '<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/>',
   send: '<path d="M21 3L10.5 13.5"/><path d="M21 3l-6.8 18-3.7-7.5L3 9.8z"/>',
@@ -212,7 +208,7 @@ function buildRail() {
   row(el.flyShape, "circle", "Circle", "circle", "O");
   // Every kind of design on the menu, not one row called "Design" with the choice
   // hidden in the popup that opens afterwards. What somebody is after — a wireframe, a
-  // redline, a whole design system — is the thing they came to this key for, and a menu
+  // a component, a whole design system — is the thing they came for, and a menu
   // that does not name it is a menu they conclude cannot do it.
   for (const [id, kind] of Object.entries(DESIGNS)) {
     designRow(el.flyDesign, id, kind);

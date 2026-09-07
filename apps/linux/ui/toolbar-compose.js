@@ -97,9 +97,9 @@ function drawPopup() {
   rows.push(note);
 
   if (mark.tool === "design") {
-    // Which of the four this is. Chips rather than a menu: they are four ways of
+    // Which of the three this is. Chips rather than a menu: they are three ways of
     // reading the same picture, and seeing them side by side is what tells somebody
-    // that "redline" and "tokens" are different questions.
+    // that a wireframe and a component are different questions.
     const kinds = document.createElement("div");
     kinds.className = "mode-row design-row";
     for (const [id, kind] of Object.entries(DESIGNS)) {
@@ -110,9 +110,9 @@ function drawPopup() {
       chip.textContent = kind.chip || kind.label;
       chip.addEventListener("click", () => {
         mark.design = id;
-        // The home moves with the kind, unless somebody has typed over it. A redline
-        // left pointing at the path a wireframe suggested is the sort of wrong that
-        // only shows up in a pull request.
+        // The home moves with the kind, unless somebody has typed over it. A design
+        // system left pointing at the path a wireframe suggested is the sort of wrong
+        // that only shows up in a pull request.
         if (!mark.destTyped) mark.dest = kind.home || "";
         render();
       });
