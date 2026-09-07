@@ -242,6 +242,19 @@ async function photograph(mark) {
   // with whichever happened to be last — confidently, and wrongly.
   mark.where = await showing(state.surface, mark);
   mark.spot = spotIn(mark, mark.where, screenSize());
+  // And what it is attached to, which is the same address said as something to draw
+  // from. `region.box` stays what it always was — where this was on the screen at the
+  // moment it was marked — because the picture was cropped from it and the message
+  // describes it. `inside` is that place said in the window's own terms, so drawing can
+  // ask where the window is now instead of where the desktop was then.
+  mark.on = anchorOf(mark.where);
+  if (mark.on) {
+    const screen = screenSize();
+    mark.inside = {
+      box: mark.region ? intoWindow(mark.region.box, mark.on.at, screen) : null,
+      points: (mark.points || []).map((point) => intoWindow(point, mark.on.at, screen)),
+    };
+  }
   document.body.style.visibility = "hidden";
   try {
     await new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn)));
@@ -303,7 +316,15 @@ function accentNow() {
 function drawMarks() {
   const live = document.getElementById("live");
   const drawn = [];
-  for (const mark of state.marks) {
+  // Where the marks belong now: the window each was made on, where that window is at
+  // this moment. A mark whose application is not the one in front is not drawn at all —
+  // a dot left at the same pixels over somebody else's tab is the toolbar lying about
+  // what it is pointing at.
+  const front = state.front;
+  const screen = screenSize();
+  for (const held of state.marks) {
+    if (!showingNow(held, front)) continue;
+    const mark = asDrawn(held, front, screen);
     // A span has no region — it is two points and the distance between them — so the
     // shape cannot be read off the mark the way a box's can. Without this the number
     // was drawn and the line it measures was not.
@@ -342,9 +363,13 @@ function drawMarks() {
   // Every waiting mark wears its number, and it is the number the message will give it.
   // One mark on screen needed none of this; four of them are unreadable without it.
   const drawnPins = state.marks
-    .map((mark) => {
+    .map((held) => {
+      if (!showingNow(held, front)) return null;
+      const mark = asDrawn(held, front, screen);
       const spot = badgeAt(mark);
-      const number = numberOf(state.marks, mark);
+      // Numbered from the mark itself, not from the copy: the number has to be the one
+      // the message will give it, and the copy is not in the list the message counts.
+      const number = numberOf(state.marks, held);
       if (!spot || number === null) return null;
       const pin = document.createElement("span");
       pin.className = "pin";
@@ -358,9 +383,13 @@ function drawMarks() {
   // A measurement's whole point is its number, so the number is on the screen and not
   // only in the message. Written in HTML rather than into the marks layer, which is a
   // unit square stretched to the display and would stretch the text with it.
-  for (const mark of state.marks) {
-    if (mark.tool !== "measure" || typeof mark.px !== "number") continue;
-    drawnPins.push(spanLabel(mark.points, `${mark.px}px`));
+  for (const held of state.marks) {
+    if (held.tool !== "measure" || typeof held.px !== "number") continue;
+    if (!showingNow(held, front)) continue;
+    // The label rides with its line, so it is placed from the drawn copy too. The number
+    // it says does not change: a measurement is of the thing, not of the screen it
+    // happens to be on, and a window somebody resized did not re-measure anything.
+    drawnPins.push(spanLabel(asDrawn(held, front, screen).points, `${held.px}px`));
   }
   el.pins.replaceChildren(...drawnPins);
 }

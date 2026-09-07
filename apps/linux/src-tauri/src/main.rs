@@ -1,5 +1,6 @@
 mod cli;
 mod colai;
+mod colai_attach;
 mod colai_capture;
 mod colai_files;
 #[cfg(target_os = "linux")]
@@ -1369,6 +1370,10 @@ fn main() {
                 eprintln!("[colai] could not open the toolbar: {trouble}");
             }
         }
+
+        // And from here on, which window somebody is looking at — so a mark can be drawn
+        // on the application it was made on and nowhere else.
+        colai_attach::watch_the_front(app.handle());
 
         #[cfg(target_os = "linux")]
         app.manage(gateway_sleep_logind::SleepBridge::start(

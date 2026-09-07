@@ -183,6 +183,126 @@ function homeOf(mark) {
 }
 
 /*
+ * ── what a mark is attached to ───────────────────────────────────────────────
+ *
+ * A mark is a place in an application, not a place on the desktop. Point at something in
+ * a tab, switch tab, and a mark held in screen pixels is still sitting there over
+ * whatever is now underneath — same dot, different content, and the toolbar quietly
+ * lying about what it is pointing at.
+ *
+ * So a mark is anchored: the window it was made on, and where inside that window. The
+ * screen position is worked out again every time it is drawn, from where that window is
+ * *now*. Move the window and the marks ride with it; resize it and they scale; put
+ * something else in front and they are not drawn at all.
+ *
+ * `where.at` — the window's own rectangle — has carried the second half of this since it
+ * was written. Its comment said it was there "so a mark can be given in coordinates that
+ * still mean something after somebody moves the window", and then nothing read it.
+ */
+
+/**
+ * The tools whose marks belong to an application rather than to the display.
+ *
+ * All of them but two. A screenshot and a recording are about what the screen looked
+ * like — they are taken of the desktop, and following a window would be answering a
+ * different question from the one they were asked.
+ */
+const FOLLOWS_WINDOW = Object.keys(TOOLS).filter(
+  (tool) => tool !== "pointer" && tool !== "screenshot" && tool !== "record",
+);
+
+/**
+ * What a mark is attached to, taken from the window it was made on.
+ *
+ * Null when the desktop could not say which window that was — an unanchored mark is
+ * drawn the way it always was, because refusing to show somebody their own mark is worse
+ * than showing it in the wrong place.
+ */
+function anchorOf(where) {
+  if (!where || !where.id || !where.at || !where.at.width || !where.at.height) return null;
+  return {
+    id: where.id,
+    at: { x: where.at.x, y: where.at.y, width: where.at.width, height: where.at.height },
+    title: where.title || null,
+    url: where.url || null,
+  };
+}
+
+/**
+ * A place on the screen, said as a place inside a window.
+ *
+ * Fractions both sides: of the desktop coming in, of the window going out. Fractions of
+ * the window rather than pixels so that a window somebody resizes takes its marks with
+ * it proportionally, which is what a mark on a button in a panel should do.
+ */
+function intoWindow(box, at, screen) {
+  return {
+    x: (box.x * screen.width - at.x) / at.width,
+    y: (box.y * screen.height - at.y) / at.height,
+    ...(box.w === undefined ? {} : { w: (box.w * screen.width) / at.width }),
+    ...(box.h === undefined ? {} : { h: (box.h * screen.height) / at.height }),
+  };
+}
+
+/** And back again, given where that window is now. */
+function ontoScreen(box, at, screen) {
+  return {
+    x: (at.x + box.x * at.width) / screen.width,
+    y: (at.y + box.y * at.height) / screen.height,
+    ...(box.w === undefined ? {} : { w: (box.w * at.width) / screen.width }),
+    ...(box.h === undefined ? {} : { h: (box.h * at.height) / screen.height }),
+  };
+}
+
+/**
+ * A mark as it should be drawn now: at its window's rectangle, not the desktop's.
+ *
+ * The mark itself is never changed. `region.box` is where this was on the screen at the
+ * moment it was marked — the picture was cropped from it and the message describes it —
+ * and rewriting that as a window moved would quietly make both wrong. What comes back is
+ * a copy for drawing.
+ *
+ * Nothing to go on gives the mark back untouched, which is what it did before any of
+ * this existed.
+ */
+function asDrawn(mark, front, screen) {
+  const on = mark.on;
+  if (!on || !mark.inside || !front || !front.at || front.id !== on.id) return mark;
+  const there = (box) => ontoScreen(box, front.at, screen);
+  return {
+    ...mark,
+    region: mark.region && mark.inside.box ? { ...mark.region, box: there(mark.inside.box) } : mark.region,
+    points: mark.inside.points.length ? mark.inside.points.map(there) : mark.points,
+  };
+}
+
+/**
+ * Whether a mark is looking at what it was made on, and so should be drawn.
+ *
+ * Everything unknown is drawn. Not knowing which window is in front is a reason to leave
+ * somebody's marks alone, not a reason to take them off the screen — and it happens for
+ * the moment before the first answer arrives, when there is nothing to hide anyway.
+ *
+ * The toolbar's own window is never "something else". Opening a popup makes the overlay
+ * the active window, so a rule that only asked "is your window in front" would erase
+ * every mark the instant anybody reached for the toolbar.
+ */
+function showingNow(mark, front) {
+  if (!FOLLOWS_WINDOW.includes(mark.tool)) return true;
+  const on = mark.on;
+  if (!on || !front || front.ours) return true;
+  if (front.id !== on.id) return false;
+  if (front.gone) return false;
+  // Tabs. One browser window keeps one id across every tab it holds, so the id alone
+  // cannot see the change that half of this is about. A URL says it exactly, where the
+  // desktop serves one; a title says it bluntly, and blunt fails toward hiding — which
+  // is the right way round for a mark that would otherwise be over the wrong thing.
+  if (on.url && front.url) return on.url === front.url;
+  if (on.title && front.title) return on.title === front.title;
+  return true;
+}
+
+/*
  * ── where a mark is ──────────────────────────────────────────────────────────
  *
  * A point on a screen means nothing to somebody who cannot see the screen. `x=1420,

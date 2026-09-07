@@ -101,6 +101,9 @@ const state = {
   runs: [],
   // The library window, while it is open, and which mark it will answer.
   library: null,
+  // The window somebody is looking at, as the watcher last reported it. Null until it
+  // has spoken, which is a reason to leave every mark alone rather than to hide them.
+  front: null,
   // The catalogues this build knows how to read, so the library window can say which.
   libraries: [],
   // What every agent on this Gateway is doing, which is not the same question as what
@@ -546,6 +549,14 @@ async function start() {
   // work coming out — and only what an agent finally said back is an answer to what was
   // pointed at.
   // A run saying it is over, or has fallen over.
+  // Which window is in front, as it changes. A mark belongs to the application it was
+  // made on, so this is what decides where — and whether — each one is drawn.
+  void listen("colai:front", (event) => {
+    state.front = (event && event.payload) || null;
+    drawMarks();
+    shape();
+  }).catch(() => {});
+
   void listen("colai:ended", (event) => {
     const key = event && event.payload && event.payload.sessionKey;
     if (!key) return;

@@ -35,7 +35,7 @@ pub(crate) const OVERLAY_LABEL: &str = "colai-overlay";
 
 /// A rectangle in physical pixels: a region of the overlay Colai has claimed, or the
 /// window a mark was made over.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub(crate) struct Rect {
     pub x: i32,
     pub y: i32,

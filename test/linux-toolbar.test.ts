@@ -179,6 +179,12 @@ type ToolbarHelpers = {
     room: { left: number; top: number; right: number; bottom: number },
     box: { width: number; height: number },
   ) => { x: number; y: number };
+  FOLLOWS_WINDOW: string[];
+  anchorOf: (where: Front | null) => Anchor | null;
+  intoWindow: (box: Placed, at: Rect, screen: Size) => Placed;
+  ontoScreen: (box: Placed, at: Rect, screen: Size) => Placed;
+  showingNow: (mark: { tool: string; on?: Anchor | null }, front: InFront | null) => boolean;
+  asDrawn: (mark: Held, front: InFront | null, screen: Size) => Held;
   unchosen: (
     marks: { tool: string; design?: string; source?: string; fromLibrary?: Chosen | null }[],
   ) => string | null;
@@ -224,6 +230,33 @@ type Brought = { path: string; name: string; bytes: number; folder: boolean };
 /** What every agent on the Gateway adds up to, as the light reads it. */
 type Work = { running: number; waiting: number; trouble: number };
 
+/** A window's rectangle, and the sizes a mark is expressed against. */
+type Rect = { x: number; y: number; width: number; height: number };
+type Size = { width: number; height: number };
+/** A point, or a point with a size — the conversions take either. */
+type Placed = { x: number; y: number; w?: number; h?: number };
+
+/** What a mark is attached to, and what the desktop says is in front of it now. */
+type Anchor = { id: string; at: Rect; title: string | null; url: string | null };
+/** A mark as the page holds it, with the two fields drawing reads. */
+type Held = {
+  tool: string;
+  on?: Anchor | null;
+  inside?: { box: Placed | null; points: Placed[] } | null;
+  region?: { box: Placed } | null;
+  points?: Placed[];
+};
+
+type InFront = {
+  id?: string;
+  title?: string | null;
+  url?: string | null;
+  /** Where that window is now, which is what a mark is drawn from. */
+  at?: Rect | null;
+  ours?: boolean;
+  gone?: boolean;
+};
+
 /** What somebody picked out of a catalogue, as the mark carries it. */
 type Chosen = {
   id: string;
@@ -235,7 +268,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn };`,
   context,
 );
 const {
@@ -308,6 +341,12 @@ const {
   broughtIn,
   unchosen,
   centredIn,
+  FOLLOWS_WINDOW,
+  anchorOf,
+  intoWindow,
+  ontoScreen,
+  showingNow,
+  asDrawn,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -1904,6 +1943,162 @@ describe("taking a conversation back", () => {
     expect(agoSaid(now - 3_600_000, now)).toBe("1 hour ago");
     expect(agoSaid(now - 100_000, now)).toBe("2 minutes ago");
     expect(agoSaid(now - 86_400_000, now)).toBe("1 day ago");
+  });
+});
+
+describe("a mark belongs to what it was marked on", () => {
+  /*
+   * The bug this is about: point at something in a tab, switch tab, and the dot is still
+   * there — same pixels, different content. A mark is a place in an application, not a
+   * place on the desktop.
+   */
+  const SCREEN = { width: 3840, height: 1080 };
+  // A window on the right-hand monitor, well away from the origin so an anchor that
+  // quietly forgot to subtract it would be obviously wrong rather than nearly right.
+  const WINDOW = { x: 2000, y: 100, width: 800, height: 600 };
+  const A_MARK = { x: 2400 / 3840, y: 400 / 1080, w: 200 / 3840, h: 150 / 1080 };
+
+  test("a place on the screen becomes a place inside the window", () => {
+    const inside = intoWindow(A_MARK, WINDOW, SCREEN);
+    // 400px along a 800px window, 300px down a 600px one.
+    expect(inside.x).toBeCloseTo(0.5, 6);
+    expect(inside.y).toBeCloseTo(0.5, 6);
+    expect(inside.w).toBeCloseTo(0.25, 6);
+    expect(inside.h).toBeCloseTo(0.25, 6);
+  });
+
+  test("and comes back to the same place while the window has not moved", () => {
+    const there = ontoScreen(intoWindow(A_MARK, WINDOW, SCREEN), WINDOW, SCREEN);
+    for (const edge of ["x", "y", "w", "h"] as const) {
+      expect(there[edge]!, edge).toBeCloseTo(A_MARK[edge], 9);
+    }
+  });
+
+  test("a window that moved takes its marks with it", () => {
+    const inside = intoWindow(A_MARK, WINDOW, SCREEN);
+    const moved = { ...WINDOW, x: WINDOW.x - 300, y: WINDOW.y + 40 };
+    const there = ontoScreen(inside, moved, SCREEN);
+    expect(there.x * SCREEN.width).toBeCloseTo(2400 - 300, 6);
+    expect(there.y * SCREEN.height).toBeCloseTo(400 + 40, 6);
+    // The same size: moving a window does not stretch what is on it.
+    expect(there.w! * SCREEN.width).toBeCloseTo(200, 6);
+  });
+
+  test("a window that was resized scales them", () => {
+    const inside = intoWindow(A_MARK, WINDOW, SCREEN);
+    const half = { ...WINDOW, width: 400, height: 300 };
+    const there = ontoScreen(inside, half, SCREEN);
+    // Still halfway across, and half the size it was.
+    expect(there.x * SCREEN.width).toBeCloseTo(2000 + 200, 6);
+    expect(there.w! * SCREEN.width).toBeCloseTo(100, 6);
+  });
+
+  test("a point has no size and does not grow one", () => {
+    const pin = { x: 0.5, y: 0.5 };
+    const inside = intoWindow(pin, WINDOW, SCREEN);
+    expect(inside.w).toBeUndefined();
+    expect(ontoScreen(inside, WINDOW, SCREEN).h).toBeUndefined();
+  });
+
+  test("every tool follows its window except the two about the display itself", () => {
+    // Asserted against the whole table rather than as a list, so a tool added later is a
+    // deliberate answer instead of an omission.
+    expect([...FOLLOWS_WINDOW].toSorted()).toEqual(
+      Object.keys(TOOLS)
+        .filter((tool) => !["pointer", "screenshot", "record", "surfaceWrite"].includes(tool))
+        .toSorted(),
+    );
+    expect(FOLLOWS_WINDOW).not.toContain("screenshot");
+    expect(FOLLOWS_WINDOW).not.toContain("record");
+  });
+
+  test("an anchor needs a window with a size, or there is no anchor", () => {
+    const front = { app: "Chrome", title: "colai", id: "0x1", at: WINDOW } as unknown as Front;
+    expect(anchorOf(front)).toEqual({ id: "0x1", at: WINDOW, title: "colai", url: null });
+    expect(anchorOf(null)).toBeNull();
+    expect(anchorOf({ ...front, at: null } as unknown as Front)).toBeNull();
+    // A window reported with no width describes no rectangle, and half a rectangle would
+    // put a mark somewhere nobody put it.
+    expect(anchorOf({ ...front, at: { ...WINDOW, width: 0 } } as unknown as Front)).toBeNull();
+  });
+
+  describe("and is drawn where its window is now", () => {
+    const inside = intoWindow(A_MARK, WINDOW, SCREEN);
+    const held = {
+      tool: "box",
+      on: { id: "0x1", at: WINDOW, title: "Prices", url: null },
+      inside: { box: inside, points: [] },
+      region: { box: A_MARK },
+    };
+
+    test("a window that moved carries its marks", () => {
+      const moved = { ...WINDOW, x: WINDOW.x - 300 };
+      const drawn = asDrawn(held, { id: "0x1", at: moved }, SCREEN);
+      expect(drawn.region!.box.x * SCREEN.width).toBeCloseTo(2400 - 300, 6);
+      // And the mark itself is untouched: `region.box` is where this was when it was
+      // marked, the picture was cropped from it, and the message describes it.
+      expect(held.region.box.x).toBeCloseTo(A_MARK.x, 9);
+    });
+
+    test("a mark with nothing to go on is given back exactly as it was", () => {
+      // Older marks, marks made when the desktop could not say which window it was, and
+      // every moment before the watcher has spoken.
+      expect(asDrawn(held, null, SCREEN)).toBe(held);
+      expect(
+        asDrawn({ tool: "box", region: { box: A_MARK } }, { id: "0x1", at: WINDOW }, SCREEN),
+      ).toEqual({ tool: "box", region: { box: A_MARK } });
+      // A different window in front moves nothing — that mark is not drawn at all.
+      expect(asDrawn(held, { id: "0x2", at: WINDOW }, SCREEN)).toBe(held);
+    });
+  });
+
+  describe("and is drawn only while that is what you are looking at", () => {
+    const ON = { id: "0x1", at: WINDOW, title: "Prices — Shop", url: null };
+    const pin = { tool: "pointAt", on: ON };
+
+    test("the window it was made on, and not another", () => {
+      expect(showingNow(pin, { id: "0x1", title: "Prices — Shop" })).toBe(true);
+      expect(showingNow(pin, { id: "0x2", title: "Something else" })).toBe(false);
+    });
+
+    test("the toolbar's own window is never something else", () => {
+      /*
+       * The one that makes this usable rather than maddening. Opening a popup makes the
+       * overlay the active window, so a rule that only asked "is your window in front"
+       * would erase every mark the instant anybody reached for the toolbar — including
+       * the mark whose popup they just opened.
+       */
+      expect(showingNow(pin, { ours: true })).toBe(true);
+      expect(showingNow(pin, { ours: true, id: "colai" })).toBe(true);
+    });
+
+    test("a tab change hides it, by url where there is one and by title otherwise", () => {
+      // One browser window keeps one id across every tab, so the id alone cannot see the
+      // change that half of this is about.
+      expect(showingNow(pin, { id: "0x1", title: "Basket — Shop" })).toBe(false);
+      const withUrl = { tool: "pointAt", on: { ...ON, url: "https://shop/prices" } };
+      expect(showingNow(withUrl, { id: "0x1", url: "https://shop/prices" })).toBe(true);
+      expect(showingNow(withUrl, { id: "0x1", url: "https://shop/basket" })).toBe(false);
+      // A url on the mark and none to compare with falls back to the title.
+      expect(showingNow(withUrl, { id: "0x1", title: "Prices — Shop" })).toBe(true);
+    });
+
+    test("a window that has gone takes its marks off the screen", () => {
+      expect(showingNow(pin, { id: "0x1", title: "Prices — Shop", gone: true })).toBe(false);
+    });
+
+    test("what is not known is left alone rather than taken away", () => {
+      // Before the first answer, and for a mark made when the desktop could not say which
+      // window it was on. Hiding somebody's mark for want of information is worse than
+      // the thing this fixes.
+      expect(showingNow(pin, null)).toBe(true);
+      expect(showingNow({ tool: "pointAt" }, { id: "0x9" })).toBe(true);
+    });
+
+    test("a screenshot is about the display, so nothing hides it", () => {
+      expect(showingNow({ tool: "screenshot", on: ON }, { id: "0x9" })).toBe(true);
+      expect(showingNow({ tool: "record", on: ON }, { id: "0x9" })).toBe(true);
+    });
   });
 });
 
