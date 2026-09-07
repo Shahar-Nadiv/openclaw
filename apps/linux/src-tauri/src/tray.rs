@@ -31,6 +31,8 @@ pub struct TrayHandles {
     status: MenuItem<tauri::Wry>,
     status_line: Mutex<StatusLine>,
     _quickchat: MenuItem<tauri::Wry>,
+    /// Ticked while the toolbar is on screen, and the way to put it back when it is not.
+    toolbar: CheckMenuItem<tauri::Wry>,
     open: MenuItem<tauri::Wry>,
     _check_updates: MenuItem<tauri::Wry>,
     _start_at_login: CheckMenuItem<tauri::Wry>,
@@ -127,6 +129,16 @@ impl TrayHandles {
             set_quickchat_shortcut_checked(item, checked);
         }
     }
+
+    /// Say whether the toolbar is on screen.
+    ///
+    /// Told by whatever put it there or took it away, rather than worked out when the
+    /// menu opens: it can go from the toolbar's own keyboard, and a tray that only
+    /// learned about the menu's own clicks would be confidently wrong the first time
+    /// somebody pressed Escape.
+    pub fn set_toolbar_checked(&self, checked: bool) {
+        let _ = self.toolbar.set_checked(checked);
+    }
 }
 
 pub fn build(
@@ -145,7 +157,15 @@ pub fn build(
     // The toolbar is the product, so it is the first thing in this menu and it is
     // always reachable — the window behind it navigates away to the Gateway's own
     // interface, and anything that lived only on a Colai page went with it.
-    let toolbar = MenuItem::with_id(app, COLAI_ID, "Point at something", true, None::<&str>)?;
+    //
+    // Named for the thing rather than for one of the things it does. "Point at
+    // something" described the first tool on it, and by now that is one of nine.
+    //
+    // Ticked, and it toggles. The toolbar can be put away from the toolbar itself, so
+    // this is both the way to get it back and the only place that says whether it is
+    // there — a menu that could only turn it on would leave somebody looking for a way
+    // out that was in front of them all along.
+    let toolbar = CheckMenuItem::with_id(app, COLAI_ID, "Toolbar", true, true, None::<&str>)?;
     let open = MenuItem::with_id(app, OPEN_ID, "Open Dashboard", true, None::<&str>)?;
     let check_updates = MenuItem::with_id(
         app,
@@ -323,6 +343,7 @@ pub fn build(
 
     Ok(TrayHandles {
         _tray: tray,
+        toolbar,
         status,
         status_line: Mutex::new(StatusLine {
             gateway: "Checking…".to_string(),
@@ -367,7 +388,7 @@ fn handle_menu(
             app.exit(0);
         }
         COLAI_ID => {
-            if let Err(trouble) = crate::colai::colai_summon(app.clone()) {
+            if let Err(trouble) = crate::colai::toggle_toolbar(app) {
                 eprintln!("[colai] could not open the toolbar: {trouble}");
             }
         }

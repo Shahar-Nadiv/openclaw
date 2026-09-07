@@ -2111,6 +2111,43 @@ describe("a mark belongs to what it was marked on", () => {
   });
 });
 
+describe("the tray entry for the toolbar", () => {
+  const src = new URL("../apps/linux/src-tauri/src/", import.meta.url);
+  const tray = readFileSync(new URL("tray.rs", src), "utf8");
+  const colai = readFileSync(new URL("colai.rs", src), "utf8");
+
+  test("it is named for the thing, not for one of its tools", () => {
+    // It said "Point at something", which described the first tool on the rail. By now
+    // that is one of nine, and the entry is how somebody finds the toolbar itself.
+    expect(tray).toContain('"Toolbar"');
+    expect(tray).not.toContain('"Point at something"');
+  });
+
+  test("it puts the toolbar away as well as fetching it", () => {
+    // The toolbar can be dismissed from its own keyboard, so an entry that could only
+    // turn it on left somebody hunting for a way back through a menu that said nothing
+    // about it.
+    const pressed = tray.slice(tray.indexOf("COLAI_ID => {"));
+    expect(pressed.slice(0, 200)).toContain("toggle_toolbar");
+  });
+
+  test("and both ways of moving it tell the tray, so the tick cannot lie", () => {
+    /*
+     * The tick is only worth having if it is true. Showing and hiding are the only two
+     * things that move the toolbar, and Escape reaches the second one without the menu
+     * being involved — so a tray that learned only from its own clicks would be
+     * confidently wrong the first time anybody pressed it.
+     */
+    const inside = (fn: string) => {
+      const from = colai.indexOf(`fn ${fn}(`);
+      expect(from, fn).toBeGreaterThan(-1);
+      return colai.slice(from, colai.indexOf("\n}\n", from));
+    };
+    expect(inside("colai_summon")).toContain("tray_says_toolbar(&app, true)");
+    expect(inside("colai_release")).toContain("tray_says_toolbar(&app, false)");
+  });
+});
+
 describe("hidden means hidden", () => {
   const css = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
 

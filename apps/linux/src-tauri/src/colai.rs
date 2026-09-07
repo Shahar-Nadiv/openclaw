@@ -581,7 +581,37 @@ pub(crate) fn colai_summon(app: AppHandle) -> Result<(), String> {
     cover_everything(&window)?;
     window
         .show()
-        .map_err(|error| format!("Could not show the overlay: {error}"))
+        .map_err(|error| format!("Could not show the overlay: {error}"))?;
+    tray_says_toolbar(&app, true);
+    Ok(())
+}
+
+/// Put the toolbar on screen, or take it away.
+///
+/// What the tray's own entry does. Both directions from one place, because the tray only
+/// ever offered the way in — and the toolbar can be put away from its own keyboard, so
+/// somebody who did that was left looking for a way back through a menu that said
+/// nothing about it.
+pub(crate) fn toggle_toolbar(app: &AppHandle) -> Result<(), String> {
+    let showing = app
+        .get_webview_window(OVERLAY_LABEL)
+        .is_some_and(|window| window.is_visible().unwrap_or(false));
+    if showing {
+        colai_release(app.clone())
+    } else {
+        colai_summon(app.clone())
+    }
+}
+
+/// Tell the tray whether the toolbar is on screen.
+///
+/// Called by the two functions that put it there and take it away, rather than worked
+/// out when the menu opens. Those two are the only ways it moves, so this is the whole
+/// truth — and a tick that guessed would be wrong the first time somebody pressed Escape.
+fn tray_says_toolbar(app: &AppHandle, showing: bool) {
+    if let Some(state) = app.try_state::<crate::DesktopState>() {
+        state.set_toolbar_checked(showing);
+    }
 }
 
 /// Give the screen back.
@@ -599,6 +629,7 @@ pub(crate) fn colai_release(app: AppHandle) -> Result<(), String> {
             *held = None;
         }
     }
+    tray_says_toolbar(&app, false);
     Ok(())
 }
 

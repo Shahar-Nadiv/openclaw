@@ -435,6 +435,18 @@ impl DesktopState {
         *self.inner.tray.lock().expect("tray mutex poisoned") = Some(handles);
     }
 
+    pub(crate) fn set_toolbar_checked(&self, checked: bool) {
+        if let Some(tray) = self
+            .inner
+            .tray
+            .lock()
+            .expect("tray mutex poisoned")
+            .as_ref()
+        {
+            tray.set_toolbar_checked(checked);
+        }
+    }
+
     pub(crate) fn set_quickchat_shortcut_checked(&self, checked: bool) {
         if let Some(tray) = self
             .inner
