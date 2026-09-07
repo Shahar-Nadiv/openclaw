@@ -606,6 +606,60 @@ function stillRunning(runs, now) {
   return (runs || []).filter((run) => now - run.heard < RUN_QUIET);
 }
 
+/*
+ * ── what the whole Gateway is doing ──────────────────────────────────────────
+ *
+ * One light, for every agent at once. The agent somebody is looking at is the one they
+ * already know about; the point of this is the other one — work started in another
+ * conversation and left to run, an approval sitting unanswered under a different agent,
+ * a run that fell over while somebody was pointing at something else.
+ *
+ * A single icon can only say one thing, so these are ranked rather than combined.
+ */
+
+/** How the mascot reads, worst news first. */
+const MOODS = {
+  // Something went wrong and nobody has been told. It is the only one of the three that
+  // is about a thing that already happened, and the only one that is a surprise.
+  trouble: { colour: "red", says: (many) => (many === 1 ? "a run failed" : `${many} runs failed`) },
+  // Stopped dead until a person answers. Work is not happening and will not resume on
+  // its own, which is worse than working and better than broken.
+  waiting: {
+    colour: "blue",
+    says: (many) => (many === 1 ? "waiting for you" : `${many} waiting for you`),
+  },
+  // Working. Nothing is asked of anybody.
+  working: {
+    colour: "green",
+    says: (many) => (many === 1 ? "an agent is working" : `${many} agents are working`),
+  },
+};
+
+/** Which of them the icon shows, and how many things it stands for. */
+function moodOf(work) {
+  if (!work) return null;
+  for (const [name, count] of [
+    ["trouble", work.trouble],
+    ["waiting", work.waiting],
+    ["working", work.running],
+  ]) {
+    if (count > 0) return { mood: name, many: count };
+  }
+  return null;
+}
+
+/** What the icon's tooltip says, given everything happening at once. */
+function moodSaid(work) {
+  const now = moodOf(work);
+  if (!now) return "OpenClaw · ⌘,";
+  const said = [MOODS[now.mood].says(now.many)];
+  // The rest, so a red light does not hide two agents still working behind it. Named in
+  // the same order they would have been ranked.
+  if (now.mood !== "waiting" && work.waiting > 0) said.push(MOODS.waiting.says(work.waiting));
+  if (now.mood !== "working" && work.running > 0) said.push(MOODS.working.says(work.running));
+  return `OpenClaw — ${said.join(", ")}`;
+}
+
 /** What the rail says about work underway, in the fewest words that are still true. */
 function runningSaid(runs) {
   if (!runs || runs.length === 0) return null;

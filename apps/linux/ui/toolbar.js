@@ -98,6 +98,10 @@ const state = {
   // yet heard the end of. Kept as a list rather than a flag, because "one agent is
   // working" and "four are" are different things to be told.
   runs: [],
+  // What every agent on this Gateway is doing, which is not the same question as what
+  // this toolbar started. Null until the Gateway has answered once: no light is the
+  // honest state before anything is known, and a green one would be a claim.
+  atWork: null,
   // Windows that were asked what they are showing and had nothing to say. Asking again
   // is a quarter of a second spent learning what the last answer already said.
   mute: new Set(),
@@ -195,6 +199,14 @@ function render() {
   buttons.agents.dataset.working = String(state.runs.length > 0);
   buttons.stop.hidden = state.runs.length === 0;
   buttons.stop.title = state.runs.length === 1 ? "Stop the agent" : `Stop ${state.runs.length} runs`;
+
+  // The mascot carries what the whole Gateway is doing, including the agents somebody
+  // is not looking at. `data-mood` rather than a class, so the stylesheet holds the one
+  // table of what each state looks like and this holds none of it.
+  const mood = moodOf(state.atWork);
+  buttons.settings.dataset.mood = mood ? mood.mood : "";
+  buttons.settings.title = moodSaid(state.atWork);
+  buttons.settings.setAttribute("aria-label", buttons.settings.title);
 
   const who = receiver();
   const mark = buttons.agents.querySelector(".running-dots");
@@ -526,6 +538,10 @@ async function start() {
     if (!key) return;
     state.runs = state.runs.filter((run) => run.sessionKey !== key);
     render();
+    // The light is about every agent, not this one, but a run ending is the most likely
+    // moment for the answer to have changed — and five seconds late is five seconds of
+    // a green glow over nothing.
+    void watchEverything();
   }).catch(() => {});
 
   void listen("colai:reply", (event) => {
@@ -551,6 +567,9 @@ async function start() {
   }).catch(() => {});
 
   void loadWho();
+  // And what every agent is doing, from now until the window closes.
+  void watchEverything();
+  setInterval(() => void watchEverything(), WATCH_EVERY);
   // The Gateway connects a moment after the app does, so the first ask usually lands
   // before there is anything to answer it. Asked again rather than leaving the rail
   // saying "unavailable" until somebody happens to open the menu.

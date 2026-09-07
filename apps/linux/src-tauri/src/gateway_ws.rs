@@ -240,6 +240,24 @@ pub(crate) struct GatewaySessionSummary {
     pub last_message_preview: Option<String>,
     pub status: Option<String>,
     pub unread: Option<bool>,
+    /// When this session last did anything. Only used to decide whether a failure is
+    /// news or history — a run that fell over yesterday is not a warning about now.
+    pub last_activity_at: Option<i64>,
+    pub updated_at: Option<i64>,
+}
+
+/// What every agent on this Gateway adds up to, for something that can only say one
+/// thing at a time.
+///
+/// Counts rather than a single verdict, because the toolbar has to say *which* and
+/// *how many* somewhere, and a struct that decided that here would be deciding it in
+/// the wrong language. The page owns the words; this owns the arithmetic.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AtWork {
+    pub running: u32,
+    pub waiting: u32,
+    pub trouble: u32,
 }
 
 /// A conversation held by an agent the Gateway knows about but does not own — a Claude
@@ -407,6 +425,50 @@ fn when_in(value: &Value) -> Option<i64> {
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
     let days = era * 146_097 + day_of_era - 719_468;
     Some(((days * 86_400 + hour * 3_600 + minute * 60) * 1_000) + (second * 1_000.0) as i64)
+}
+
+/// How long after a run falls over the toolbar still calls it news.
+///
+/// A session that failed an hour ago is simply a session, and a red light about it is a
+/// warning about nothing — which teaches somebody to stop reading the light. Long
+/// enough to be seen if you were away from the desk, short enough to still be about now.
+const TROUBLE_RECENT: i64 = 10 * 60 * 1000;
+
+/// What the sessions add up to: how many are working, and how many just fell over.
+///
+/// Pure, and separate from the request that fetches them, because every interesting
+/// decision is here — which statuses count as work, which count as trouble, and when
+/// trouble stops being news.
+pub(crate) fn at_work_of(sessions: &[GatewaySessionSummary], now: i64) -> AtWork {
+    let mut counted = AtWork::default();
+    for row in sessions {
+        match row.status.as_deref() {
+            Some("running" | "queued") => counted.running += 1,
+            // Killed is not trouble. Somebody stopped it on purpose, and a red light
+            // over a deliberate act is the toolbar arguing with the person using it.
+            Some("failed" | "timeout") => {
+                let last = row.last_activity_at.or(row.updated_at).unwrap_or(0);
+                if now - last < TROUBLE_RECENT {
+                    counted.trouble += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    counted
+}
+
+/// How many approvals are waiting, out of whatever shape the list arrives in.
+///
+/// Only the count is wanted: the icon says "something is waiting on you" and the
+/// Control UI is where somebody goes to see what. Reading no further than that is also
+/// what keeps this from breaking when the record around it grows a field.
+fn waiting_in(payload: &Value) -> u32 {
+    let rows = payload
+        .as_array()
+        .or_else(|| payload.get("approvals").and_then(Value::as_array))
+        .or_else(|| payload.get("items").and_then(Value::as_array));
+    rows.map_or(0, |rows| rows.len() as u32)
 }
 
 /// What a prompt said, in the words somebody would recognise it by.
@@ -605,6 +667,8 @@ enum GatewayRequest {
         key: String,
         entry_id: String,
     },
+    /// Everything waiting on a person right now, across every agent.
+    ApprovalsPending,
     ChatSend(ChatSendParams),
     RefreshCanvasSurface {
         observed_url: Option<String>,
@@ -626,6 +690,7 @@ enum GatewayResponse {
     SessionsCatalogContinue(CatalogContinueResult),
     CronAdd(CronAdded),
     History(Vec<Point>),
+    Pending(u32),
     Rewound(Rewound),
     ChatSend(ChatSendAck),
     CanvasSurface(Option<String>),
@@ -953,6 +1018,16 @@ impl GatewayClient {
             GatewayResponse::History(points) => Ok(points),
             _ => Err("The Gateway answered something else.".to_string()),
         }
+    }
+
+    /// How many things are waiting on a person, across every agent.
+    pub async fn approvals_pending(&self) -> Result<u32, String> {
+        let GatewayResponse::Pending(count) =
+            self.request(GatewayRequest::ApprovalsPending).await?
+        else {
+            return Err("Gateway returned the wrong response for exec.approval.list.".to_string());
+        };
+        Ok(count)
     }
 
     /// Cut a conversation back to one of its own prompts.
@@ -2073,6 +2148,17 @@ where
             .await?;
             Ok(GatewayResponse::History(points_in(&payload)))
         }
+        GatewayRequest::ApprovalsPending => {
+            let payload = request_on_socket(
+                socket,
+                "exec.approval.list",
+                serde_json::json!({}),
+                budget,
+                dispatch,
+            )
+            .await?;
+            Ok(GatewayResponse::Pending(waiting_in(&payload)))
+        }
         GatewayRequest::SessionsRewind { key, entry_id } => {
             let payload = request_on_socket(
                 socket,
@@ -2928,6 +3014,75 @@ esac
                 "__openclaw": {"id": "69c5a8fb-d8c3-4ccf-8745-6d042b011aef", "seq": 162}
             }
         ]})
+    }
+
+    fn a_session(status: &str, last: i64) -> GatewaySessionSummary {
+        GatewaySessionSummary {
+            key: "main:1".to_string(),
+            agent_id: None,
+            label: None,
+            display_name: None,
+            derived_title: None,
+            last_message_preview: None,
+            status: Some(status.to_string()),
+            unread: None,
+            last_activity_at: Some(last),
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn work_underway_is_counted_wherever_it_is_happening() {
+        let now = 1_700_000_000_000;
+        let counted = at_work_of(
+            &[
+                a_session("running", now),
+                a_session("queued", now),
+                a_session("done", now),
+            ],
+            now,
+        );
+        assert_eq!(
+            counted.running, 2,
+            "queued work has not started but is work"
+        );
+        assert_eq!(counted.trouble, 0);
+    }
+
+    #[test]
+    fn a_run_that_was_stopped_on_purpose_is_not_trouble() {
+        // A red light over a deliberate act is the toolbar arguing with the person who
+        // pressed stop.
+        let now = 1_700_000_000_000;
+        assert_eq!(at_work_of(&[a_session("killed", now)], now).trouble, 0);
+    }
+
+    #[test]
+    fn a_failure_is_news_until_it_is_history() {
+        let now = 1_700_000_000_000;
+        assert_eq!(at_work_of(&[a_session("failed", now)], now).trouble, 1);
+        assert_eq!(at_work_of(&[a_session("timeout", now)], now).trouble, 1);
+        // An hour later it is simply a session, and a warning about it is a warning
+        // about nothing — which is how somebody learns to stop reading the light.
+        let old = now - 60 * 60 * 1000;
+        assert_eq!(at_work_of(&[a_session("failed", old)], now).trouble, 0);
+    }
+
+    #[test]
+    fn a_failure_with_no_time_on_it_is_not_treated_as_just_now() {
+        // Missing means unknown, and unknown is not an emergency.
+        let mut row = a_session("failed", 0);
+        row.last_activity_at = None;
+        assert_eq!(at_work_of(&[row], 1_700_000_000_000).trouble, 0);
+    }
+
+    #[test]
+    fn what_is_waiting_is_counted_out_of_whatever_shape_it_arrives_in() {
+        assert_eq!(waiting_in(&json!([{ "id": "a" }, { "id": "b" }])), 2);
+        assert_eq!(waiting_in(&json!({ "approvals": [{ "id": "a" }] })), 1);
+        assert_eq!(waiting_in(&json!({ "items": [] })), 0);
+        // Nothing recognisable is nothing waiting, not a light nobody can turn off.
+        assert_eq!(waiting_in(&json!({ "other": 3 })), 0);
     }
 
     #[test]

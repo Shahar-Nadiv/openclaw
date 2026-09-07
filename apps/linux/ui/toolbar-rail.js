@@ -62,26 +62,29 @@ function icon(name, size) {
  */
 function openclawMark(size) {
   const edge = size || 17;
+  // Grouped rather than flat, because the parts move independently when it is working:
+  // the legs take turns, and everything above them rides on one body so the eyes never
+  // come off the face.
   return `<svg width="${edge}" height="${edge}" viewBox="0 0 18 18" aria-hidden="true">
     <mask id="colai-critter" maskUnits="userSpaceOnUse" x="0" y="0" width="18" height="18">
-      <g fill="#fff">
+      <rect class="crab-leg crab-leg-a" fill="#fff" x="5.4" y="12.96" width="2.52" height="3.24" rx="1.26" />
+      <rect class="crab-leg crab-leg-b" fill="#fff" x="10.08" y="12.96" width="2.52" height="3.24" rx="1.26" />
+      <g class="crab-body">
         <g fill="none" stroke="#fff" stroke-width="2.07" stroke-linecap="round">
           <path d="M6.926 4.563 Q6.149 1.35 3.816 1.62" />
           <path d="M11.074 4.563 Q11.851 1.35 14.184 1.62" />
         </g>
-        <rect x="5.4" y="12.96" width="2.52" height="3.24" rx="1.26" />
-        <rect x="10.08" y="12.96" width="2.52" height="3.24" rx="1.26" />
-        <circle cx="2.7" cy="9.59" r="1.8" />
-        <circle cx="15.3" cy="9.59" r="1.8" />
-        <ellipse cx="9" cy="8.64" rx="6.48" ry="5.94" />
-      </g>
-      <g fill="#000">
-        <ellipse cx="6.149" cy="7.69" rx="1.426" ry="1.544" />
-        <ellipse cx="11.851" cy="7.69" rx="1.426" ry="1.544" />
-      </g>
-      <g fill="#fff">
-        <circle cx="5.522" cy="7.134" r="0.741" />
-        <circle cx="11.224" cy="7.134" r="0.741" />
+        <circle class="crab-claw crab-claw-a" fill="#fff" cx="2.7" cy="9.59" r="1.8" />
+        <circle class="crab-claw crab-claw-b" fill="#fff" cx="15.3" cy="9.59" r="1.8" />
+        <ellipse fill="#fff" cx="9" cy="8.64" rx="6.48" ry="5.94" />
+        <g fill="#000">
+          <ellipse cx="6.149" cy="7.69" rx="1.426" ry="1.544" />
+          <ellipse cx="11.851" cy="7.69" rx="1.426" ry="1.544" />
+        </g>
+        <g fill="#fff">
+          <circle cx="5.522" cy="7.134" r="0.741" />
+          <circle cx="11.224" cy="7.134" r="0.741" />
+        </g>
       </g>
     </mask>
     <rect width="18" height="18" fill="currentColor" mask="url(#colai-critter)" />
@@ -478,6 +481,48 @@ function flyout(which) {
  * and says so on the rail rather than emptying them, because "nobody there" and "could
  * not ask" are different facts and only one of them is the user's problem.
  */
+/**
+ * How often the toolbar asks what every agent is doing.
+ *
+ * A light that lags is worse than no light, and a light that costs a round trip a
+ * second is a toolbar somebody turns off. The Gateway caches this list, so what is
+ * being paid for is one small frame on an already-open socket.
+ *
+ * Asked on a timer rather than pushed, deliberately. The pushed events this toolbar
+ * already receives arrive only for the sessions it subscribed to — which is exactly the
+ * set this light is not about. A subscription wide enough would have to be re-made on
+ * every reconnect, and a light that silently stops after a dropped connection is the
+ * failure this is meant to prevent.
+ */
+const WATCH_EVERY = 5000;
+
+/**
+ * Ask, and only redraw if the answer changed.
+ *
+ * Every tick would otherwise rebuild the rail and re-measure the clickable region five
+ * times a minute for a picture that is usually identical.
+ */
+async function watchEverything() {
+  try {
+    const work = await invoke("colai_at_work");
+    const before = state.atWork;
+    if (
+      before &&
+      before.running === work.running &&
+      before.waiting === work.waiting &&
+      before.trouble === work.trouble
+    ) {
+      return;
+    }
+    state.atWork = work;
+    render();
+  } catch {
+    // A Gateway that cannot be asked is not news about agents. The light holds what it
+    // last knew rather than flickering off every time the socket blinks — and the
+    // conversations menu is where "could not ask" is already said out loud.
+  }
+}
+
 async function loadWho() {
   const pick = (kind) => (state.receiving.kind === kind ? state.receiving.id : null);
   try {

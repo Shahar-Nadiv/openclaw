@@ -160,6 +160,9 @@ type ToolbarHelpers = {
   agoSaid: (at: number, now: number) => string;
   REWIND_SAYS: string;
   KEEPS_MARKING: string[];
+  MOODS: Record<string, { colour: string; says: (many: number) => string }>;
+  moodOf: (work: Work | null) => { mood: string; many: number } | null;
+  moodSaid: (work: Work | null) => string;
   numberOf: (
     marks: { tool?: string; chosen?: boolean }[] | undefined,
     mark: { tool?: string; chosen?: boolean } | null | undefined,
@@ -199,9 +202,12 @@ type Cron = {
 /** A file or folder somebody dropped on the toolbar, as the page holds it. */
 type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
+/** What every agent on the Gateway adds up to, as the light reads it. */
+type Work = { running: number; waiting: number; trouble: number };
+
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid };`,
   context,
 );
 const {
@@ -265,6 +271,9 @@ const {
   REWIND_SAYS,
   KEEPS_MARKING,
   numberOf,
+  MOODS,
+  moodOf,
+  moodSaid,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -1860,6 +1869,77 @@ describe("taking a conversation back", () => {
     expect(agoSaid(now - 3_600_000, now)).toBe("1 hour ago");
     expect(agoSaid(now - 100_000, now)).toBe("2 minutes ago");
     expect(agoSaid(now - 86_400_000, now)).toBe("1 day ago");
+  });
+});
+
+describe("one light for every agent at once", () => {
+  const css = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+
+  test("nothing known yet is no light, not a green one", () => {
+    // Before the Gateway has answered, the toolbar knows nothing about anybody's work.
+    // A light that defaulted to green would be a claim, and the first thing somebody
+    // would learn is that it lies.
+    expect(moodOf(null)).toBeNull();
+    expect(moodOf({ running: 0, waiting: 0, trouble: 0 })).toBeNull();
+    expect(moodSaid(null)).not.toContain("working");
+  });
+
+  test("worst news wins, because one icon can only say one thing", () => {
+    const busy = { running: 3, waiting: 0, trouble: 0 };
+    expect(moodOf(busy)).toEqual({ mood: "working", many: 3 });
+    // Waiting outranks working: nothing is moving and nothing will until somebody acts.
+    expect(moodOf({ ...busy, waiting: 1 })!.mood).toBe("waiting");
+    // And trouble outranks both. It is the only one about something that already
+    // happened, and the only one nobody would otherwise find out about.
+    expect(moodOf({ ...busy, waiting: 1, trouble: 1 })!.mood).toBe("trouble");
+  });
+
+  test("the rest is still said, so a red light hides nothing behind it", () => {
+    const said = moodSaid({ running: 2, waiting: 1, trouble: 1 });
+    expect(said).toContain("a run failed");
+    expect(said).toContain("waiting for you");
+    expect(said).toContain("2 agents are working");
+    // In the order they were ranked, so reading it top to bottom is reading the priority.
+    expect(said.indexOf("failed")).toBeLessThan(said.indexOf("waiting"));
+    expect(said.indexOf("waiting")).toBeLessThan(said.indexOf("working"));
+  });
+
+  test("one of a thing and several read as English, not as a count", () => {
+    expect(MOODS.working!.says(1)).toBe("an agent is working");
+    expect(MOODS.working!.says(4)).toBe("4 agents are working");
+    expect(MOODS.trouble!.says(1)).toBe("a run failed");
+  });
+
+  test("every mood the page can show has a colour, and they are three different ones", () => {
+    // Read out of the stylesheet, so a mood added here and nowhere else shows as no
+    // light at all rather than as a state nobody can see.
+    const painted = new Map<string, string>();
+    for (const found of css.matchAll(
+      /\.home-key\[data-mood="(\w+)"\]\s*\{\s*--mood:\s*([^;]+);/g,
+    )) {
+      painted.set(found[1]!, found[2]!.trim());
+    }
+    expect([...painted.keys()].toSorted()).toEqual(Object.keys(MOODS).toSorted());
+    expect(new Set(painted.values()).size).toBe(painted.size);
+  });
+
+  test("it only walks while it is working", () => {
+    // A crab merrily scuttling under a red light would be the toolbar contradicting
+    // itself, so the gait is tied to the one mood that asks nothing of anybody.
+    for (const part of ["crab-body", "crab-leg-a", "crab-claw-b"]) {
+      const rule = new RegExp(`\\.home-key\\[data-mood="(\\w+)"\\] \\.${part}\\s*\\{`, "g");
+      const moods = [...css.matchAll(rule)].map((found) => found[1]!);
+      expect(moods, part).toEqual(["working"]);
+    }
+  });
+
+  test("a desktop that asked for less movement gets none of it", () => {
+    const quiet = css.slice(
+      css.indexOf("@media (prefers-reduced-motion: reduce)", css.indexOf("crab-walk")),
+    );
+    for (const part of ["crab-leg", "crab-claw", "crab-body"]) {
+      expect(quiet.slice(0, 400), part).toContain(part);
+    }
   });
 });
 

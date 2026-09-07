@@ -173,6 +173,9 @@ async function sendMarks(ids) {
       ...state.runs.filter((run) => run.sessionKey !== sent.sessionKey),
       { sessionKey: sent.sessionKey, who: state.receiving.name || who.id, heard: Date.now() },
     ];
+    // Sending is the one moment somebody is watching for the light to come on, so it is
+    // asked for rather than waited for.
+    void watchEverything();
     // What went is gone; what was left unticked is still there, which is the whole
     // point of being able to untick it.
     state.marks = state.marks.filter((mark) => !ids.includes(mark.id));

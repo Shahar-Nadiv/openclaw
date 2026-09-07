@@ -127,6 +127,34 @@ pub(crate) async fn colai_sessions(
         .collect())
 }
 
+/// What every agent on this Gateway is doing, for the light on the toolbar.
+///
+/// Deliberately not scoped to the conversation somebody is on. The whole point is the
+/// agent you are *not* looking at: work you started in one conversation and left,
+/// running while you point at something in another. A light that only knew about the
+/// selected agent would go out exactly when it was worth watching.
+///
+/// Approvals are asked for separately because they are the one thing a session's own
+/// status cannot say. "Running" covers both an agent thinking and an agent stopped dead
+/// waiting for somebody to say yes, and those are not the same news.
+///
+/// A Gateway that cannot answer one half still answers the other: nothing waiting is
+/// reported as nothing waiting rather than failing the whole light, since the running
+/// count is the half somebody watches most.
+#[tauri::command]
+pub(crate) async fn colai_at_work(
+    gateway: tauri::State<'_, crate::gateway_ws::GatewayClient>,
+) -> Result<crate::gateway_ws::AtWork, String> {
+    let listed = gateway.sessions_list().await?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_millis() as i64)
+        .unwrap_or_default();
+    let mut counted = crate::gateway_ws::at_work_of(&listed.sessions, now);
+    counted.waiting = gateway.approvals_pending().await.unwrap_or(0);
+    Ok(counted)
+}
+
 /// What to call a conversation, in the order a person would.
 ///
 /// The name somebody gave it, then the name the Gateway shows in its own list, then the
@@ -354,6 +382,8 @@ mod tests {
             derived_title: None,
             last_message_preview: None,
             status: None,
+            last_activity_at: None,
+            updated_at: None,
             unread: None,
         }
     }

@@ -242,6 +242,123 @@ body {
   }
 }
 
+/*
+ * ── the mascot, and what the whole Gateway is doing ──────────────────────────
+ *
+ * One light for every agent at once, including the ones somebody is not looking at.
+ * Same shape as the glow on the agents key, because it is the same kind of claim; only
+ * the colour differs, so the colour is the only thing these rules change.
+ *
+ * Green is work underway and asks nothing of anybody. Blue is stopped, waiting on a
+ * person. Red is a run that fell over. Ranked in the page, not here — a stylesheet that
+ * decided which one showed would be deciding it twice.
+ */
+.home-key[data-mood] {
+  box-shadow:
+    0 0 0 1.5px rgb(var(--mood) / 55%),
+    0 0 14px rgb(var(--mood) / 35%);
+  animation: minding 2.6s ease-in-out infinite;
+}
+.home-key[data-mood="working"] {
+  --mood: 52 199 89;
+}
+.home-key[data-mood="waiting"] {
+  --mood: 64 156 255;
+}
+.home-key[data-mood="trouble"] {
+  --mood: 255 99 99;
+}
+.home-key[data-mood] {
+  color: rgb(var(--mood));
+}
+@keyframes minding {
+  50% {
+    box-shadow:
+      0 0 0 1.5px rgb(var(--mood) / 90%),
+      0 0 22px rgb(var(--mood) / 55%);
+  }
+}
+
+/*
+ * And while it is working, it walks.
+ *
+ * In place, and cute rather than energetic: this is a state that will last a minute, and
+ * a thing that jiggles urgently for a minute is a thing somebody covers up.
+ *
+ * The rock is the part that reads. At seventeen pixels the legs are two nubs mostly
+ * hidden under the body, so a leg-only gait is invisible — what carries at this size is
+ * the whole body tilting toward whichever leg is planted, which is also what walking
+ * actually looks like. The legs still take turns underneath; they sell the tilt rather
+ * than perform it.
+ *
+ * Only while it is green. A crab merrily scuttling under a red light would be the
+ * toolbar contradicting itself.
+ */
+.crab-leg,
+.crab-claw,
+.crab-body {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+/* One stride pair. Everything below is a division of it, so the parts cannot drift. */
+.home-key[data-mood="working"] .crab-body {
+  animation: crab-walk 0.68s ease-in-out infinite;
+}
+.home-key[data-mood="working"] .crab-leg-a {
+  animation: crab-step 0.68s ease-in-out infinite;
+}
+.home-key[data-mood="working"] .crab-leg-b {
+  animation: crab-step 0.68s ease-in-out -0.34s infinite;
+}
+/* Counter to the leg on their own side, so it looks pleased with itself rather than
+   merely mobile. */
+.home-key[data-mood="working"] .crab-claw-a {
+  animation: crab-wave 0.68s ease-in-out -0.34s infinite;
+}
+.home-key[data-mood="working"] .crab-claw-b {
+  animation: crab-wave 0.68s ease-in-out infinite;
+}
+@keyframes crab-walk {
+  0%,
+  50%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  /* Leaning onto the right leg while the left one is up, and the other way after. */
+  25% {
+    transform: translateY(0.3px) rotate(3deg);
+  }
+  75% {
+    transform: translateY(0.3px) rotate(-3deg);
+  }
+}
+@keyframes crab-step {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-0.9px);
+  }
+}
+@keyframes crab-wave {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-0.55px) rotate(-8deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-key[data-mood],
+  .home-key[data-mood] .crab-leg,
+  .home-key[data-mood] .crab-claw,
+  .home-key[data-mood] .crab-body {
+    animation: none;
+  }
+}
+
 /* The way to stop it, on the rail only while there is something to stop. */
 .stop-key {
   color: rgb(255 132 132);

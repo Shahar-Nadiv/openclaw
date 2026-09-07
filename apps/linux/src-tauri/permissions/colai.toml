@@ -33,6 +33,7 @@ commands.allow = [
   "colai_automate",
   "colai_showing",
   "colai_describe_files",
+  "colai_at_work",
   "colai_pick_files",
   "colai_pick_folder",
   "colai_release",
