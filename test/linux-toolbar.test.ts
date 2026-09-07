@@ -1670,6 +1670,27 @@ describe("the page and the commands it calls", () => {
     expect(calls.length).toBeGreaterThan(10);
   });
 
+  test("a command the page calls is registered, and allowed", () => {
+    /*
+     * Declaring a command is three edits, not one: the function, the handler list, and
+     * the permission allow-list. Miss either of the last two and the function compiles,
+     * the page compiles, and the button does nothing at all until somebody presses it.
+     *
+     * Only the ones the page actually calls: a command reachable from somewhere else is
+     * not this test's business, and asserting on every one would make adding an
+     * internal command a failure.
+     */
+    const main = readFileSync(new URL("src-tauri/src/main.rs", dir), "utf8");
+    const handlers = main.slice(main.indexOf("generate_handler!"));
+    const allowed = readFileSync(new URL("src-tauri/permissions/colai.toml", dir), "utf8");
+    for (const call of new Set(calls.map((one) => one.name))) {
+      // The last entry in the list carries no comma, so the boundary is the name's end.
+      const listed = new RegExp(`::${call}\\b`).test(handlers);
+      expect(listed, `${call} is not in the handler list`).toBe(true);
+      expect(allowed.includes(`"${call}"`), `${call} is not allowed`).toBe(true);
+    }
+  });
+
   test("every command the page calls exists", () => {
     for (const call of calls) {
       expect(commands.has(call.name), `${call.name} is not a command`).toBe(true);

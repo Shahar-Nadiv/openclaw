@@ -9,6 +9,33 @@
 // the choosing is the point of both of them.
 
 /**
+ * Ask the desktop where this document should go.
+ *
+ * Relative to the project the marked window was working in, when the folder is inside
+ * it. The destination is read by an agent that may not be on this machine, so an
+ * absolute path from this one is an instruction only this machine could follow — Rust
+ * decides that, since it is the side that knows what was actually chosen.
+ *
+ * Cancelling leaves the field exactly as it was, which is why nothing is written until
+ * an answer comes back.
+ */
+async function chooseHome(mark) {
+  try {
+    const within = (mark.where && mark.where.cwd) || null;
+    const chosen = await invoke("colai_pick_folder", { within });
+    if (!chosen) return;
+    mark.dest = chosen.said;
+    mark.destTyped = true;
+    render();
+  } catch (error) {
+    state.trouble = `Could not open the file chooser — ${
+      error && error.message ? error.message : String(error)
+    }`;
+    render();
+  }
+}
+
+/**
  * The one line of a mark's address that fits beside its thumbnail.
  *
  * The most specific thing known, because that is the thing worth checking: a URL beats
@@ -121,6 +148,8 @@ function drawPopup() {
     rows.push(kinds);
 
     const kind = kindOf(mark);
+    const line = document.createElement("div");
+    line.className = "popup-dest-line";
     const where = document.createElement("input");
     where.className = "popup-note popup-dest";
     where.type = "text";
@@ -134,7 +163,21 @@ function drawPopup() {
       mark.dest = where.value;
       mark.destTyped = true;
     });
-    rows.push(where);
+    line.append(where);
+
+    // Beside the field rather than instead of it. A destination can be a folder that
+    // does not exist yet, or one in a checkout that is not on this machine at all, and
+    // both are things somebody types. The chooser is for the ordinary case — this
+    // project, a folder they would otherwise recall from memory and mistype.
+    const browse = document.createElement("button");
+    browse.type = "button";
+    browse.className = "popup-browse";
+    browse.title = "Choose a folder";
+    browse.setAttribute("aria-label", "Choose a folder");
+    browse.innerHTML = icon("folder", 14);
+    browse.addEventListener("click", () => void chooseHome(mark));
+    line.append(browse);
+    rows.push(line);
   }
 
   const foot = document.createElement("div");

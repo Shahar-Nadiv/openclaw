@@ -1458,6 +1458,7 @@ fn main() {
         colai_send::colai_automate,
         colai_files::colai_describe_files,
         colai_files::colai_pick_files,
+        colai_files::colai_pick_folder,
         #[cfg(target_os = "linux")]
         colai_inspect::colai_showing,
         colai::colai_summon,

@@ -62,7 +62,16 @@ pub(crate) async fn colai_pick_files(
         let (say, heard) = tokio::sync::oneshot::channel::<Vec<String>>();
         let parent = app.get_webview_window(crate::colai::OVERLAY_LABEL);
         app.run_on_main_thread(move || {
-            let _ = say.send(ask_gtk(parent, folders));
+            let _ = say.send(ask_gtk(
+                parent,
+                Want {
+                    folders,
+                    multiple: true,
+                    title: if folders { "Add a folder" } else { "Add files" },
+                    accept: "Add",
+                    start: None,
+                },
+            ));
         })
         .map_err(|error| format!("Could not open the file chooser: {error}"))?;
         let picked = heard
@@ -80,28 +89,127 @@ pub(crate) async fn colai_pick_files(
     }
 }
 
+/// Where a design document is going, once somebody has pointed at the folder.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Destination {
+    /// What to put in the field: relative to the project when it sits inside one.
+    pub said: String,
+    /// The folder itself, whatever the field ends up saying.
+    pub path: String,
+}
+
+/// Ask where a design document should go.
+///
+/// A folder, not a file: what the agent is asked for is a place to write into.
+///
+/// `within` is the project the marked window was working in, and it does two things.
+/// The dialog opens there rather than in the home directory, and a folder chosen inside
+/// it comes back as a path relative to it — because the destination travels to an agent
+/// that may not be on this machine, and `/home/somebody/Desktop/colai/docs/Design` is an
+/// instruction only this machine can follow. `docs/Design/` is one any checkout can.
+#[tauri::command]
+pub(crate) async fn colai_pick_folder(
+    app: tauri::AppHandle,
+    within: Option<String>,
+) -> Result<Option<Destination>, String> {
+    #[cfg(target_os = "linux")]
+    {
+        use tauri::Manager as _;
+        let (say, heard) = tokio::sync::oneshot::channel::<Vec<String>>();
+        let parent = app.get_webview_window(crate::colai::OVERLAY_LABEL);
+        let start = within.clone();
+        app.run_on_main_thread(move || {
+            let _ = say.send(ask_gtk(
+                parent,
+                Want {
+                    folders: true,
+                    multiple: false,
+                    title: "Where the document goes",
+                    accept: "Use this folder",
+                    start,
+                },
+            ));
+        })
+        .map_err(|error| format!("Could not open the file chooser: {error}"))?;
+        let picked = heard
+            .await
+            .map_err(|_| "The file chooser closed without answering.".to_string())?;
+        Ok(picked.first().map(|path| said_as(path, within.as_deref())))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (app, within);
+        Err("Choosing a folder is only wired up on Linux.".to_string())
+    }
+}
+
+/// What the field should say about a folder, given the project it may sit inside.
+///
+/// Split out from the dialog because the dialog cannot run in a test harness and this
+/// is the part with a decision in it.
+fn said_as(path: &str, within: Option<&str>) -> Destination {
+    let said = within
+        .map(|root| root.trim_end_matches('/'))
+        // A root of `/` makes everything "inside" it and every path relative, which is
+        // how an absolute path would come back looking repository-relative.
+        .filter(|root| !root.is_empty())
+        .and_then(|root| {
+            let rest = path.strip_prefix(root)?.trim_start_matches('/');
+            // The project root itself is not a folder within the project, and an empty
+            // destination means "wherever this project keeps them" elsewhere.
+            (!rest.is_empty()).then(|| format!("{rest}/"))
+        })
+        .unwrap_or_else(|| path.to_string());
+    Destination {
+        said,
+        path: path.to_string(),
+    }
+}
+
+/// What a dialog is being opened for.
+///
+/// One dialog function rather than one per caller: adding files to a send and choosing
+/// where a document goes differ in what they ask for, not in how they ask.
+#[cfg(target_os = "linux")]
+struct Want {
+    folders: bool,
+    multiple: bool,
+    title: &'static str,
+    accept: &'static str,
+    /// Where the dialog opens. A chooser that starts in the home directory when the
+    /// project is three levels down is a chooser somebody navigates out of every time.
+    start: Option<String>,
+}
+
 /// The dialog itself. Runs a nested main loop, which is what makes it modal.
 #[cfg(target_os = "linux")]
-fn ask_gtk(parent: Option<tauri::WebviewWindow>, folders: bool) -> Vec<String> {
+fn ask_gtk(parent: Option<tauri::WebviewWindow>, want: Want) -> Vec<String> {
     use gtk::prelude::*;
 
     let window = parent.and_then(|window| window.gtk_window().ok());
     let chooser = gtk::FileChooserNative::new(
-        if folders {
-            Some("Add a folder")
-        } else {
-            Some("Add files")
-        },
+        Some(want.title),
         window.as_ref(),
-        if folders {
+        if want.folders {
             gtk::FileChooserAction::SelectFolder
         } else {
             gtk::FileChooserAction::Open
         },
-        Some("Add"),
+        Some(want.accept),
         Some("Cancel"),
     );
-    chooser.set_select_multiple(true);
+    chooser.set_select_multiple(want.multiple);
+    // A document can be destined for a folder that does not exist yet, which is most of
+    // the point of choosing rather than typing: the dialog makes it, and the path that
+    // comes back is real.
+    chooser.set_create_folders(true);
+    if let Some(start) = want.start.as_deref() {
+        let path = std::path::Path::new(start);
+        if path.is_dir() {
+            let _ = chooser.set_current_folder(path);
+        }
+    }
     let answered = chooser.run();
     let picked = if answered == gtk::ResponseType::Accept {
         chooser
@@ -274,6 +382,50 @@ mod tests {
         );
 
         std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn a_folder_inside_the_project_is_said_the_way_any_checkout_could_follow() {
+        // The destination travels to an agent that may not be on this machine, so an
+        // absolute path here is an instruction only this machine can follow.
+        assert_eq!(
+            said_as(
+                "/home/me/code/colai/docs/Design",
+                Some("/home/me/code/colai")
+            ),
+            Destination {
+                said: "docs/Design/".to_string(),
+                path: "/home/me/code/colai/docs/Design".to_string(),
+            }
+        );
+        // A trailing slash on the project is the same project.
+        assert_eq!(
+            said_as("/home/me/code/colai/docs", Some("/home/me/code/colai/")).said,
+            "docs/"
+        );
+    }
+
+    #[test]
+    fn a_folder_outside_the_project_is_said_in_full_rather_than_pretended_about() {
+        assert_eq!(
+            said_as("/etc/design", Some("/home/me/code/colai")).said,
+            "/etc/design"
+        );
+        // Nothing known to be inside: the honest answer is the path itself.
+        assert_eq!(said_as("/etc/design", None).said, "/etc/design");
+        // A root of `/` would make every absolute path look repository-relative.
+        assert_eq!(said_as("/etc/design", Some("/")).said, "/etc/design");
+        assert_eq!(said_as("/etc/design", Some("")).said, "/etc/design");
+    }
+
+    #[test]
+    fn the_project_root_itself_is_not_a_folder_within_the_project() {
+        // An empty destination already means "wherever this project keeps them", so
+        // producing one here would quietly change what was asked for.
+        assert_eq!(
+            said_as("/home/me/code/colai", Some("/home/me/code/colai")).said,
+            "/home/me/code/colai"
+        );
     }
 
     #[test]
