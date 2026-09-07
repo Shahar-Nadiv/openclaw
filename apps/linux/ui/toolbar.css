@@ -19,6 +19,22 @@
 }
 
 /*
+ * `hidden` means hidden, whatever else a rule here says.
+ *
+ * The browser's own `[hidden] { display: none }` is the weakest rule there is: any
+ * `display` in this file beats it, and `all: unset` throws it away entirely. Both have
+ * happened — twice on the rail's keys, and then the library window, which set
+ * `display: flex` and so was drawn even while the page believed it was hidden. It sat in
+ * the corner of somebody's screen as an empty dark box, permanently, looking like a bug
+ * in a toolbar it had nothing to do with.
+ *
+ * One rule, stated once and loudly, instead of remembering to write it per element.
+ */
+[hidden] {
+  display: none !important;
+}
+
+/*
  * Nothing on the path to the rail may paint.
  *
  * This document is a sheet of glass over somebody's desktop. A background anywhere
@@ -107,12 +123,6 @@ body {
   margin: 4px 0;
 }
 
-/* `all: unset` below throws away the browser's own `[hidden] { display: none }`, so a
-   key told to hide stays on the rail claiming to be hidden. Stated back — this has been
-   found twice now, once for the folded tools and once for the stop key. */
-.key[hidden] {
-  display: none;
-}
 .key {
   all: unset;
   box-sizing: border-box;

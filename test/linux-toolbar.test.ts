@@ -1907,6 +1907,32 @@ describe("taking a conversation back", () => {
   });
 });
 
+describe("hidden means hidden", () => {
+  const css = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+
+  test("one rule outranks every display in the file", () => {
+    /*
+     * The browser's own `[hidden] { display: none }` is the weakest rule there is: any
+     * `display` here beats it, and `all: unset` discards it. Three elements have been
+     * caught drawn while the page believed them hidden — two rail keys, then the library
+     * window, which set `display: flex` and so sat in the corner of somebody's screen as
+     * an empty dark box, permanently, looking like a bug in something else entirely.
+     */
+    expect(css).toMatch(/\[hidden\]\s*\{[^}]*display:\s*none\s*!important/);
+  });
+
+  test("and it is stated once, not remembered per element", () => {
+    // A per-element workaround is a rule somebody has to know about before writing the
+    // element that needs it, which is exactly the order this keeps being found in.
+    // Comments in this file quote the rule they are about, so they are taken out first.
+    const rules = [
+      ...css.replaceAll(/\/\*[\s\S]*?\*\//g, "").matchAll(/[^\n{]*\[hidden\][^\n{]*\{/g),
+    ];
+    expect(rules.length).toBe(1);
+    expect(rules[0]![0].trim().startsWith("[hidden]")).toBe(true);
+  });
+});
+
 describe("a window lands on a screen, not across two", () => {
   /*
    * The desktop this was found on: two 1920x1080 monitors side by side, the right one
