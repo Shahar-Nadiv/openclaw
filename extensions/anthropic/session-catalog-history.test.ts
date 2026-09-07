@@ -131,10 +131,42 @@ describe("importClaudeHistory", () => {
     const userRow = appended.find((message) => message.role === "user");
     // mirrorOrigin keeps imported native prompts out of ownRecentUserTexts; without
     // it a repeated external prompt like "continue" is swallowed as self-echo.
-    expect(userRow?.["__openclaw"]).toMatchObject({ mirrorOrigin: "claude-catalog-import" });
+    //
+    // The other three are the thread back to the line this came from. Without them an
+    // adopted conversation is a copy with nothing tying it to its original, and anything
+    // that has to act on the upstream file — going back to a point in it, above all —
+    // has no way to find where. Measured on a real machine before this was added: none
+    // of 275 imported entries could be located in the 85MB transcript they came from, by
+    // id, by timestamp, or by anything else.
+    expect(userRow?.["__openclaw"]).toMatchObject({
+      mirrorOrigin: "claude-catalog-import",
+      importedFrom: "claude",
+      cliSessionId: "thread-1",
+      externalId: "u-1",
+    });
     const assistantRow = appended.find((message) => message.role === "assistant");
     expect(assistantRow).toBeDefined();
     expect(assistantRow?.["__openclaw"]).toBeUndefined();
+  });
+
+  it("claims no identity for a row the transcript gave none", async () => {
+    // A line with no uuid cannot be pointed back at, and saying otherwise would be worse
+    // than saying nothing: the whole reason for recording this is that something may one
+    // day cut the upstream file at the place it names.
+    appended.length = 0;
+    await importClaudeHistory({
+      items: [{ type: "userMessage", text: "continue" }],
+      threadId: "thread-1",
+      storePath: "/tmp/sessions.json",
+      sessionId: "session-1",
+      sessionKey: "agent:main:catalog-adopt",
+      agentId: "main",
+      config: {} as OpenClawConfig,
+    });
+    const row = appended.find((message) => message.role === "user");
+    const said = row?.["__openclaw"] as Record<string, unknown> | undefined;
+    expect(said).toMatchObject({ cliSessionId: "thread-1" });
+    expect(said && "externalId" in said).toBe(false);
   });
 
   it("omits empty native reasoning records instead of rendering a placeholder", async () => {
