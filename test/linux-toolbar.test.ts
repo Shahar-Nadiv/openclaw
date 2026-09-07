@@ -153,6 +153,7 @@ type ToolbarHelpers = {
   RUN_QUIET: number;
   sheeted: (mark: { tool: string; frames?: number }) => boolean;
   asksSomething: (said: string) => boolean;
+  rewindRefused: (said: unknown) => string;
   canGoBack: (
     row: { kind: string; id?: string; sessionKey?: string } | null,
     allowed: string[] | undefined,
@@ -267,7 +268,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn };`,
   context,
 );
 const {
@@ -326,6 +327,7 @@ const {
   sheeted,
   asksSomething,
   canGoBack,
+  rewindRefused,
   pointSaid,
   agoSaid,
   REWIND_SAYS,
@@ -1870,14 +1872,45 @@ describe("taking a conversation back", () => {
     expect(canGoBack({ kind: "session", id: "s1", sessionKey: "s1" }, admin).can).toBe(true);
   });
 
-  test("a thread cannot, until it has been sent to once", () => {
-    // Rewinding is a Gateway session's operation, and most of what this list shows is a
-    // thread the Gateway knows about but does not own. Offering it and then refusing
-    // teaches somebody the toolbar is broken.
-    const cold = canGoBack({ kind: "thread", id: "t1" }, admin);
-    expect(cold.can).toBe(false);
-    expect(cold.why).toContain("Send to this conversation once");
-    expect(canGoBack({ kind: "thread", id: "t1", sessionKey: "s9" }, admin).can).toBe(true);
+  test("a conversation another agent owns cannot, sent to or not", () => {
+    /*
+     * Sending to a thread gives it a session key here, which was read as "so it can be
+     * rewound now". It cannot: the agent that started it owns that history, and the
+     * Gateway refuses to cut it in place — "session history changes are unavailable
+     * because this session is owned by an external agent harness". So the toolbar
+     * offered an action that always failed, which is the exact thing this gate exists
+     * to prevent.
+     */
+    for (const row of [
+      { kind: "thread", id: "t1" },
+      { kind: "thread", id: "t1", sessionKey: "s9" },
+    ]) {
+      const said = canGoBack(row, admin);
+      expect(said.can, JSON.stringify(row)).toBe(false);
+      // And not a dead end: rewind is not missing, it is in the application that owns
+      // the transcript, which is where it has to happen.
+      expect(said.why).toContain("rewind it there");
+    }
+  });
+
+  test("the Gateway's refusal is said in words somebody can act on", () => {
+    // What it actually says is true and addressed to nobody. The toolbar knows what it
+    // means and can say the useful half.
+    const refused = rewindRefused(
+      new Error(
+        "Session history changes are unavailable because this session is owned by an external agent harness.",
+      ),
+    );
+    expect(refused).toContain("rewind it there");
+    expect(refused).not.toContain("harness");
+
+    expect(rewindRefused(new Error("Rewind is unavailable for archived sessions."))).toContain(
+      "archived",
+    );
+    // Anything it has not been taught is passed through rather than swallowed: a
+    // refusal nobody can read still beats one nobody can see.
+    expect(rewindRefused(new Error("the disk is on fire"))).toContain("the disk is on fire");
+    expect(rewindRefused(null)).toContain("did not say why");
   });
 
   test("an agent is not a conversation", () => {

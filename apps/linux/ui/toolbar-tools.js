@@ -712,12 +712,39 @@ function canGoBack(row, allowed) {
     return { can: false, why: "This machine is not allowed to rewind conversations." };
   }
   if (row.kind === "session" && row.id) return { can: true, why: null };
-  if (row.kind === "thread") {
-    return row.sessionKey
-      ? { can: true, why: null }
-      : { can: false, why: "Send to this conversation once and it can be rewound after that." };
-  }
+  // A conversation held by another agent — a Claude Code thread, and whatever else
+  // registers a catalog later. Sending to one gives it a session key here, which used to
+  // be read as "so it can be rewound now", and it cannot: the other agent owns that
+  // history and the Gateway refuses to cut it in place. Offering it anyway meant an
+  // action that always failed, which teaches somebody the toolbar is broken.
+  if (row.kind === "thread") return { can: false, why: HELD_ELSEWHERE };
   return { can: false, why: "An agent is not a conversation — pick one of its conversations." };
+}
+
+/**
+ * Why a conversation somebody else's agent owns cannot be taken back from here.
+ *
+ * With somewhere to go rather than a dead end. Rewind is not missing — it is in the
+ * application that owns the transcript, which is where it has to happen for the two
+ * copies of that conversation not to disagree.
+ */
+const HELD_ELSEWHERE =
+  "This conversation is held by the agent that started it, which owns its history — rewind it there.";
+
+/**
+ * The Gateway's refusal, in words somebody can act on.
+ *
+ * It says "session history changes are unavailable because this session is owned by an
+ * external agent harness", which is true and is not addressed to anybody. The toolbar
+ * knows what that means and can say the useful half.
+ */
+function rewindRefused(said) {
+  const words = String((said && said.message) || said || "");
+  if (/external agent harness|owned by/i.test(words)) return HELD_ELSEWHERE;
+  if (/archived/i.test(words)) {
+    return "This conversation is archived, and an archived conversation cannot be taken back.";
+  }
+  return `Could not go back — ${words || "the Gateway did not say why."}`;
 }
 
 /**
