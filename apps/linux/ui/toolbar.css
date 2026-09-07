@@ -660,15 +660,6 @@ body {
   font-size: 11px;
 }
 
-/* A rule between two groups of rows in one menu. The kinds of design are one thing to
-   choose from; a plain screenshot is a different question that happens to live here. */
-.row-divider {
-  display: block;
-  height: 1px;
-  margin: 5px 10px;
-  background: rgb(255 255 255 / 10%);
-}
-
 /* A row that is a way out of a panel rather than a thing to pick in it. Quieter, so it
    does not read as another item on the list above it. */
 .row-quiet {

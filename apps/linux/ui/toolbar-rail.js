@@ -146,10 +146,15 @@ function buildRail() {
   // to read when it is shorter — not that somewhere else is a better home for them.
   const exact = document.createDocumentFragment();
   exact.append(
-    key("exact", "Measure, colour, record…", "more", toggleTucked, MENU),
+    key("exact", "Measure, colour, record, screenshot…", "more", toggleTucked, MENU),
     key("measure", "Measure · M", "measure", () => use("measure")),
     key("colour", "Colour · C", "colour", () => use("colour")),
     key("record", "Record · R", "record", () => flyout("record"), MENU),
+    // Under the recorder, because that is what somebody is choosing between when they
+    // reach for either: a moving picture of this, or a still one. It was a row at the
+    // bottom of the Design menu, where nobody looking for a screenshot would think to
+    // open a menu named after wireframes.
+    key("screenshot", "Screenshot", "screenshot", () => use("screenshot")),
   );
   dividers[1].after(exact);
 
@@ -210,10 +215,6 @@ function buildRail() {
   for (const [id, kind] of Object.entries(DESIGNS)) {
     designRow(el.flyDesign, id, kind);
   }
-  const between = document.createElement("span");
-  between.className = "row-divider";
-  el.flyDesign.append(between);
-  row(el.flyDesign, "screenshot", "Screenshot", "screenshot");
   for (const seconds of RECORD_LENGTHS) length(el.flyRecord, seconds);
   for (const [id, pen] of Object.entries(PENS)) penRow(el.flyDraw, id, pen);
 }
@@ -235,7 +236,7 @@ function length(into, seconds) {
 }
 
 /** The tools that fold away together, in the order they sit on the rail. */
-const EXACT = ["measure", "colour", "record"];
+const EXACT = ["measure", "colour", "record", "screenshot"];
 
 /** Fold them shut, or open them out, and remember which. */
 function toggleTucked() {

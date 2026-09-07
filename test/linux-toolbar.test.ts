@@ -1821,6 +1821,42 @@ describe("taking a conversation back", () => {
   });
 });
 
+describe("every tool has a key somebody can find", () => {
+  const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+  const keys = new Set([...rail.matchAll(/\bkey\("(\w+)"/g)].map((found) => found[1]!));
+  const folds = (rail.match(/const EXACT = \[([^\]]+)\]/)?.[1] ?? "")
+    .split(",")
+    .map((name) => name.trim().replaceAll('"', ""))
+    .filter(Boolean);
+
+  test("a tool is reached from the rail, not from inside another tool's menu", () => {
+    // Screenshot used to be a row at the bottom of the Design menu — reachable, and
+    // findable only by somebody who had already opened a menu named after wireframes.
+    // That is not a placement anybody chose; it is one nothing was checking.
+    //
+    // Read out of the rail source, so a tool added to the table and never given a key
+    // fails here rather than existing only in the code that sends it.
+    for (const tool of Object.keys(TOOLS)) {
+      if (tool === "surfaceWrite") {
+        continue;
+      }
+      // Box and circle share one key, which opens onto both under their own names.
+      const shared = tool === "box" || tool === "circle";
+      expect(keys.has(tool) || (shared && keys.has("shape")), `${tool} has a key`).toBe(true);
+    }
+  });
+
+  test("the fold key names every tool it folds away", () => {
+    // It is the only label somebody reads before deciding whether what they want is
+    // behind it, so a label that says less than it hides is how a tool goes missing.
+    const named = rail.match(/key\("exact", "([^"]+)"/)?.[1] ?? "";
+    expect(folds.length).toBeGreaterThan(0);
+    for (const tool of folds) {
+      expect(named.toLowerCase(), tool).toContain(tool);
+    }
+  });
+});
+
 describe("marking several things before saying anything", () => {
   test("annotating accumulates; answering a question does not", () => {
     // Asserted against the whole tool table rather than as a list, so a tool added later
