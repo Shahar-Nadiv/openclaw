@@ -158,7 +158,7 @@ type ToolbarHelpers = {
     now: number,
   ) => { words: string; when: string | null };
   agoSaid: (at: number, now: number) => string;
-  GOING_BACK: Record<string, { label: string; says: string; fork: boolean }>;
+  REWIND_SAYS: string;
   KEEPS_MARKING: string[];
   numberOf: (
     marks: { tool?: string; chosen?: boolean }[] | undefined,
@@ -201,7 +201,7 @@ type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, pointSaid, agoSaid, GOING_BACK, KEEPS_MARKING, numberOf };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf };`,
   context,
 );
 const {
@@ -262,7 +262,7 @@ const {
   canGoBack,
   pointSaid,
   agoSaid,
-  GOING_BACK,
+  REWIND_SAYS,
   KEEPS_MARKING,
   numberOf,
 } = context.helpers as ToolbarHelpers;
@@ -1782,15 +1782,15 @@ describe("taking a conversation back", () => {
     }
   });
 
-  test("the two verbs differ in exactly one decision, and say so", () => {
-    // Whether the conversation somebody is looking at survives it. Side by side, so the
-    // difference is visible rather than implied.
-    expect(GOING_BACK.rewind!.fork).toBe(false);
-    expect(GOING_BACK.branch!.fork).toBe(true);
-    expect(GOING_BACK.rewind!.says).not.toBe(GOING_BACK.branch!.says);
+  test("the panel says what it does not do, before anything is chosen", () => {
+    // The one sentence that has to be there. Somebody who believes their work reverted
+    // and finds out later is the worst outcome this surface could produce, so it is
+    // stated where they read it rather than left to be discovered.
+    expect(REWIND_SAYS).toContain("files are not touched");
+    expect(REWIND_SAYS).toContain("only the conversation");
   });
 
-  test("a point is words and a time, kept apart", () => {
+  test("a prompt is its words and a time, kept apart", () => {
     // They compete for the same room and the wrong one loses. The words are what
     // somebody remembers; the time is what tells two similar messages apart.
     const now = 1_000_000_000_000;

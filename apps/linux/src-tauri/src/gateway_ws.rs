@@ -325,9 +325,6 @@ pub(crate) struct Point {
 pub(crate) struct Rewound {
     #[serde(default)]
     pub editor_text: Option<String>,
-    /// Only a fork makes one; a rewind repoints the conversation it was given.
-    #[serde(default)]
-    pub session_key: Option<String>,
 }
 
 /// The user messages in a transcript, read without insisting on a shape.
@@ -559,7 +556,6 @@ enum GatewayRequest {
     SessionsRewind {
         key: String,
         entry_id: String,
-        fork: bool,
     },
     ChatSend(ChatSendParams),
     RefreshCanvasSurface {
@@ -911,18 +907,12 @@ impl GatewayClient {
         }
     }
 
-    /// Cut a conversation back to a point, or start a new one from it.
-    pub async fn sessions_rewind(
-        &self,
-        key: &str,
-        entry_id: &str,
-        fork: bool,
-    ) -> Result<Rewound, String> {
+    /// Cut a conversation back to one of its own prompts.
+    pub async fn sessions_rewind(&self, key: &str, entry_id: &str) -> Result<Rewound, String> {
         match self
             .request(GatewayRequest::SessionsRewind {
                 key: key.to_string(),
                 entry_id: entry_id.to_string(),
-                fork,
             })
             .await?
         {
@@ -2035,18 +2025,10 @@ where
             .await?;
             Ok(GatewayResponse::History(points_in(&payload)))
         }
-        GatewayRequest::SessionsRewind {
-            key,
-            entry_id,
-            fork,
-        } => {
+        GatewayRequest::SessionsRewind { key, entry_id } => {
             let payload = request_on_socket(
                 socket,
-                if fork {
-                    "sessions.fork"
-                } else {
-                    "sessions.rewind"
-                },
+                "sessions.rewind",
                 serde_json::json!({ "sessionKey": key, "entryId": entry_id }),
                 budget,
                 dispatch,

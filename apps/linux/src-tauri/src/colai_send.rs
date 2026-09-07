@@ -251,26 +251,19 @@ pub(crate) async fn colai_points(
 /// reads to the end of — while the answer itself is a transcript coming down a socket.
 const POINTS_AT_MOST: u32 = 40;
 
-/// Take a conversation back to one of its own points, or start a new one from there.
+/// Take a conversation back to one of its own prompts.
 ///
-/// Two verbs behind one door because they differ in a single decision — whether the
-/// conversation somebody is looking at survives — and putting them side by side is what
-/// makes that decision visible rather than implied.
-///
-/// This is the first thing on this surface that discards work. It says what it did.
+/// The first thing on this surface that discards work. It says what it did.
 #[tauri::command]
 pub(crate) async fn colai_rewind(
     gateway: State<'_, GatewayClient>,
     session_key: String,
     entry_id: String,
-    fork: Option<bool>,
 ) -> Result<Rewound, String> {
     if entry_id.trim().is_empty() {
-        return Err("There is no point to go back to.".to_string());
+        return Err("There is no prompt to go back to.".to_string());
     }
-    gateway
-        .sessions_rewind(&session_key, &entry_id, fork.unwrap_or(false))
-        .await
+    gateway.sessions_rewind(&session_key, &entry_id).await
 }
 
 /// Stop a run that is underway.

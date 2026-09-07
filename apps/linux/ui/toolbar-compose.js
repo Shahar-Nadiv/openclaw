@@ -318,20 +318,18 @@ function drawRowMenu() {
   rows.push(title);
 
   const may = canGoBack(about, state.allowed);
-  for (const [id, how] of Object.entries(GOING_BACK)) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "row row-stacked";
-    item.disabled = !may.can;
-    const name = document.createElement("span");
-    name.textContent = how.label;
-    const says = document.createElement("span");
-    says.className = "row-under";
-    says.textContent = how.says;
-    item.append(name, says);
-    item.addEventListener("click", () => void openPoints(id));
-    rows.push(item);
-  }
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = "row row-stacked";
+  item.disabled = !may.can;
+  const name = document.createElement("span");
+  name.textContent = "Rewind…";
+  const says = document.createElement("span");
+  says.className = "row-under";
+  says.textContent = "go back to an earlier prompt you sent";
+  item.append(name, says);
+  item.addEventListener("click", () => void openPoints());
+  rows.push(item);
   if (!may.can) {
     const why = document.createElement("p");
     why.className = "cron-bare";
@@ -348,10 +346,10 @@ function drawRowMenu() {
  * every message, and a list fetched earlier is a list that is quietly out of date about
  * the thing somebody is about to act on.
  */
-async function openPoints(how) {
+async function openPoints() {
   const about = state.rowMenu;
   if (!about || !about.sessionKey) return;
-  state.points = { how, loading: true, list: [], trouble: null };
+  state.points = { loading: true, list: [], trouble: null };
   flyout("points");
   try {
     state.points.list = await invoke("colai_points", { sessionKey: about.sessionKey });
@@ -371,18 +369,15 @@ async function openPoints(how) {
  */
 function drawPoints() {
   const found = state.points;
-  const how = GOING_BACK[(found && found.how) || "rewind"];
   const rows = [];
   const title = document.createElement("p");
   title.className = "agents-title";
-  title.textContent = how.label;
+  title.textContent = (state.rowMenu && state.rowMenu.name) || "Rewind";
   rows.push(title);
 
   const bare = document.createElement("p");
   bare.className = "cron-bare";
-  bare.textContent = how.fork
-    ? "Starts a new conversation from that point. This one is left as it is, and so are your files."
-    : "Takes this conversation back to that point. Your files are not touched — only the conversation.";
+  bare.textContent = REWIND_SAYS;
   rows.push(bare);
 
   if (found && found.loading) {
@@ -393,21 +388,24 @@ function drawPoints() {
     // Honest about the useless answer. The transcript may be empty, or it may be a shape
     // this build cannot find message ids in; either way there is nowhere to go, and
     // saying so beats an empty list somebody stares at.
-    rows.push(saying("Nothing here to go back to."));
+    rows.push(saying("No prompts here to go back to."));
   } else {
     const now = Date.now();
     for (const point of [...found.list].reverse()) {
       const item = document.createElement("button");
       item.type = "button";
-      item.className = "row";
+      item.className = "row row-stacked prompt-row";
       const { words, when } = pointSaid(point, now);
+      // The prompt itself, not a label for it. This is how somebody recognises which of
+      // their own messages they meant, so it gets room to be read rather than a slot on
+      // one line beside a timestamp.
       const said = document.createElement("span");
-      said.className = "agent-name";
+      said.className = "prompt-said";
       said.textContent = words;
       item.append(said);
       if (when) {
         const ago = document.createElement("span");
-        ago.className = "row-key";
+        ago.className = "row-under";
         ago.textContent = when;
         item.append(ago);
       }
@@ -436,7 +434,6 @@ function saying(words) {
  */
 async function goBack(point) {
   const about = state.rowMenu;
-  const how = GOING_BACK[(state.points && state.points.how) || "rewind"];
   if (!about || !about.sessionKey || state.sending) return;
   state.sending = true;
   render();
@@ -444,14 +441,11 @@ async function goBack(point) {
     const back = await invoke("colai_rewind", {
       sessionKey: about.sessionKey,
       entryId: point.id,
-      fork: how.fork,
     });
     state.open = null;
     state.points = null;
     if (back && back.editorText) state.text = back.editorText;
-    state.trouble = how.fork
-      ? `Started a new conversation from “${(point.said || "that point").slice(0, 40)}”.`
-      : `${about.name} is back at “${(point.said || "that point").slice(0, 40)}”. The files are as they were.`;
+    state.trouble = `${about.name} is back to just before “${(point.said || "that prompt").slice(0, 40)}”. The files are as they were.`;
     void loadWho();
   } catch (error) {
     state.trouble = `Could not go back — ${error && error.message ? error.message : String(error)}`;

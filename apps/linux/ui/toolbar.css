@@ -722,6 +722,26 @@ body {
   font-size: 11px;
 }
 
+/*
+ * One of somebody's own prompts, to be picked out of several.
+ *
+ * Given up to three lines rather than clipped to one. A prompt is recognised by reading
+ * it, and a list of rows all ending in the same ellipsis is a list nobody can choose
+ * from — which is what a single line of a three-hundred-pixel panel produces.
+ */
+.prompt-row {
+  align-items: flex-start;
+  text-align: left;
+}
+.prompt-said {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+  white-space: normal;
+}
+
 .row[disabled] {
   opacity: 0.45;
   cursor: default;

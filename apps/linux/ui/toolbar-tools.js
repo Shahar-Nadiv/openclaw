@@ -510,28 +510,19 @@ const FOLD_TIME = 220;
 /*
  * ── going back ───────────────────────────────────────────────────────────────
  *
- * A conversation can be taken back to one of its own messages. Two verbs behind one
- * door, because they differ in a single decision — whether the conversation somebody is
- * looking at survives it — and putting them side by side is what makes that decision
- * visible instead of implied.
+ * A conversation can be taken back to one of its own prompts: pick something you sent
+ * earlier and the conversation returns to just before it, with what you typed handed
+ * back so you can say it differently.
  *
  * The thing this must never let somebody believe: **it takes the conversation back, not
  * the code.** The Gateway's rewind repoints a transcript and touches no files. Somebody
  * who thinks their work reverted and finds out later is the worst outcome this surface
  * could produce, so the panel says it where they read it before choosing.
  */
-const GOING_BACK = {
-  rewind: {
-    label: "Rewind to here",
-    says: "cuts this conversation back",
-    fork: false,
-  },
-  branch: {
-    label: "Branch from here",
-    says: "keeps this one, starts another",
-    fork: true,
-  },
-};
+
+/** What the rewind panel says about what it is and is not about to do. */
+const REWIND_SAYS =
+  "Takes this conversation back to just before that prompt. Your files are not touched — only the conversation.";
 
 /**
  * Whether a row in the conversations list can be taken back at all, and why not.
@@ -562,11 +553,11 @@ function canGoBack(row, allowed) {
 }
 
 /**
- * A point in a conversation, as a row somebody can recognise.
+ * A prompt somebody sent, as the row they will recognise it by.
  *
- * Two halves rather than one sentence, because they compete for the same room and the
- * wrong one loses. The words are what somebody remembers; the time is what tells two
- * similar messages apart — so the words ellipsize and the time never does.
+ * The words and the time kept apart, because they are read for different reasons: the
+ * words are what somebody remembers writing, and the time is what tells two similar
+ * prompts apart. The words get the room — they are the thing being chosen between.
  */
 function pointSaid(point, now) {
   const words = (point.said || "").trim().replace(/\s+/g, " ");
