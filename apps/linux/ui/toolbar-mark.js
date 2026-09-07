@@ -208,8 +208,8 @@ function addMark(mark) {
  * before the pixels underneath it are read, and a frame callback only says the page has
  * drawn, not that anybody has seen it.
  */
-async function shoot(mark, again) {
-  await photograph(mark, again);
+async function shoot(mark) {
+  await photograph(mark);
   state.popup = mark.id;
   render();
   // The note is a text field and one way out is a key, and neither works while the
@@ -220,13 +220,10 @@ async function shoot(mark, again) {
 /**
  * Take the picture, and nothing else.
  *
- * Split from `shoot` because a watch takes its second picture with nobody there. The
- * popup and the keyboard grab are what a person wants when they have just marked
- * something, and are exactly wrong when the toolbar is answering a change that happened
- * while somebody was in another window: an overlay that seizes the keyboard because a
- * build finished is an overlay that eats the sentence they were typing.
+ * Split from `shoot` because the popup and the keyboard grab are what a person wants
+ * when they have just marked something, and a picture is worth taking without them.
  */
-async function photograph(mark, again) {
+async function photograph(mark) {
   // What is in front *now*. A mark is about the window somebody is looking at, and
   // reading that once when the app started answered a question about a different
   // afternoon.
@@ -234,22 +231,12 @@ async function photograph(mark, again) {
   // The address goes on the mark rather than being read at send time. Two marks made in
   // two applications are two addresses, and one global read at the end would label both
   // with whichever happened to be last — confidently, and wrongly.
-  if (!again) {
-    mark.where = await showing(state.surface, mark);
-    mark.spot = spotIn(mark, mark.where, screenSize());
-  }
+  mark.where = await showing(state.surface, mark);
+  mark.spot = spotIn(mark, mark.where, screenSize());
   document.body.style.visibility = "hidden";
   try {
     await new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn)));
     await new Promise((waited) => setTimeout(waited, 40));
-    // Asked before the picture, while the window underneath is still the one that was
-    // pointed at and nothing of ours has been drawn over it.
-    if (mark.tool === "inspect") {
-      mark.seen = await invoke("colai_inspect", {
-        x: Math.round(mark.points[0].x * window.innerWidth),
-        y: Math.round(mark.points[0].y * window.innerHeight),
-      }).catch(() => null);
-    }
     // A recording is the one capture long enough to be waited through, so it says so
     // while it happens — and gives the desktop back while it does, because a recording
     // of somebody being unable to click anything is not what they were pointing at.
@@ -257,13 +244,12 @@ async function photograph(mark, again) {
     const taken = await invoke("colai_capture_mark", {
       mark,
       accent: accentNow(),
-      again,
       seconds: state.recordFor,
     });
     if (taken.hex) mark.hex = taken.hex;
     mark.frames = taken.frames;
     mark.seconds = taken.seconds;
-    if (!again) mark.thumb = taken.thumb;
+    mark.thumb = taken.thumb;
     mark.shot = `${taken.width}\u00d7${taken.height}`;
   } catch (error) {
     // The mark still exists and can still be described; it simply arrives without a

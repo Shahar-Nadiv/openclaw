@@ -118,25 +118,9 @@ function needsAgreeing() {
  * a decision about the marks somebody made and belongs beside them. The shell resolves
  * the receiver, attaches the pictures and reports what happened.
  */
-/**
- * Send marks to whoever is receiving.
- *
- * `alone` is for a send nobody asked for at that moment — a watch firing while somebody
- * is in another window. It carries the mark and nothing else, and leaves the composer
- * exactly as it was found: clearing a half-written note and putting somebody's tool
- * away because a build finished is the toolbar taking their turn.
- */
-async function sendMarks(ids, alone) {
-  if (state.sending) {
-    // A send nobody pressed a button for cannot just evaporate because one was already
-    // in the air. The pair is in the tray with both its pictures; this says so, and it
-    // can go by hand.
-    if (alone) {
-      state.trouble = "A watched region changed while another send was going out. It is waiting in the tray.";
-      render();
-    }
-    return;
-  }
+/** Send marks to whoever is receiving. */
+async function sendMarks(ids) {
+  if (state.sending) return;
   const who = receiverNow();
   if (!who) {
     state.trouble = "Nobody is receiving. Choose an agent or a conversation first.";
@@ -160,13 +144,7 @@ async function sendMarks(ids, alone) {
   try {
     const sent = await invoke("colai_send", {
       receiver: who,
-      message: summaryFor(
-        going,
-        state.mode,
-        alone ? "" : state.text,
-        state.surface,
-        alone ? [] : state.files,
-      ),
+      message: summaryFor(going, state.mode, state.text, state.surface, state.files),
       markIds: ids,
       // Which of them would rather be one picture than several. Decided here rather than
       // in the capture, because it is the same decision the message states — and the two
@@ -176,11 +154,9 @@ async function sendMarks(ids, alone) {
       // Only the ones that travel. What is named rather than carried is already in the
       // message as a path, and sending it twice would mean encoding a gigabyte to say
       // something the sentence above it already said.
-      files: alone
-        ? []
-        : carrying(state.files)
-            .filter((file) => file.carried)
-            .map((file) => file.path),
+      files: carrying(state.files)
+        .filter((file) => file.carried)
+        .map((file) => file.path),
     });
     if (who.kind === "thread") {
       state.adopted = [...state.adopted, who.id];
@@ -200,21 +176,16 @@ async function sendMarks(ids, alone) {
     // What went is gone; what was left unticked is still there, which is the whole
     // point of being able to untick it.
     state.marks = state.marks.filter((mark) => !ids.includes(mark.id));
-    if (!alone) {
-      state.files = [];
-      state.text = "";
-      state.popup = null;
-      state.open = null;
-    }
+    state.files = [];
+    state.text = "";
+    state.popup = null;
+    state.open = null;
     // And put the tool away. A marking tool holds a sheet of glass over the whole desk
     // that swallows every click on it, which is what marking needs and is the opposite
     // of what somebody needs the moment they have finished. Sending is the end of the
     // gesture: what was marked has gone, and leaving the desktop deaf until they
     // thought to press Escape is not something anybody asked for.
-    //
-    // Not when nobody asked, though: a watch that fires while somebody is drawing a
-    // box would take the tool out of their hand mid-drag.
-    if (!alone) state.tool = "pointer";
+    state.tool = "pointer";
     // Where to put the answer when it comes. The marks are about to be cleared, so the
     // place they were asking about has to be kept now or the reply has nowhere to land
     // — which was the whole trouble with this surface: you sent, and nothing ever came

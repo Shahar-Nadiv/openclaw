@@ -1,22 +1,21 @@
-//! What is actually under the pointer, as the desktop itself describes it.
+//! What a window says it is showing, as the desktop itself reports it.
 //!
-//! Every other tool hands an agent pixels. A model reads an image well, but it is
-//! reading: "a red button near the top" is a guess about something the desktop already
-//! knows exactly — that it is a Button, that its name is "Send", that it is disabled,
-//! and where its edges are. This asks.
+//! Only ever asked one question: what is the address of the page or folder in front of
+//! you. A browser knows its own URL exactly, and a mark that carries it saves an agent
+//! the round trip of working out which page a screenshot came from — which is the whole
+//! reason any of this is here.
 //!
 //! Over the D-Bus connection the app already has a client for, rather than the `atspi`
-//! crate: the interfaces used here are four methods and three properties on a stable
-//! specification, and taking a dependency to spell them differently would mean owning
-//! its version alignment with zbus forever.
+//! crate: the interfaces used here are two methods on a stable specification, and taking
+//! a dependency to spell them differently would mean owning its version alignment with
+//! zbus forever.
 //!
 //! It is honest about its reach. GTK applications answer; Chromium and Electron ones
-//! expose nothing unless they believe a screen reader is present, which on a
-//! developer's desk is most of the windows. A window that says nothing produces no
-//! reading rather than an invented one, and the message says so — an agent told
-//! nothing about structure knows it is looking at pixels, where an agent told
-//! something vague does not.
-
+//! expose nothing unless they believe a screen reader is present, which on a developer's
+//! desk is most of the windows. Measured on this machine: holding a connection open does
+//! not wake them — accessibility has to be switched on. So a window that says nothing
+//! produces no address rather than an invented one, and the message says the URL was not
+//! available rather than going quiet about it.
 use serde::Serialize;
 use zbus::zvariant::OwnedObjectPath;
 use zbus::{Connection, Proxy};
@@ -24,104 +23,13 @@ use zbus::{Connection, Proxy};
 /// An AT-SPI object: which application answers for it, and where it lives there.
 type Node = (String, OwnedObjectPath);
 
-/// What the registry returns when there is nothing at a point.
-const NOWHERE: &str = "/org/a11y/atspi/null";
 /// Screen coordinates rather than window-relative ones.
 const ON_SCREEN: u32 = 0;
-/// How far down a tree to walk before deciding it is not converging.
-///
-/// A well-behaved application answers "what is at this point" with something smaller
-/// each time and then with itself. One that keeps handing back a different object is
-/// not going to stop, and the toolbar cannot wait for it to.
-const DEEPEST: usize = 40;
 /// How long a reading taken for a mark's address may take.
 ///
-/// Shorter than a deliberate inspection, because nobody asked for it. Marking is
-/// instant today and has to stay that way; an address is worth a quarter of a second
-/// and not a whole one.
+/// Short, because nobody asked for it. Marking is instant today and has to stay that
+/// way; an address is worth a quarter of a second and not a whole one.
 const BRIEFLY: std::time::Duration = std::time::Duration::from_millis(250);
-
-/// How long the whole reading may take.
-///
-/// These calls go to another application's main loop. A window that is busy — or
-/// wedged — answers slowly or never, and a toolbar that hangs because something else
-/// is hung is a worse tool than one that says it could not tell.
-const PATIENCE: std::time::Duration = std::time::Duration::from_millis(900);
-
-/// What the desktop says is at a point.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct Seen {
-    pub role: String,
-    pub name: String,
-    /// Left, top, width, height, in screen pixels.
-    pub at: (i32, i32, i32, i32),
-    /// The handful of things it sits inside, nearest first.
-    pub within: Vec<String>,
-}
-
-/// Read the structure under a point on the overlay.
-///
-/// The point arrives in the overlay's own coordinates, because that is what the page
-/// has; the desktop wants screen coordinates, and the overlay knows where it is.
-#[tauri::command]
-pub(crate) async fn colai_inspect(
-    app: tauri::AppHandle,
-    x: i32,
-    y: i32,
-) -> Result<Option<Seen>, String> {
-    #[cfg(target_os = "linux")]
-    {
-        use tauri::Manager;
-        let at = app
-            .get_webview_window(crate::colai::OVERLAY_LABEL)
-            .ok_or_else(|| "The toolbar is not open.".to_string())?
-            .outer_position()
-            .map_err(|error| format!("Could not find the overlay: {error}"))?;
-        match tokio::time::timeout(PATIENCE, look_at(x + at.x, y + at.y)).await {
-            Ok(seen) => seen,
-            // Not an error: a window that will not answer in time has told us nothing,
-            // which is the same outcome as a window with nothing to tell.
-            Err(_) => Ok(None),
-        }
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (app, x, y);
-        Ok(None)
-    }
-}
-
-#[cfg(target_os = "linux")]
-async fn look_at(x: i32, y: i32) -> Result<Option<Seen>, String> {
-    let bus = accessibility_bus().await?;
-    let root: Node = (
-        "org.a11y.atspi.Registry".to_string(),
-        OwnedObjectPath::try_from("/org/a11y/atspi/accessible/root")
-            .map_err(|error| format!("Could not address the desktop: {error}"))?,
-    );
-
-    // Applications, then their windows. The desktop object itself does not answer "what
-    // is at this point"; only the windows under it do, so the containing one has to be
-    // found before anything can be asked.
-    let Ok(apps) = children(&bus, &root).await else {
-        return Ok(None);
-    };
-    for app in apps {
-        let Ok(windows) = children(&bus, &app).await else {
-            continue;
-        };
-        for window in windows {
-            if !contains(&bus, &window, x, y).await {
-                continue;
-            }
-            return Ok(Some(
-                describe(&bus, innermost(&bus, window, x, y).await, x, y).await,
-            ));
-        }
-    }
-    Ok(None)
-}
 
 /// The a11y bus, whose address the session bus is asked for.
 /// The address of the page or folder a window is showing, if it will say.
@@ -253,99 +161,4 @@ async fn contains(bus: &Connection, node: &Node, x: i32, y: i32) -> bool {
         .call("Contains", &(x, y, ON_SCREEN))
         .await
         .unwrap_or(false)
-}
-
-/// The smallest thing at a point, by asking each container what is under it.
-#[cfg(target_os = "linux")]
-async fn innermost(bus: &Connection, from: Node, x: i32, y: i32) -> Node {
-    let mut here = from;
-    for _ in 0..DEEPEST {
-        let Some(shape) = on(bus, &here, "org.a11y.atspi.Component").await else {
-            return here;
-        };
-        let Ok(under) = shape
-            .call::<_, _, Node>("GetAccessibleAtPoint", &(x, y, ON_SCREEN))
-            .await
-        else {
-            return here;
-        };
-        // Nothing further in, or the same thing again: this is as small as it gets.
-        if under.1.as_str() == NOWHERE || under == here {
-            return here;
-        }
-        here = under;
-    }
-    here
-}
-
-#[cfg(target_os = "linux")]
-async fn describe(bus: &Connection, node: Node, x: i32, y: i32) -> Seen {
-    let role = role_of(bus, &node).await;
-    let name = name_of(bus, &node).await;
-    let at = extents_of(bus, &node).await.unwrap_or((x, y, 0, 0));
-
-    // A couple of ancestors, because "Button" alone says nothing about which button.
-    // Not the whole way to the desktop: past three, the names stop being about the
-    // thing that was pointed at.
-    let mut within = Vec::new();
-    let mut climbing = node;
-    for _ in 0..3 {
-        let Some(seat) = on(bus, &climbing, "org.a11y.atspi.Accessible").await else {
-            break;
-        };
-        let Ok(parent) = seat.get_property::<Node>("Parent").await else {
-            break;
-        };
-        if parent.1.as_str() == NOWHERE || parent == climbing {
-            break;
-        }
-        let said = name_of(bus, &parent).await;
-        let role = role_of(bus, &parent).await;
-        within.push(if said.is_empty() {
-            role
-        } else {
-            format!("{role} “{said}”")
-        });
-        climbing = parent;
-    }
-
-    Seen {
-        role,
-        name,
-        at,
-        within,
-    }
-}
-
-#[cfg(target_os = "linux")]
-async fn role_of(bus: &Connection, node: &Node) -> String {
-    match on(bus, node, "org.a11y.atspi.Accessible").await {
-        Some(seat) => seat
-            .call::<_, _, String>("GetRoleName", &())
-            .await
-            .unwrap_or_else(|_| "unknown".to_string()),
-        None => "unknown".to_string(),
-    }
-}
-
-#[cfg(target_os = "linux")]
-async fn name_of(bus: &Connection, node: &Node) -> String {
-    match on(bus, node, "org.a11y.atspi.Accessible").await {
-        Some(seat) => seat
-            .get_property::<String>("Name")
-            .await
-            .unwrap_or_default()
-            .trim()
-            .to_string(),
-        None => String::new(),
-    }
-}
-
-#[cfg(target_os = "linux")]
-async fn extents_of(bus: &Connection, node: &Node) -> Option<(i32, i32, i32, i32)> {
-    on(bus, node, "org.a11y.atspi.Component")
-        .await?
-        .call("GetExtents", &(ON_SCREEN,))
-        .await
-        .ok()
 }

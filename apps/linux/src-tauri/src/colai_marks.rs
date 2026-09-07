@@ -152,13 +152,11 @@ pub(crate) fn points_within(mark: &Mark, crop: Crop, width: i32, height: i32) ->
 /// The screenshot tools mark nothing: the crop is the whole statement, and an outline
 /// around the edge of a picture is noise.
 pub(crate) fn drawn_as(mark: &Mark) -> Option<&'static str> {
-    // Nothing is drawn on a picture whose whole meaning is another picture beside it.
-    // A box on the "before" of a watched pair is the one difference an agent could be
-    // certain of, and it would be ours — so those go bare, and the crop is the statement.
-    if matches!(
-        mark.tool.as_str(),
-        "screenshot" | "design" | "record" | "watch"
-    ) {
+    // Nothing is drawn on a picture whose whole meaning is the picture. A screenshot and
+    // a design mark are the crop itself, and an outline round the edge of one is noise;
+    // a recording's frames are about what changed between them, and a mark on every one
+    // is the only thing that did not.
+    if matches!(mark.tool.as_str(), "screenshot" | "design" | "record") {
         return None;
     }
     if mark.tool == "measure" {
@@ -349,7 +347,7 @@ mod tests {
         // them is the only thing in the picture that does not move.
         let mut recorded = mark("record", boxed(0.1, 0.1, 0.3, 0.3), vec![]);
         assert_eq!(drawn_as(&recorded), None);
-        recorded.tool = "watch".to_string();
+        recorded.tool = "screenshot".to_string();
         assert_eq!(drawn_as(&recorded), None);
     }
 

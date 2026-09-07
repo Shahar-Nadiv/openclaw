@@ -685,42 +685,6 @@ describe("the project in front of you", () => {
   });
 });
 
-describe("what the desktop says is there", () => {
-  const seen = {
-    role: "push button",
-    name: "Send",
-    at: [412, 88, 96, 32],
-    within: ["panel “Composer”", "frame “OpenClaw”"],
-  };
-
-  test("an element reads as a sentence, role first", () => {
-    // The role is the part a picture cannot be read for. "A red button near the top"
-    // is a guess about something the desktop already knows exactly.
-    expect(detailOf({ tool: "inspect", seen })).toBe(
-      "push button “Send”, 96×32 at 412,88, in panel “Composer” in frame “OpenClaw”",
-    );
-  });
-
-  test("an element with no name is still its role and its place", () => {
-    expect(
-      detailOf({ tool: "inspect", seen: { role: "filler", name: "", at: [0, 0, 10, 4] } }),
-    ).toBe("filler, 10×4 at 0,0");
-  });
-
-  test("a window that exposes nothing says so, rather than saying nothing", () => {
-    // An agent told nothing about structure knows it is reading pixels. An agent told
-    // something vague does not, and will believe it.
-    expect(detailOf({ tool: "inspect", seen: null })).toBe("this window exposes no structure");
-    expect(detailOf({ tool: "inspect" })).toBe("this window exposes no structure");
-  });
-
-  test("an element with no size is a point, not a zero-sized box", () => {
-    expect(
-      detailOf({ tool: "inspect", seen: { role: "caret", name: "", at: [700, 400, 0, 0] } }),
-    ).toBe("caret, at 700,400");
-  });
-});
-
 describe("files somebody brought in", () => {
   const file = (name: string, bytes: number, folder = false) => ({
     path: `/home/someone/${name}`,
@@ -855,68 +819,6 @@ describe("what a recording shows while it runs", () => {
     // A capture that runs past its length — the frames are taken against a live
     // desktop — shows nought rather than counting into negative numbers.
     expect(secondsLeft(10_000, 12_500)).toBe(0);
-  });
-});
-
-describe("watching a region", () => {
-  test("a watch reads as a mark that only marks, like everything else here", () => {
-    // It runs on its own for twenty minutes, which is exactly why it must not be the
-    // one tool that quietly gained the right to change something.
-    expect(TOOLS.watch!.writes).toBe(false);
-    expect(gateFor("watch", { app: "Terminal", connector: null }).blocked).toBe(false);
-  });
-
-  test("a watch is dragged out as a region, because it has to have an area to look at", () => {
-    expect(DRAWS.watch).toBe("box");
-  });
-
-  test("the pair says what happened to it, because nobody was there when it did", () => {
-    // Two pictures of the same region with no account of why they arrived is a puzzle.
-    // The line is what makes them a before and an after.
-    expect(detailOf({ tool: "watch", frames: 2 })).toContain("changed");
-    expect(detailOf({ tool: "watch", frames: 2 })).toContain("before");
-  });
-
-  test("a watch still waiting has nothing to say about itself", () => {
-    // One picture is a region somebody marked, not a change. Describing it as one
-    // before anything has happened would be the toolbar reporting its own hopes.
-    expect(detailOf({ tool: "watch", frames: 1 })).toBeNull();
-  });
-
-  test("the message names both pictures in order", () => {
-    const said = summaryFor([{ tool: "watch", frames: 2 }], "ask", "", {
-      app: "Terminal",
-      connector: null,
-    });
-    expect(said).toContain("1. Watch (mark-1-1.png … mark-1-2.png)");
-  });
-
-  test("neither picture in the pair wears a mark", () => {
-    // Whatever is drawn on the "before" and not on the "after" is the one difference an
-    // agent can be certain of, and it would be ours. The crop is the statement, the way
-    // it is for a before-and-after. This is the page's half of a rule whose other half
-    // is `drawn_as` in colai_capture.rs, which leaves both bare.
-    const list = /fn drawn_as[\s\S]*?matches!\([\s\S]*?mark\.tool\.as_str\(\),([\s\S]*?)\)/.exec(
-      marksSource,
-    );
-    assert.ok(list, "the tools drawn_as leaves bare");
-    expect(list[1]).toContain('"watch"');
-    // And a design mark, which is a picture somebody is going to build from. A red box
-    // drawn across it is a red box in the wireframe.
-    expect(list[1]).toContain('"design"');
-    expect(list[1]).not.toContain('"wireframe"');
-  });
-
-  test("the marker clears the pixels the pair is taken from", () => {
-    // The same rule as a recording's frame, and the reason is sharper here: a watch
-    // marker sits on screen for twenty minutes, so a marker inside the crop would be in
-    // the "after" and not in the "before", and the only change an agent could be sure
-    // of would be ours.
-    const screen = { width: 1920, height: 1080 };
-    const box = { x: 0.4, y: 0.4, w: 0.2, h: 0.2 };
-    const frame = recordFrame(box, screen);
-    expect((box.x - frame.x) * screen.width).toBeGreaterThan(12);
-    expect((box.y - frame.y) * screen.height).toBeGreaterThan(12);
   });
 });
 
@@ -1928,7 +1830,7 @@ describe("marking several things before saying anything", () => {
       const accumulates = KEEPS_MARKING.includes(tool);
       // Every one of these answers one question in one go. Nobody makes three colour
       // readings before saying anything about them.
-      const answers = ["measure", "colour", "record", "watch", "inspect", "screenshot", "design"];
+      const answers = ["measure", "colour", "record", "screenshot", "design"];
       if (answers.includes(tool)) {
         expect(accumulates, tool).toBe(false);
       }

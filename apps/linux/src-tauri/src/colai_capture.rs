@@ -142,21 +142,6 @@ impl MarkShots {
             .collect())
     }
 
-    /// Add a frame to a mark already photographed, keeping the run in order.
-    ///
-    /// What "before and after" needs: the same region, twice, some work in between.
-    /// Kept as one mark rather than two because the pair is the point — two separate
-    /// marks would be two pictures nobody had said were of the same thing.
-    pub(crate) fn add_frame(&self, id: &str, png: Vec<u8>) -> Result<usize, String> {
-        let mut held = self.held()?;
-        let shot = held
-            .iter_mut()
-            .find(|shot| shot.id == id)
-            .ok_or_else(|| "That mark's first picture is no longer here.".to_string())?;
-        shot.frames.push(png);
-        Ok(shot.frames.len())
-    }
-
     pub(crate) fn forget(&self, ids: &[String]) -> Result<(), String> {
         self.held()?.retain(|shot| !ids.contains(&shot.id));
         Ok(())
@@ -199,9 +184,6 @@ pub(crate) async fn colai_capture_mark(
     app: AppHandle,
     mark: Mark,
     accent: Option<String>,
-    // `again` adds to what this mark already has rather than replacing it: the second
-    // half of a before-and-after.
-    again: Option<bool>,
     // How long a recording should cover. Ignored by every other tool.
     seconds: Option<f64>,
 ) -> Result<Taken, String> {
@@ -276,20 +258,13 @@ pub(crate) async fn colai_capture_mark(
         .ok_or_else(|| "Nothing was photographed.".to_string())?;
     let thumb = thumbnail(first)?;
     let shots = app.state::<MarkShots>();
-    let held = if again.unwrap_or(false) {
-        // The second half of a before-and-after. The thumbnail stays the first frame:
-        // a pair is best recognised by what it started as.
-        shots.add_frame(&mark.id, frames.remove(0))?
-    } else {
-        let count = frames.len();
-        shots.keep(Shot {
-            id: mark.id.clone(),
-            frames,
-            width: sent.0,
-            height: sent.1,
-        })?;
-        count
-    };
+    let held = frames.len();
+    shots.keep(Shot {
+        id: mark.id.clone(),
+        frames,
+        width: sent.0,
+        height: sent.1,
+    })?;
     Ok(Taken {
         id: mark.id,
         thumb,
@@ -508,65 +483,6 @@ fn encode(pixbuf: &gdk::gdk_pixbuf::Pixbuf) -> Result<Vec<u8>, String> {
     pixbuf
         .save_to_bufferv("png", &[])
         .map_err(|error| format!("Could not encode the picture: {error}"))
-}
-
-/// How coarse a look is enough to tell whether a region changed.
-///
-/// A watch is not looking for a pixel, it is looking for something happening: a build
-/// going red, a panel appearing, a number ticking over. Reading the whole crop every
-/// few seconds would spend a screenshot's worth of work on a yes-or-no question, and
-/// worse, would answer yes to a text cursor blinking. At this size a blinking cursor is
-/// a fraction of one cell and a panel opening is half the picture.
-#[cfg(target_os = "linux")]
-const GLANCE_EDGE: i32 = 24;
-
-/// A coarse reading of what a region looks like right now.
-///
-/// Not a hash. Two hashes are equal or they are not, and a live desktop is never equal
-/// to itself twice — antialiasing, a cursor, a clock. This keeps the pixels so two
-/// readings can be compared by *how much* they differ, which is the question being
-/// asked.
-///
-/// GDK belongs to the main thread; the caller is responsible for being on it.
-#[cfg(target_os = "linux")]
-pub(crate) fn glance_at(at: (i32, i32, i32, i32)) -> Result<Vec<u8>, String> {
-    use gdk::prelude::*;
-
-    let (x, y, width, height) = at;
-    let root = gdk::Screen::default()
-        .and_then(|screen| screen.root_window())
-        .ok_or_else(|| "There is no display to look at.".to_string())?;
-    let taken = root
-        .pixbuf(x, y, width.max(1), height.max(1))
-        .ok_or_else(|| "The display would not give up that region.".to_string())?;
-    let small = taken
-        .scale_simple(
-            GLANCE_EDGE,
-            GLANCE_EDGE,
-            gdk::gdk_pixbuf::InterpType::Bilinear,
-        )
-        .ok_or_else(|| "Could not reduce that region to a glance.".to_string())?;
-    Ok(small.read_pixel_bytes().to_vec())
-}
-
-/// How far apart two glances are, as a share of the whole range they could differ by.
-///
-/// Mean rather than maximum, deliberately. A maximum answers "did any one cell change",
-/// which every desktop answers yes to within seconds; a mean answers "is this a
-/// different picture", which is the question a watch is actually asking.
-pub(crate) fn moved_by(before: &[u8], after: &[u8]) -> f64 {
-    if before.is_empty() || before.len() != after.len() {
-        // Different shapes are not comparable, and calling that "no change" would leave
-        // a watch running out its whole length over a region it can no longer read and
-        // then reporting that nothing happened.
-        return 1.0;
-    }
-    let total: u64 = before
-        .iter()
-        .zip(after)
-        .map(|(was, is)| u64::from(was.abs_diff(*is)))
-        .sum();
-    total as f64 / (before.len() as f64 * 255.0)
 }
 
 /// How wide a contact sheet is, and how many frames run across it.

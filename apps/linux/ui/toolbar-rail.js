@@ -41,14 +41,10 @@ const GLYPHS = {
   measure: '<path d="M4 6v12M20 6v12M4 12h16"/><path d="M8.5 9l-3 3 3 3M15.5 9l3 3-3 3"/>',
   record:
     '<rect x="2.5" y="5" width="14" height="14" rx="2.5"/><path d="M16.5 10.2l5-2.7v9l-5-2.7z"/>',
-  inspect:
-    '<path d="M3 3.5h7M3 3.5v7M21 3.5h-7M21 3.5v7M3 20.5h7M3 20.5v-7M21 20.5h-7M21 20.5v-7"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
   colour:
     '<path d="M12 3.5s6 6.4 6 10.1a6 6 0 0 1-12 0C6 9.9 12 3.5 12 3.5z"/><path d="M8.6 14.4a3.4 3.4 0 0 0 3.4 3.2"/>',
   more:
     '<circle cx="6" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="18" r="1.7" fill="currentColor" stroke="none"/>',
-  watch:
-    '<path d="M2 12s3.8-6.5 10-6.5S22 12 22 12s-3.8 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/>',
 };
 
 function icon(name, size) {
@@ -117,9 +113,6 @@ function key(id, title, glyph, onClick, mark) {
   button.setAttribute("aria-label", title);
   button.innerHTML =
     icon(glyph) +
-    // Only the keys that count something get somewhere to put it; the rest would carry
-    // an empty span for the life of the rail.
-    (id === "watch" ? '<span class="watch-many"></span>' : "") +
     (mark === MENU ? '<span class="caret">▾</span>' : "");
   button.addEventListener("click", onClick);
   buttons[id] = button;
@@ -157,8 +150,6 @@ function buildRail() {
     key("measure", "Measure · M", "measure", () => use("measure")),
     key("colour", "Colour · C", "colour", () => use("colour")),
     key("record", "Record · R", "record", () => flyout("record"), MENU),
-    key("watch", "Watch for a change · W", "watch", () => use("watch")),
-    key("inspect", "Inspect what is there · I", "inspect", () => use("inspect")),
   );
   dividers[1].after(exact);
 
@@ -244,7 +235,7 @@ function length(into, seconds) {
 }
 
 /** The tools that fold away together, in the order they sit on the rail. */
-const EXACT = ["measure", "colour", "record", "watch", "inspect"];
+const EXACT = ["measure", "colour", "record"];
 
 /** Fold them shut, or open them out, and remember which. */
 function toggleTucked() {

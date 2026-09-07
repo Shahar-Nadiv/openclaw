@@ -27,7 +27,6 @@ const el = {
   trouble: document.getElementById("trouble"),
   marks: document.getElementById("marks"),
   pins: document.getElementById("pins"),
-  watching: document.getElementById("watching"),
   recording: document.getElementById("recording"),
   recordingArea: document.getElementById("recording-area"),
   recordingLeft: document.getElementById("recording-left"),
@@ -110,9 +109,6 @@ const state = {
   // this toolbar is, and a first look at it should be the whole thing. Remembered with
   // the dock, because it is the same kind of fact: how somebody wants this to sit.
   tucked: false,
-  // The regions being watched. Each one is a mark that has had its "before" taken and
-  // is waiting for the world to move.
-  watching: [],
   // Whether the receiver was chosen rather than worked out. A guess may fill an empty
   // seat; it may never take one somebody has sat in.
   picked: false,
@@ -177,19 +173,6 @@ function render() {
       // One mark that turns says "this opens and closes". Two different marks would say
       // "these are two different buttons".
       button.dataset.turn = String(!state.tucked);
-    } else if (id === "watch") {
-      // Pressed means "this is the tool in your hand", the same as every other key —
-      // a running watch is not a held tool, and lighting it the same way made the rail
-      // look like two tools were selected at once. What is running gets a count, the
-      // way the send key counts what is waiting to go.
-      button.setAttribute("aria-pressed", String(state.tool === "watch"));
-      button.querySelector(".watch-many").textContent = state.watching.length
-        ? String(state.watching.length)
-        : "";
-      button.dataset.live = String(state.watching.length > 0);
-      button.title = state.watching.length
-        ? `${counted(state.watching.length, "region")} being watched · W`
-        : "Watch for a change · W";
     } else if (id === "draw") {
       button.setAttribute("aria-pressed", String(state.tool === "draw" || state.open === "draw"));
       button.title = `Draw · ${(PENS[state.pen] || PENS[PEN_FIRST]).label} · D`;
@@ -291,7 +274,6 @@ function render() {
   }
 
   drawMarks();
-  drawWatching();
   drawAnswers();
   drawPopup();
   drawTrouble();
@@ -328,9 +310,6 @@ function shape() {
       ? [{ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }]
       : [boxAround(el.wrap)];
   if (state.popup !== null && !el.popup.hidden) rects.push(boxAround(el.popup));
-  // One at a time, not as a union: a watch on each screen would otherwise claim the
-  // whole desk between them, which is the mistake the answer pins below already avoid.
-  for (const area of el.watching.children) rects.push(boxAround(area.firstChild));
   for (const answer of el.answers.children) rects.push(boxAround(answer));
   const key = JSON.stringify(rects);
   if (key === shaped) return;
@@ -440,13 +419,6 @@ function sayFailed(message) {
  * rail, or the composer when it is open. Everywhere else the drag goes through to the
  * desktop, which is right — the transparent part of this window is not a window.
  */
-/*
- * A watched region moved, or stopped being watched without moving.
- *
- * Two events rather than one with a flag, because they are two different things to a
- * person: one produces a message and the other produces a marker quietly disappearing,
- * and the second has to say why or it looks like the toolbar forgot.
- */
 function listenForDrops() {
   listen("tauri://drag-enter", (event) => {
     state.catching = onTheToolbar(event);
@@ -535,7 +507,6 @@ async function start() {
   // page decides when it comes alive.
   listenForMarking();
   listenForKeys();
-  listenForWatches();
   listenForDrops();
   listenForDrag();
   recall();

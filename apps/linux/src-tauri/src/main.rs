@@ -7,7 +7,6 @@ mod colai_inspect;
 mod colai_marks;
 mod colai_receivers;
 mod colai_send;
-mod colai_watch;
 mod discovery;
 mod gateway;
 mod gateway_device_identity;
@@ -1459,10 +1458,6 @@ fn main() {
         colai_send::colai_automate,
         colai_files::colai_describe_files,
         colai_files::colai_pick_files,
-        colai_watch::colai_watch_start,
-        colai_watch::colai_watch_stop,
-        #[cfg(target_os = "linux")]
-        colai_inspect::colai_inspect,
         #[cfg(target_os = "linux")]
         colai_inspect::colai_showing,
         colai::colai_summon,
@@ -1472,8 +1467,7 @@ fn main() {
 
     let builder = builder
         .manage(colai::ShapeState::default())
-        .manage(colai_capture::MarkShots::default())
-        .manage(colai_watch::Watches::default());
+        .manage(colai_capture::MarkShots::default());
 
     let app = builder
         .on_window_event(|window, event| {

@@ -160,17 +160,8 @@ function drawPopup() {
   now.type = "button";
   now.className = "popup-do popup-go";
   now.disabled = state.sending;
-  // A watch is not sent now — that is the whole point of it. The note above travels
-  // with the pair when it fires, so this is where somebody says what they are waiting
-  // for and then agrees to be told about it.
-  if (mark.tool === "watch") {
-    now.textContent = "Watch this";
-    now.title = `Tell ${state.receiving.name || "whoever receives"} when this changes`;
-    now.addEventListener("click", () => void startWatching(mark));
-  } else {
-    now.textContent = state.sending ? "Sending…" : needsAgreeing() ? "Send and adopt" : "Send now";
-    now.addEventListener("click", () => void sendMarks([mark.id]));
-  }
+  now.textContent = state.sending ? "Sending…" : needsAgreeing() ? "Send and adopt" : "Send now";
+  now.addEventListener("click", () => void sendMarks([mark.id]));
   foot.append(to, keep, now);
   rows.push(foot);
 

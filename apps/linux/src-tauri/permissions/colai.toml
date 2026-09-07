@@ -31,12 +31,9 @@ commands.allow = [
   "colai_rewind",
   "colai_start_here",
   "colai_automate",
-  "colai_inspect",
   "colai_showing",
   "colai_describe_files",
   "colai_pick_files",
-  "colai_watch_start",
-  "colai_watch_stop",
   "colai_release",
   "colai_open_settings",
 ]

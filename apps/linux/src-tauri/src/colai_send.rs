@@ -178,9 +178,8 @@ fn attach(
         // out in a grid — and the grid reads better, because the sequence is visible
         // instead of having to be reassembled from eight unrelated pictures.
         //
-        // Which marks want it is the page's call, not this function's — a watched pair
-        // is two frames whose whole point is the difference between them, and shrinking
-        // them into cells would spend the thing the watch was set for.
+        // Which marks want it is the page's call, not this function's: what deserves a
+        // sheet is a question about what somebody meant, and this end only knows bytes.
         if frames.len() > 1 && sheets.contains(&id) {
             #[cfg(target_os = "linux")]
             if let Ok(sheet) = crate::colai_capture::contact_sheet(&frames, accent) {
