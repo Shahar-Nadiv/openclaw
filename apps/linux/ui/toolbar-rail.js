@@ -37,6 +37,7 @@ const GLYPHS = {
   screenshot:
     '<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/>',
   send: '<path d="M21 3L10.5 13.5"/><path d="M21 3l-6.8 18-3.7-7.5L3 9.8z"/>',
+  schedule: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5.3l3.4 2"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/>',
   measure: '<path d="M4 6v12M20 6v12M4 12h16"/><path d="M8.5 9l-3 3 3 3M15.5 9l3 3-3 3"/>',
   record:
@@ -174,15 +175,16 @@ function buildRail() {
   send.innerHTML =
     icon("send") + '<span class="send-many"></span><span class="caret">▾</span>';
   send.addEventListener("click", () => flyout("send"));
-  // Sending is what this key does; scheduling the same thing is what it is about. A
-  // right click, the same as the record key's length — "more about this key" rather
-  // than another key.
+  // Sending is what this key does; scheduling the same thing is what it is also for. A
+  // right click, the same as every other key with more behind it — "more about this
+  // key" rather than another key.
+  //
+  // It asks which rather than picking one. Right-clicking used to drop straight into
+  // the schedule, so the second thing this key can do was the only thing the gesture
+  // reached, and sending — the thing it is named after — was not on the menu it opened.
   send.addEventListener("contextmenu", (event) => {
     event.preventDefault();
-    // Fresh every time. An automation is about one piece of work, and a half-filled
-    // schedule left over from the last one is a job somebody creates by accident.
-    if (state.open !== "automate") state.cron = { ...AUTOMATION_FIRST };
-    flyout("automate");
+    flyout("how");
   });
   buttons.send = send;
 
@@ -215,8 +217,37 @@ function buildRail() {
   for (const [id, kind] of Object.entries(DESIGNS)) {
     designRow(el.flyDesign, id, kind);
   }
+  howRow(
+    "send",
+    "Send now",
+    "hand it to the agent straight away",
+    () => flyout("send"),
+  );
+  howRow("schedule", "Create an automation…", "the same thing, on a schedule", () => {
+    // Fresh every time. An automation is about one piece of work, and a half-filled
+    // schedule left over from the last one is a job somebody creates by accident.
+    state.cron = { ...AUTOMATION_FIRST };
+    flyout("automate");
+  });
   for (const seconds of RECORD_LENGTHS) length(el.flyRecord, seconds);
   for (const [id, pen] of Object.entries(PENS)) penRow(el.flyDraw, id, pen);
+}
+
+/**
+ * One of the two things the send key can do with what is marked.
+ *
+ * Stacked, because the difference between them is not in their names — both send this
+ * work to this agent — but in when it happens, and that is what the second line says.
+ */
+function howRow(glyph, label, under, chose) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "row how-row";
+  button.innerHTML =
+    icon(glyph, 14) +
+    `<span class="how-words"><span>${label}</span><span class="row-under">${under}</span></span>`;
+  button.addEventListener("click", chose);
+  el.flyHow.append(button);
 }
 
 /** One of the lengths a recording can be, on the menu the record key opens. */

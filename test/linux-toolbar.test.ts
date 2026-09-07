@@ -1314,22 +1314,43 @@ describe("nothing is reachable only by right click", () => {
     .map((file) => readFileSync(new URL(`../apps/linux/ui/${file}`, import.meta.url), "utf8"))
     .join("\n");
 
+  const RIGHT_CLICK = /addEventListener\("contextmenu"[\s\S]{0,400}?\}\);/g;
+  /*
+   * A menu that only *offers* things somebody can already reach hides nothing — it
+   * saves a step, and the rule above is about capability rather than about every list
+   * on the way to one. `how` is the send key's chooser: send this now, or put it on a
+   * schedule. It is exempt from the rule above and answers to the second test instead.
+   */
+  const ACCELERATORS = new Set(["how"]);
+  // Where those choices are built. Cut out of `shown` below, or an accelerator would
+  // vouch for its own destinations and the second test would prove nothing.
+  const offers = /howRow\([\s\S]{0,400}?\n {2}\}?\);/g;
+
+  const opens = (source: string) =>
+    [...source.matchAll(/flyout\("(\w+)"\)/g)].map((found) => found[1]!);
+  const hidden = new Set([...page.matchAll(RIGHT_CLICK)].flatMap((block) => opens(block[0])));
+  const offered = [...page.matchAll(offers)].flatMap((block) => opens(block[0]));
+  const shown = new Set(opens(page.replaceAll(RIGHT_CLICK, "").replaceAll(offers, "")));
+
   test("every menu a right click opens is opened by a visible control too", () => {
-    const hidden = new Set(
-      [...page.matchAll(/addEventListener\("contextmenu"[\s\S]{0,400}?\}\);/g)].flatMap((block) =>
-        [...block[0].matchAll(/flyout\("(\w+)"\)/g)].map((found) => found[1]!),
-      ),
-    );
-    const shown = new Set(
-      [
-        ...page
-          .replaceAll(/addEventListener\("contextmenu"[\s\S]{0,400}?\}\);/g, "")
-          .matchAll(/flyout\("(\w+)"\)/g),
-      ].map((found) => found[1]!),
-    );
     expect(hidden.size).toBeGreaterThan(0);
     for (const menu of hidden) {
+      if (ACCELERATORS.has(menu)) {
+        continue;
+      }
       expect(shown.has(menu), `${menu} is only reachable by right click`).toBe(true);
+    }
+  });
+
+  test("an accelerator offers nothing that is not reachable without it", () => {
+    // The send key's right click chooses between sending now and scheduling. Both
+    // panels open from a plain press elsewhere — the composer from the key itself, the
+    // schedule from a visible row inside the composer — so nobody who never right
+    // clicks loses anything. The moment that stops being true this is a hiding place,
+    // and the exemption above has to go rather than this assertion.
+    expect(offered.length).toBeGreaterThan(1);
+    for (const menu of offered) {
+      expect(shown.has(menu), `${menu} is offered but not otherwise reachable`).toBe(true);
     }
   });
 
@@ -1818,6 +1839,29 @@ describe("taking a conversation back", () => {
     expect(agoSaid(now - 3_600_000, now)).toBe("1 hour ago");
     expect(agoSaid(now - 100_000, now)).toBe("2 minutes ago");
     expect(agoSaid(now - 86_400_000, now)).toBe("1 day ago");
+  });
+});
+
+describe("what the send key can do with what is marked", () => {
+  const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+
+  test("a right click asks which, rather than choosing one", () => {
+    // It used to drop straight into the schedule, so the second thing this key does was
+    // the only thing the gesture reached — and sending, the thing the key is named
+    // after, was not on the menu it opened.
+    const handler =
+      rail.match(/send\.addEventListener\("contextmenu"[\s\S]*?\n {2}\}\);/)?.[0] ?? "";
+    expect(handler).toContain('flyout("how")');
+    expect(handler).not.toContain('flyout("automate")');
+  });
+
+  test("both of the things it can do are on that menu", () => {
+    const rows = [...rail.matchAll(/howRow\(\s*"(\w+)",\s*\n?\s*"([^"]+)"/g)].map(
+      (found) => found[2]!,
+    );
+    expect(rows.length).toBe(2);
+    expect(rows.join(" | ")).toMatch(/Send now/);
+    expect(rows.join(" | ")).toMatch(/automation/i);
   });
 });
 

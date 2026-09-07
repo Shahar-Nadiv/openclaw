@@ -21,6 +21,7 @@ const el = {
   flyDraw: document.getElementById("fly-draw"),
   flyRow: document.getElementById("fly-row"),
   flyPoints: document.getElementById("fly-points"),
+  flyHow: document.getElementById("fly-how"),
   flyAutomate: document.getElementById("fly-automate"),
   flyAgents: document.getElementById("fly-agents"),
   agentRows: document.getElementById("agent-rows"),
@@ -227,6 +228,7 @@ function render() {
 
   el.flyShape.hidden = state.open !== "shape";
   el.flyDesign.hidden = state.open !== "design";
+  el.flyHow.hidden = state.open !== "how";
   el.flyAutomate.hidden = state.open !== "automate";
   // Folded, the six close up where they stand rather than vanishing — the stylesheet
   // animates it and `data-folded` is what it animates between. Not `hidden`: a key that
@@ -266,6 +268,7 @@ function render() {
     [el.flyDraw, buttons.draw],
     [el.flyRow, buttons.agents],
     [el.flyPoints, buttons.agents],
+    [el.flyHow, buttons.send],
     [el.flyAutomate, buttons.send],
     [el.flySend, buttons.send],
     [el.flyAgents, buttons.agents],
