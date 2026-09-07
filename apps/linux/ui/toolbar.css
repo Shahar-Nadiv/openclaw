@@ -980,15 +980,15 @@ body {
  * being chosen is its name; a component is recognised by its picture, so this needs room
  * for pictures — and room is what makes it a window rather than a flyout.
  *
- * Centred on the screen, not hung off a key. It belongs to the mark that opened it, and
- * the mark can be anywhere.
+ * Centred on the screen the mark is on — placed by `placeLibrary`, not by the stylesheet.
+ * The overlay spans every display, so centring on the viewport means centring on the
+ * union of all of them: with two monitors side by side that is the bezel, and the window
+ * arrives split down the middle with its close button on the screen you are not looking
+ * at. The same trap the answer panels already avoid.
  */
 .library {
   position: fixed;
   z-index: 80;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
   display: flex;
   flex-direction: column;
   gap: 8px;

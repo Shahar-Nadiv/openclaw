@@ -175,6 +175,10 @@ type ToolbarHelpers = {
     source?: string;
     fromLibrary?: Chosen | null;
   }) => Chosen | null;
+  centredIn: (
+    room: { left: number; top: number; right: number; bottom: number },
+    box: { width: number; height: number },
+  ) => { x: number; y: number };
   unchosen: (
     marks: { tool: string; design?: string; source?: string; fromLibrary?: Chosen | null }[],
   ) => string | null;
@@ -231,7 +235,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn };`,
   context,
 );
 const {
@@ -303,6 +307,7 @@ const {
   sourceOf,
   broughtIn,
   unchosen,
+  centredIn,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -1899,6 +1904,82 @@ describe("taking a conversation back", () => {
     expect(agoSaid(now - 3_600_000, now)).toBe("1 hour ago");
     expect(agoSaid(now - 100_000, now)).toBe("2 minutes ago");
     expect(agoSaid(now - 86_400_000, now)).toBe("1 day ago");
+  });
+});
+
+describe("a window lands on a screen, not across two", () => {
+  /*
+   * The desktop this was found on: two 1920x1080 monitors side by side, the right one
+   * carrying the dock. The overlay spans both, so a window centred on the *viewport* is
+   * centred on the union — which is the bezel. The library window opened there, split
+   * down the middle, with its close button on the screen nobody was looking at, and the
+   * only other way out was a key nobody had been told about.
+   */
+  const NOTHING = { left: 0, top: 0, right: 0, bottom: 0 };
+  const LEFT = { x: 0, y: 0, width: 1920, height: 1080, reserved: NOTHING };
+  const RIGHT = {
+    x: 1920,
+    y: 0,
+    width: 1920,
+    height: 1080,
+    reserved: { left: 66, top: 32, right: 0, bottom: 32 },
+  };
+  const SCREENS = [LEFT, RIGHT];
+  const WINDOW = { width: 560, height: 420 };
+
+  const put = (at: { x: number; y: number }) =>
+    // Never null here: the list is never empty, and screenAt falls back to the nearest.
+    centredIn(usable(screenAt(SCREENS, at)!), WINDOW);
+
+  test("it opens on the screen the mark is on", () => {
+    const onLeft = put({ x: 400, y: 300 });
+    expect(onLeft.x).toBe(680);
+    expect(onLeft.x + WINDOW.width).toBeLessThanOrEqual(1920);
+
+    const onRight = put({ x: 2800, y: 300 });
+    expect(onRight.x).toBeGreaterThanOrEqual(1920);
+    expect(onRight.x + WINDOW.width).toBeLessThanOrEqual(3840);
+  });
+
+  test("it never straddles the seam between them", () => {
+    // The assertion that would have caught this: wherever it opens, it is inside one
+    // screen. Centred on the viewport it landed at 1640-2200, which is neither.
+    for (const at of [
+      { x: 10, y: 10 },
+      { x: 960, y: 540 },
+      { x: 1919, y: 900 },
+      { x: 1921, y: 100 },
+      { x: 3830, y: 1070 },
+    ]) {
+      const opened = put(at);
+      const inside = SCREENS.some(
+        (screen) => opened.x >= screen.x && opened.x + WINDOW.width <= screen.x + screen.width,
+      );
+      expect(inside, `opened at ${opened.x} for a mark at ${at.x}`).toBe(true);
+    }
+  });
+
+  test("it stays out of what the desktop has reserved", () => {
+    // The dock on the right screen takes 66px, so its middle is not its geometric one.
+    const onRight = put({ x: 2800, y: 300 });
+    expect(onRight.x).toBeGreaterThanOrEqual(1986);
+    expect(onRight.y).toBeGreaterThanOrEqual(32);
+  });
+
+  test("a window larger than the room starts inside it rather than above it", () => {
+    const huge = centredIn(usable(LEFT), { width: 4000, height: 2000 });
+    expect(huge).toEqual({ x: 0, y: 0 });
+  });
+
+  test("a press outside the library closes it before anything can be drawn", () => {
+    // Without this the glass underneath took the press and began another mark behind the
+    // window, so pressing away from it did not dismiss it — it quietly drew.
+    const mark = readFileSync(new URL("../apps/linux/ui/toolbar-mark.js", import.meta.url), "utf8");
+    const gesture = mark.slice(mark.indexOf("function startGesture"));
+    const closes = gesture.indexOf("closeLibrary()");
+    const draws = gesture.indexOf("addMark(");
+    expect(closes).toBeGreaterThan(-1);
+    expect(closes).toBeLessThan(draws);
   });
 });
 

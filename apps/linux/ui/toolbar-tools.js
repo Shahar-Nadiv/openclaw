@@ -1137,6 +1137,25 @@ function screenAt(screens, at) {
   return screens.reduce((best, screen) => (awayFrom(screen, at) < awayFrom(best, at) ? screen : best));
 }
 
+/**
+ * A box put in the middle of the room it belongs to.
+ *
+ * The room, never the viewport. The overlay spans every display, so centring on the
+ * window means centring on the union of all of them — with two monitors side by side
+ * that is the bezel, and a panel arrives split down the middle with half of itself, and
+ * its close button, on the screen nobody is looking at. That is not hypothetical: it is
+ * what the library window did.
+ *
+ * Clamped rather than allowed to go negative, so a panel taller than the room it is
+ * given starts at the top of it instead of above it.
+ */
+function centredIn(room, box) {
+  return {
+    x: Math.round(room.left + Math.max(0, room.right - room.left - box.width) / 2),
+    y: Math.round(room.top + Math.max(0, room.bottom - room.top - box.height) / 2),
+  };
+}
+
 /** How far a point is from a screen's box, zero when it is inside it. */
 function awayFrom(screen, at) {
   const across = Math.max(screen.x - at.x, 0, at.x - (screen.x + screen.width));

@@ -186,6 +186,32 @@ function drawLibrary() {
     rows.push(grid);
   }
   el.library.replaceChildren(...rows);
+  placeLibrary();
+}
+
+/**
+ * Put the window on the screen the mark is on, in the middle of it.
+ *
+ * Measured after it is filled, because how tall it is depends on how many results came
+ * back — and a window placed from a guessed height sits off centre by however wrong the
+ * guess was.
+ */
+function placeLibrary() {
+  const open = state.library;
+  if (!open) return;
+  const mark = state.marks.find((one) => one.id === open.markId);
+  // The middle of what was marked. A mark with no region — a pin — still has a point,
+  // and a mark that has gone leaves the rail, which is at least somewhere somebody is.
+  const at =
+    mark && mark.region
+      ? {
+          x: (mark.region.box.x + mark.region.box.w / 2) * window.innerWidth,
+          y: (mark.region.box.y + mark.region.box.h / 2) * window.innerHeight,
+        }
+      : state.at || { x: 0, y: 0 };
+  const put = centredIn(usable(screenAt(state.screens, at)), el.library.getBoundingClientRect());
+  el.library.style.left = `${put.x}px`;
+  el.library.style.top = `${put.y}px`;
 }
 
 /** One thing to choose, as a picture with its name under it. */

@@ -43,6 +43,15 @@ function startGesture(event) {
   // is underneath, and swallowing it is how an overlay earns a reputation.
   if (event.button !== 0) return;
   event.preventDefault();
+  // The library is open over everything, and a press outside it means "not this one".
+  // Without this the glass underneath takes the press and starts drawing a new mark —
+  // so pressing away from the window did not close it, it quietly began another mark
+  // behind it, and the only ways out were a close button on the far screen and a key
+  // nobody had been told about.
+  if (state.library !== null) {
+    closeLibrary();
+    return;
+  }
   // A press off the popup. The catcher covers the whole desk and the popup is stacked
   // above it, so this only ever fires outside.
   //
