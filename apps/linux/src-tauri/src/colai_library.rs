@@ -1,0 +1,331 @@
+//! Components and design systems brought in from somewhere else.
+//!
+//! The design tools photograph a region and ask an agent to make something like it. This
+//! is the other direction: a thing that already exists in a catalogue, put *into* the
+//! region that was marked. The mark still says where; the library says what.
+//!
+//! Nothing here holds an account. Whatever catalogue somebody has connected is connected
+//! to their agent, and this borrows it through the Gateway's own `tools.invoke` — so the
+//! search runs as the agent, with the agent's credentials, and colai stores none of it.
+//! It also means a second catalogue is an entry in the table below rather than a second
+//! integration.
+//!
+//! What this must never do is spend somebody's money to draw a menu. Browsing is free
+//! metadata; fetching a component's source is paid and counted, and it belongs to the
+//! agent doing the work once, on the one thing that was actually chosen. The table names
+//! only the free calls for exactly that reason.
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+use crate::gateway_ws::GatewayClient;
+
+/// A catalogue the toolbar knows how to read.
+///
+/// One entry, because one was named. It is a table rather than a pair of constants
+/// because the ask was "sites like 21st.dev, etc." — the second one should be four lines
+/// of data, not a second code path.
+struct Library {
+    /// How the catalogue is named to a person.
+    label: &'static str,
+    /// The free search, and the argument names it takes.
+    search: &'static str,
+    /// What the search calls a component, and what it calls a design system.
+    component: &'static str,
+    theme: &'static str,
+}
+
+const LIBRARIES: &[Library] = &[Library {
+    label: "21st.dev",
+    search: "mcp__21st__search",
+    component: "component",
+    theme: "theme",
+}];
+
+/// One thing somebody can choose, as the window needs to draw it.
+///
+/// Everything here comes out of a free search. There is deliberately no field for the
+/// component's source: that costs a retrieval, and it is the agent's to spend.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Card {
+    pub id: String,
+    pub name: String,
+    pub blurb: String,
+    /// A picture of the thing, which is the entire reason this is a window and not a
+    /// list of names.
+    pub preview: Option<String>,
+    pub author: Option<String>,
+    pub url: Option<String>,
+    /// What to run to add it, when the catalogue says.
+    pub install: Option<String>,
+}
+
+/// What a look through the library found, including finding no library.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Found {
+    /// Which catalogue answered, for a window that should say whose results these are.
+    pub library: Option<String>,
+    pub cards: Vec<Card>,
+    /// Nothing is connected. Not an error — the answer to a question the window asks on
+    /// somebody's behalf, and the reason it can say what to do about it.
+    pub connect: bool,
+    pub trouble: Option<String>,
+}
+
+/// Look through whatever catalogue the agent has, for the kind of thing being marked.
+///
+/// `mine` asks for what somebody already collected rather than the public catalogue,
+/// which is what "import from my account" actually means: the components and themes they
+/// bookmarked, not a search they have to think of words for.
+#[tauri::command]
+pub(crate) async fn colai_library_search(
+    gateway: tauri::State<'_, GatewayClient>,
+    kind: String,
+    query: String,
+    mine: bool,
+    agent_id: Option<String>,
+    session_key: Option<String>,
+) -> Result<Found, String> {
+    for library in LIBRARIES {
+        let wanted = if kind == "system" {
+            library.theme
+        } else {
+            library.component
+        };
+        let answer = gateway
+            .invoke_tool(
+                library.search,
+                asked_for(wanted, &query, mine),
+                agent_id.clone(),
+                session_key.clone(),
+            )
+            .await?;
+        if answer.missing {
+            continue;
+        }
+        return Ok(Found {
+            library: Some(library.label.to_string()),
+            cards: cards_in(&answer.output),
+            connect: false,
+            trouble: answer.trouble,
+        });
+    }
+    Ok(Found {
+        connect: true,
+        ..Found::default()
+    })
+}
+
+/// The search, as the catalogue is asked for it.
+///
+/// A blank query with `mine` is a real request — everything you saved — but a blank query
+/// on the public catalogue is not, so it is given something to rank against rather than
+/// being sent empty.
+fn asked_for(kind: &str, query: &str, mine: bool) -> Value {
+    let words = query.trim();
+    json!({
+        "query": if words.is_empty() { "ui component" } else { words },
+        "type": kind,
+        "limit": 24,
+        "mine": mine,
+    })
+}
+
+/// Turn whatever the catalogue said into cards, or into none.
+///
+/// Written to be disappointed. A tool's reply is not a contract this repository owns, and
+/// the last thing that read an outside shape by guessing at field names produced an empty
+/// panel on a conversation full of prompts. So: find the rows wherever they are, take a
+/// row only when it has the two things a card cannot be drawn without — something to call
+/// it and something to name it by — and drop the rest without inventing anything.
+fn cards_in(output: &Value) -> Vec<Card> {
+    let Some(rows) = rows_in(output) else {
+        return Vec::new();
+    };
+    rows.iter().filter_map(card_in).collect()
+}
+
+/// Where the list is, in a reply that may be the list, may wrap it, and may have been
+/// handed back as text that happens to be JSON.
+fn rows_in(output: &Value) -> Option<Vec<Value>> {
+    if let Some(rows) = output.as_array() {
+        return Some(rows.clone());
+    }
+    // A tool result carries its useful shape beside the text a model would read.
+    for key in [
+        "structuredContent",
+        "results",
+        "items",
+        "components",
+        "data",
+    ] {
+        if let Some(found) = output.get(key) {
+            if let Some(rows) = found.as_array() {
+                return Some(rows.clone());
+            }
+            if found.is_object() {
+                if let Some(rows) = rows_in(found) {
+                    return Some(rows);
+                }
+            }
+        }
+    }
+    // Failing that, the text parts — which is where an MCP server puts everything when it
+    // has no structured shape to offer.
+    let parts = output.get("content").and_then(Value::as_array)?;
+    for part in parts {
+        let text = part.get("text").and_then(Value::as_str)?;
+        if let Ok(parsed) = serde_json::from_str::<Value>(text) {
+            if let Some(rows) = rows_in(&parsed) {
+                return Some(rows);
+            }
+        }
+    }
+    None
+}
+
+fn card_in(row: &Value) -> Option<Card> {
+    let id = ["id", "demoId", "componentId"]
+        .iter()
+        .find_map(|key| row.get(key))
+        .and_then(said_as)?;
+    let name = ["name", "title", "label"]
+        .iter()
+        .find_map(|key| row.get(key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())?;
+    Some(Card {
+        id,
+        name: name.to_string(),
+        blurb: text_in(row, &["description", "blurb", "summary"]).unwrap_or_default(),
+        preview: text_in(
+            row,
+            &["preview", "previewUrl", "image", "imageUrl", "thumbnail"],
+        ),
+        author: text_in(row, &["author", "username", "owner"]),
+        url: text_in(row, &["url", "link", "pageUrl"]),
+        install: text_in(row, &["install", "installCommand", "command"]),
+    })
+}
+
+/// An id that arrives as a number is still an id.
+fn said_as(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => (!text.trim().is_empty()).then(|| text.trim().to_string()),
+        Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
+fn text_in(row: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| row.get(key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One search result in the shape the catalogue documents: lightweight metadata, a
+    /// preview picture, and a numeric id that is a demo rather than a component.
+    fn a_result() -> Value {
+        json!({
+            "id": 4821,
+            "name": "Pricing table",
+            "description": "Three tiers with a highlighted middle",
+            "preview": "https://example.test/pricing.png",
+            "author": "someone",
+            "url": "https://21st.dev/someone/pricing-table",
+            "install": "npx shadcn@latest add pricing-table"
+        })
+    }
+
+    #[test]
+    fn a_search_result_becomes_a_card_without_its_code() {
+        let cards = cards_in(&json!([a_result()]));
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].id, "4821", "a numeric id is still an id");
+        assert_eq!(cards[0].name, "Pricing table");
+        assert_eq!(
+            cards[0].preview.as_deref(),
+            Some("https://example.test/pricing.png")
+        );
+        assert_eq!(
+            cards[0].install.as_deref(),
+            Some("npx shadcn@latest add pricing-table")
+        );
+    }
+
+    #[test]
+    fn the_rows_are_found_wherever_the_tool_put_them() {
+        for (what, output) in [
+            ("bare array", json!([a_result()])),
+            ("wrapped", json!({ "results": [a_result()] })),
+            (
+                "structured",
+                json!({ "structuredContent": { "results": [a_result()] } }),
+            ),
+            (
+                "text that happens to be json",
+                json!({ "content": [{ "type": "text", "text": "[{\"id\":4821,\"name\":\"Pricing table\"}]" }] }),
+            ),
+        ] {
+            assert_eq!(cards_in(&output).len(), 1, "{what}");
+        }
+    }
+
+    #[test]
+    fn a_row_that_cannot_be_drawn_is_dropped_rather_than_invented() {
+        // Two things a card cannot exist without: something to ask for it by, and
+        // something to call it. Anything else missing is a quieter card, not a wrong one.
+        assert!(cards_in(&json!([{ "name": "No id here" }])).is_empty());
+        assert!(cards_in(&json!([{ "id": 1 }])).is_empty());
+        assert!(cards_in(&json!([{ "id": 1, "name": "   " }])).is_empty());
+        assert!(cards_in(&json!({ "nothing": "recognisable" })).is_empty());
+        let sparse = cards_in(&json!([{ "id": "t1", "name": "Bare" }]));
+        assert_eq!(sparse.len(), 1);
+        assert_eq!(sparse[0].preview, None);
+    }
+
+    #[test]
+    fn browsing_never_names_the_call_that_costs_money() {
+        // The whole economy of this rests on it. Fetching a component's source is paid
+        // and counted, and it belongs to the agent, once, on the thing somebody chose —
+        // never to drawing a menu somebody is only looking at.
+        for library in LIBRARIES {
+            assert!(
+                !library.search.contains("get_component"),
+                "{}",
+                library.label
+            );
+        }
+    }
+
+    #[test]
+    fn a_design_system_and_a_component_ask_for_different_things() {
+        let system = asked_for(LIBRARIES[0].theme, "violet", false);
+        let component = asked_for(LIBRARIES[0].component, "pricing", false);
+        assert_eq!(system["type"], "theme");
+        assert_eq!(component["type"], "component");
+        assert_eq!(system["query"], "violet");
+    }
+
+    #[test]
+    fn everything_you_saved_is_a_real_search_with_no_words_in_it() {
+        // "Import from my account" is a request, not a query somebody has to think of
+        // words for — but the public catalogue has nothing to rank an empty string
+        // against, so it is given something.
+        let mine = asked_for("component", "  ", true);
+        assert_eq!(mine["mine"], true);
+        assert!(mine["query"]
+            .as_str()
+            .is_some_and(|words| !words.is_empty()));
+    }
+}

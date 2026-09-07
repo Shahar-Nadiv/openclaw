@@ -4,6 +4,7 @@ mod colai_capture;
 mod colai_files;
 #[cfg(target_os = "linux")]
 mod colai_inspect;
+mod colai_library;
 mod colai_marks;
 mod colai_receivers;
 mod colai_send;
@@ -1458,6 +1459,7 @@ fn main() {
         colai_send::colai_automate,
         colai_files::colai_describe_files,
         colai_receivers::colai_at_work,
+        colai_library::colai_library_search,
         colai_files::colai_pick_files,
         colai_files::colai_pick_folder,
         #[cfg(target_os = "linux")]

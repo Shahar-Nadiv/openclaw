@@ -458,6 +458,45 @@ pub(crate) fn at_work_of(sessions: &[GatewaySessionSummary], now: i64) -> AtWork
     counted
 }
 
+/// What a tool said, and whether it was there to say anything.
+///
+/// `missing` is the useful half. A tool the agent does not have is not a failure to
+/// report — it is the answer to "is a library connected", and the surface that asked
+/// says something helpful about it rather than showing an error.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct ToolAnswer {
+    pub output: Value,
+    pub missing: bool,
+    pub trouble: Option<String>,
+}
+
+/// Read one `tools.invoke` reply, keeping the difference between the three outcomes.
+fn answer_in(payload: &Value) -> ToolAnswer {
+    if payload.get("ok").and_then(Value::as_bool) == Some(true) {
+        return ToolAnswer {
+            output: payload.get("output").cloned().unwrap_or(Value::Null),
+            missing: false,
+            trouble: None,
+        };
+    }
+    let error = payload.get("error");
+    let code = error
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    ToolAnswer {
+        output: Value::Null,
+        missing: code == "not_found",
+        trouble: (code != "not_found").then(|| {
+            error
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("The tool could not be called.")
+                .to_string()
+        }),
+    }
+}
+
 /// How many approvals are waiting, out of whatever shape the list arrives in.
 ///
 /// Only the count is wanted: the icon says "something is waiting on you" and the
@@ -669,6 +708,13 @@ enum GatewayRequest {
     },
     /// Everything waiting on a person right now, across every agent.
     ApprovalsPending,
+    /// One of the agent's own tools, called as the agent.
+    ToolsInvoke {
+        name: String,
+        args: Value,
+        agent_id: Option<String>,
+        session_key: Option<String>,
+    },
     ChatSend(ChatSendParams),
     RefreshCanvasSurface {
         observed_url: Option<String>,
@@ -691,6 +737,7 @@ enum GatewayResponse {
     CronAdd(CronAdded),
     History(Vec<Point>),
     Pending(u32),
+    ToolOutput(ToolAnswer),
     Rewound(Rewound),
     ChatSend(ChatSendAck),
     CanvasSurface(Option<String>),
@@ -1018,6 +1065,33 @@ impl GatewayClient {
             GatewayResponse::History(points) => Ok(points),
             _ => Err("The Gateway answered something else.".to_string()),
         }
+    }
+
+    /// Call one of the agent's own tools and hand back what it said.
+    ///
+    /// The toolbar has no credentials of its own and wants none: whatever library is
+    /// connected is connected to the agent, and this borrows it rather than duplicating
+    /// it. `tools.invoke` refusing with `not_found` is how the toolbar learns nothing is
+    /// connected, which is a fact worth having rather than an error to report.
+    pub async fn invoke_tool(
+        &self,
+        name: &str,
+        args: Value,
+        agent_id: Option<String>,
+        session_key: Option<String>,
+    ) -> Result<ToolAnswer, String> {
+        let GatewayResponse::ToolOutput(answer) = self
+            .request(GatewayRequest::ToolsInvoke {
+                name: name.to_string(),
+                args,
+                agent_id,
+                session_key,
+            })
+            .await?
+        else {
+            return Err("Gateway returned the wrong response for tools.invoke.".to_string());
+        };
+        Ok(answer)
     }
 
     /// How many things are waiting on a person, across every agent.
@@ -2147,6 +2221,25 @@ where
             )
             .await?;
             Ok(GatewayResponse::History(points_in(&payload)))
+        }
+        GatewayRequest::ToolsInvoke {
+            name,
+            args,
+            agent_id,
+            session_key,
+        } => {
+            let mut params = serde_json::json!({ "name": name, "args": args });
+            if let Some(map) = params.as_object_mut() {
+                if let Some(agent) = agent_id {
+                    map.insert("agentId".to_string(), Value::from(agent));
+                }
+                if let Some(key) = session_key {
+                    map.insert("sessionKey".to_string(), Value::from(key));
+                }
+            }
+            let payload =
+                request_on_socket(socket, "tools.invoke", params, budget, dispatch).await?;
+            Ok(GatewayResponse::ToolOutput(answer_in(&payload)))
         }
         GatewayRequest::ApprovalsPending => {
             let payload = request_on_socket(

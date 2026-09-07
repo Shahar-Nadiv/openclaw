@@ -973,6 +973,107 @@ body {
 
 /* ── the popup that opens on a mark ───────────────────────────────────────── */
 
+/*
+ * ── the library ──────────────────────────────────────────────────────────────
+ *
+ * The one window in this toolbar. Every other menu is a list of words because the thing
+ * being chosen is its name; a component is recognised by its picture, so this needs room
+ * for pictures — and room is what makes it a window rather than a flyout.
+ *
+ * Centred on the screen, not hung off a key. It belongs to the mark that opened it, and
+ * the mark can be anywhere.
+ */
+.library {
+  position: fixed;
+  z-index: 80;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(560px, 82vw);
+  max-height: 70vh;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgb(20 20 22 / 98%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  box-shadow: 0 30px 80px rgb(0 0 0 / 68%);
+}
+.library-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+.library-head .agents-title {
+  flex: 1;
+  padding: 2px 0 0;
+}
+.library-find {
+  margin: 0;
+}
+/* Three across, so a preview is wide enough to tell two cards apart at a glance. */
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  min-height: 0;
+  padding: 2px;
+}
+.library-card {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid rgb(255 255 255 / 8%);
+}
+.library-card:hover {
+  background: rgb(255 255 255 / 7%);
+  border-color: rgb(255 255 255 / 16%);
+}
+.library-card:focus-visible {
+  outline: 2px solid var(--accent, #ff6b6b);
+  outline-offset: 1px;
+}
+/* The frame keeps its height whether or not a picture arrived, so a catalogue with one
+   dead image does not leave a hole in the grid. */
+.library-shot {
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgb(255 255 255 / 5%);
+}
+.library-shot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.library-name {
+  font-size: 11.5px;
+  color: #f7f7f8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* What was chosen out of it, said on the mark that asked. */
+.chosen-row {
+  margin-top: 6px;
+}
+.chosen-none {
+  color: #8e8e93;
+}
+
+/* Where a design mark's content comes from, under the row saying what kind it is. */
+.source-row {
+  margin-top: 4px;
+}
+
 .popup {
   position: absolute;
   z-index: 70;

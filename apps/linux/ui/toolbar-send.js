@@ -139,6 +139,14 @@ async function sendMarks(ids) {
     render();
     return;
   }
+  // And the other way a mark can be unfinished: it asked for something out of a library
+  // and never said which. Refused here for the same reason, before anything is sent.
+  const waiting = unchosen(going);
+  if (waiting) {
+    state.trouble = waiting;
+    render();
+    return;
+  }
   state.sending = true;
   render();
   try {

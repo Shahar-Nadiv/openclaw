@@ -76,6 +76,8 @@ type ToolbarHelpers = {
       pen?: string;
       where?: Front | null;
       spot?: Spot | null;
+      source?: string;
+      fromLibrary?: Chosen | null;
     }[],
     mode: string,
     text: string,
@@ -107,6 +109,8 @@ type ToolbarHelpers = {
       glyph?: string;
       home: string | null;
       says: (file: string, home: string) => string;
+      /** Only the kinds that can be brought in rather than copied. */
+      brings?: (file: string, home: string, chosen: Chosen) => string;
     }
   >;
   DESIGN_FIRST: string;
@@ -163,6 +167,17 @@ type ToolbarHelpers = {
   MOODS: Record<string, { colour: string; says: (many: number) => string }>;
   moodOf: (work: Work | null) => { mood: string; many: number } | null;
   moodSaid: (work: Work | null) => string;
+  SOURCES: Record<string, { label: string; says: string }>;
+  TAKES_SOURCE: string[];
+  sourceOf: (mark: { design?: string; source?: string; fromLibrary?: Chosen | null }) => string;
+  broughtIn: (mark: {
+    design?: string;
+    source?: string;
+    fromLibrary?: Chosen | null;
+  }) => Chosen | null;
+  unchosen: (
+    marks: { tool: string; design?: string; source?: string; fromLibrary?: Chosen | null }[],
+  ) => string | null;
   numberOf: (
     marks: { tool?: string; chosen?: boolean }[] | undefined,
     mark: { tool?: string; chosen?: boolean } | null | undefined,
@@ -205,9 +220,18 @@ type Brought = { path: string; name: string; bytes: number; folder: boolean };
 /** What every agent on the Gateway adds up to, as the light reads it. */
 type Work = { running: number; waiting: number; trouble: number };
 
+/** What somebody picked out of a catalogue, as the mark carries it. */
+type Chosen = {
+  id: string;
+  name: string;
+  library: string;
+  url?: string | null;
+  install?: string | null;
+};
+
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen };`,
   context,
 );
 const {
@@ -274,6 +298,11 @@ const {
   MOODS,
   moodOf,
   moodSaid,
+  SOURCES,
+  TAKES_SOURCE,
+  sourceOf,
+  broughtIn,
+  unchosen,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -1632,6 +1661,7 @@ describe("the page and the commands it calls", () => {
     "toolbar-live.js",
     "toolbar-answers.js",
     "toolbar-compose.js",
+    "toolbar-library.js",
     "toolbar-send.js",
     "toolbar-dock.js",
   ]
@@ -1869,6 +1899,129 @@ describe("taking a conversation back", () => {
     expect(agoSaid(now - 3_600_000, now)).toBe("1 hour ago");
     expect(agoSaid(now - 100_000, now)).toBe("2 minutes ago");
     expect(agoSaid(now - 86_400_000, now)).toBe("1 day ago");
+  });
+});
+
+describe("copying what is here, or bringing something in", () => {
+  test("only the kinds with somewhere to be brought from are asked", () => {
+    // There is no library of wireframes to apply, so a wireframe is always a copy and is
+    // never asked the question. Asserted against the whole table so a kind added later
+    // is a deliberate answer rather than an omission.
+    expect([...TAKES_SOURCE].toSorted()).toEqual(["component", "system"]);
+    for (const id of Object.keys(DESIGNS)) {
+      const takes = TAKES_SOURCE.includes(id);
+      // Every kind that can be brought in needs the sentence for it, and no kind that
+      // cannot should have one lying around unused.
+      expect(typeof DESIGNS[id]!.brings === "function", id).toBe(takes);
+    }
+    expect(Object.keys(SOURCES)).toEqual(["copy", "library"]);
+  });
+
+  test("a wireframe is a copy however the mark is labelled", () => {
+    // A mark can carry a stale source after somebody switches kind, and the kind wins:
+    // it is the thing that decides whether the question was ever asked.
+    expect(sourceOf({ design: "wireframe", source: "library" })).toBe("copy");
+    expect(broughtIn({ design: "wireframe", source: "library", fromLibrary: A_CARD })).toBeNull();
+  });
+
+  test("copying is the answer until somebody says otherwise", () => {
+    expect(sourceOf({ design: "component" })).toBe("copy");
+    expect(sourceOf({ design: "component", source: "library" })).toBe("library");
+    // Marks are made by dragging, not by filling in a form, so an unset field has to
+    // already be an answer.
+    expect(sourceOf({})).toBe("copy");
+  });
+
+  const A_CARD = {
+    id: "4821",
+    name: "Pricing table",
+    library: "21st.dev",
+    url: "https://21st.dev/someone/pricing-table",
+    install: "npx shadcn@latest add pricing-table",
+  };
+
+  test("a brought-in mark asks for the thing that was chosen, by name and by id", () => {
+    const said = summaryFor(
+      [{ tool: "design", design: "component", source: "library", fromLibrary: A_CARD }],
+      "build",
+      "",
+      null,
+    );
+    expect(said).toContain("Pricing table");
+    expect(said).toContain("21st.dev");
+    expect(said).toContain("4821");
+    expect(said).toContain("npx shadcn@latest add pricing-table");
+    // And it is a different request from copying, not the same one with a note.
+    expect(said).not.toContain("Build mark-1.png as a component");
+  });
+
+  test("the picture is the address, and the agent is told to fit it rather than paste it", () => {
+    // The whole risk of this feature: a component dropped in verbatim that matches
+    // nothing around it is a component somebody has to rewrite, which is the same thing
+    // the copy sentence has always been careful about.
+    const said = summaryFor(
+      [{ tool: "design", design: "component", source: "library", fromLibrary: A_CARD }],
+      "build",
+      "",
+      null,
+    );
+    expect(said).toContain("mark-1.png");
+    expect(said.toLowerCase()).toContain("neighbours");
+  });
+
+  test("a design system brought in reconciles rather than replaces", () => {
+    const said = summaryFor(
+      [
+        {
+          tool: "design",
+          design: "system",
+          source: "library",
+          dest: "docs/Design/",
+          fromLibrary: { ...A_CARD, name: "Violet" },
+        },
+      ],
+      "build",
+      "",
+      null,
+    );
+    expect(said).toContain("Violet");
+    expect(said).toContain("docs/Design/");
+    expect(said.toLowerCase()).toContain("reconcile");
+  });
+
+  test("choosing the library and choosing nothing in it does not send", () => {
+    // An agent told to add a component nobody named would go and pick one, which is the
+    // toolbar making a design decision out of a field somebody left blank.
+    const half = { tool: "design", design: "component", source: "library" };
+    expect(unchosen([half])).toContain("nothing is chosen");
+    expect(unchosen([half, { ...half }])).toContain("2 marks");
+    // And every finished shape sends.
+    expect(unchosen([{ ...half, fromLibrary: A_CARD }])).toBeNull();
+    expect(unchosen([{ tool: "design", design: "component" }])).toBeNull();
+    expect(unchosen([{ tool: "pointAt" }])).toBeNull();
+    expect(unchosen([])).toBeNull();
+  });
+
+  test("the toolbar never names the call that costs money", () => {
+    // Browsing is free metadata; fetching a component's source is paid and counted, and
+    // it belongs to the agent doing the work once, on the one thing somebody chose.
+    // Asserted across both languages, because either could reach for it.
+    const rust = readFileSync(
+      new URL("../apps/linux/src-tauri/src/colai_library.rs", import.meta.url),
+      "utf8",
+    );
+    const library = readFileSync(
+      new URL("../apps/linux/ui/toolbar-library.js", import.meta.url),
+      "utf8",
+    );
+    for (const [what, source] of [
+      // Production only: the Rust tests name it deliberately, to assert it is not asked
+      // for, and a check that counted that would be checking itself.
+      ["rust", rust.slice(0, rust.indexOf("#[cfg(test)]")).replaceAll(/\/\/[^\n]*/g, "")],
+      ["page", library],
+    ] as const) {
+      expect(source, what).not.toContain("get_component");
+    }
   });
 });
 

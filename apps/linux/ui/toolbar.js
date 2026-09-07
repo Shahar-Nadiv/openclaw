@@ -21,6 +21,7 @@ const el = {
   flyDraw: document.getElementById("fly-draw"),
   flyRow: document.getElementById("fly-row"),
   flyPoints: document.getElementById("fly-points"),
+  library: document.getElementById("library"),
   flyHow: document.getElementById("fly-how"),
   flyAutomate: document.getElementById("fly-automate"),
   flyAgents: document.getElementById("fly-agents"),
@@ -98,6 +99,8 @@ const state = {
   // yet heard the end of. Kept as a list rather than a flag, because "one agent is
   // working" and "four are" are different things to be told.
   runs: [],
+  // The library window, while it is open, and which mark it will answer.
+  library: null,
   // What every agent on this Gateway is doing, which is not the same question as what
   // this toolbar started. Null until the Gateway has answered once: no light is the
   // honest state before anything is known, and a green one would be a claim.
@@ -291,6 +294,7 @@ function render() {
   drawMarks();
   drawAnswers();
   drawPopup();
+  drawLibrary();
   drawTrouble();
   // Left mounted while a popup is open, which is how a click off the popup is heard at
   // all — the popup is stacked above it, so its own controls still get their clicks.
@@ -325,6 +329,7 @@ function shape() {
       ? [{ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }]
       : [boxAround(el.wrap)];
   if (state.popup !== null && !el.popup.hidden) rects.push(boxAround(el.popup));
+  if (state.library !== null && !el.library.hidden) rects.push(boxAround(el.library));
   for (const answer of el.answers.children) rects.push(boxAround(answer));
   const key = JSON.stringify(rects);
   if (key === shaped) return;
@@ -377,6 +382,12 @@ function listenForKeys() {
 }
 
 function onKey(event) {
+  // The library first: it opens over the popup and closes back to it, so Escape there
+  // means "not this one" rather than "throw the mark away".
+  if (event.key === "Escape" && state.library !== null) {
+    closeLibrary();
+    return;
+  }
   if (event.key === "Escape" && state.popup !== null) {
     cancelMark(state.popup);
     return;

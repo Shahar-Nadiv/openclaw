@@ -92,6 +92,13 @@ const DESIGNS = {
       `its neighbours first and match how they are written, where they live, and how ` +
       `they are tested — a component that is correct and unlike everything around it ` +
       `is a component somebody has to rewrite.`,
+    brings: (file, home, chosen) =>
+      `Put the “${chosen.name}” component from ${chosen.library} into the place marked ` +
+      `in ${file}. Fetch its source with that library's own tool — its id is ` +
+      `${chosen.id}${chosen.url ? `, and it is at ${chosen.url}` : ""}. ` +
+      (chosen.install ? `Install it with \`${chosen.install}\`. ` : "") +
+      `Then fit it to this project rather than pasting it: read its neighbours first ` +
+      `and match how they are written, where they live, and how they are tested.`,
   },
   system: {
     label: "Design system",
@@ -108,8 +115,61 @@ const DESIGNS = {
       `stated reason for each decision, and examples rather than rules. Where this ` +
       `project already decided something, record what it decided rather than what you ` +
       `would have chosen.`,
+    brings: (file, home, chosen) =>
+      `Apply the “${chosen.name}” design system from ${chosen.library} to what is ` +
+      `marked in ${file}. Fetch its tokens with that library's own tool — its id is ` +
+      `${chosen.id}${chosen.url ? `, and it is at ${chosen.url}` : ""}. Write them to ` +
+      `${home} and reconcile them with what this project already defines: record what ` +
+      `it already decided rather than replacing it wholesale, and say what conflicts.`,
   },
 };
+
+/**
+ * Where a design mark's content comes from.
+ *
+ * Two opposite questions that happen to want the same rectangle. Copying is "there is a
+ * thing on my screen, make one like it" — the picture is the subject. Bringing something
+ * in is "there is a thing somewhere else, put it here" — the picture is the *address*,
+ * and the subject is whatever was chosen out of a catalogue.
+ *
+ * Only the kinds that have somewhere to be brought from. There is no library of
+ * wireframes to apply, so a wireframe is always a copy and is never asked.
+ */
+const SOURCES = {
+  copy: { label: "Copy what's here", says: "from the picture" },
+  library: { label: "From a library", says: "from a catalogue" },
+};
+
+/** Which design kinds can be brought in rather than copied. */
+const TAKES_SOURCE = ["component", "system"];
+
+/** Which source a mark is using, whatever it happens to be carrying. */
+function sourceOf(mark) {
+  if (!TAKES_SOURCE.includes(kindIdOf(mark))) return "copy";
+  return mark.source === "library" ? "library" : "copy";
+}
+
+/** Which kind a design mark is, by name. */
+function kindIdOf(mark) {
+  const id = (mark && mark.design) || DESIGN_FIRST;
+  return DESIGNS[id] ? id : DESIGN_FIRST;
+}
+
+/**
+ * Whether a mark is actually ready to be brought in.
+ *
+ * Choosing the library and then choosing nothing out of it is an ordinary half-finished
+ * state, and it must not send: an agent told to add a component nobody named would go
+ * and pick one, which is the toolbar making a design decision on somebody's behalf.
+ */
+/*
+ * Not `chosen`: a mark already has one of those, and it means ticked in the tray. The
+ * two would have collided silently — a library pick would have counted as a tick, and an
+ * unticked mark would have looked half-asked.
+ */
+function broughtIn(mark) {
+  return sourceOf(mark) === "library" && mark.fromLibrary ? mark.fromLibrary : null;
+}
 
 /** Which kind a design mark is when nobody has said. */
 const DESIGN_FIRST = "wireframe";
@@ -971,8 +1031,17 @@ function summaryFor(marks, mode, text, surface, files) {
     marks.forEach((mark, at) => {
       if (mark.tool !== "design") return;
       const kind = kindOf(mark);
+      const chosen = broughtIn(mark);
       said.push("");
-      said.push(kind.says(`mark-${at + 1}.png`, homeOf(mark)));
+      // The picture means two different things depending on where the content comes
+      // from, so the sentence is a different sentence rather than the same one with a
+      // clause bolted on. Copying makes the picture the subject; bringing something in
+      // makes it the address.
+      said.push(
+        chosen
+          ? kind.brings(`mark-${at + 1}.png`, homeOf(mark), chosen)
+          : kind.says(`mark-${at + 1}.png`, homeOf(mark)),
+      );
     });
     said.push("");
   }
@@ -1163,6 +1232,23 @@ function pathFor(shape) {
  * It answers only when the answer is no. An allowed action needs no narration; it just
  * happens, and the thing that happens is the feedback.
  */
+/**
+ * A mark that asked for something out of a library and never said which.
+ *
+ * Half-asked, and it must not travel. An agent told to add a component nobody named
+ * would go and choose one, which is this toolbar making a design decision on somebody's
+ * behalf out of a field they left blank.
+ */
+function unchosen(marks) {
+  const waiting = (marks || []).filter(
+    (mark) => mark.tool === "design" && sourceOf(mark) === "library" && !mark.fromLibrary,
+  );
+  if (waiting.length === 0) return null;
+  return waiting.length === 1
+    ? "One mark is set to come from a library but nothing is chosen yet."
+    : `${waiting.length} marks are set to come from a library but nothing is chosen yet.`;
+}
+
 function gateFor(tool, surface) {
   const known = TOOLS[tool];
   if (!known || !known.writes || (surface && surface.connector)) {

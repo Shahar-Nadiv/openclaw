@@ -116,6 +116,19 @@
     ></div>
 
     <!--
+      The library, which is a window rather than a menu because what it offers is
+      recognised by its picture and not by its name. Centred on the screen rather than
+      hung off a key: it is not about the rail, it is about the mark that opened it.
+    -->
+    <div
+      id="library"
+      class="library"
+      role="dialog"
+      aria-label="Choose from a library"
+      hidden
+    ></div>
+
+    <!--
       Classic scripts sharing one global scope. Every one of them is declarations and
       nothing else — no listener is registered and no element is touched while any of
       these load — so the order below is for reading rather than for correctness. Only
@@ -128,6 +141,7 @@
     <script src="toolbar-live.js"></script>
     <script src="toolbar-answers.js"></script>
     <script src="toolbar-compose.js"></script>
+    <script src="toolbar-library.js"></script>
     <script src="toolbar-send.js"></script>
     <script src="toolbar-dock.js"></script>
     <script src="toolbar.js"></script>

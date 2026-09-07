@@ -147,6 +147,47 @@ function drawPopup() {
     }
     rows.push(kinds);
 
+    // And where its content comes from, for the two kinds that can be brought in rather
+    // than copied. A second row rather than more kinds: "component, copied" and
+    // "component, from a catalogue" are one thing with two sources, and making them two
+    // chips in the first row would say they were two different things to build.
+    if (TAKES_SOURCE.includes(kindIdOf(mark))) {
+      const sources = document.createElement("div");
+      sources.className = "mode-row source-row";
+      for (const [id, source] of Object.entries(SOURCES)) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip";
+        chip.setAttribute("aria-pressed", String(sourceOf(mark) === id));
+        chip.textContent = source.label;
+        chip.addEventListener("click", () => {
+          mark.source = id;
+          // Opening the library is the whole point of choosing it, so choosing it opens
+          // the library. Pressing it again with something already chosen goes back to
+          // swap it, which is the only other thing anybody wants from that chip.
+          if (id === "library") openLibrary(mark);
+          else render();
+        });
+        sources.append(chip);
+      }
+      rows.push(sources);
+    }
+
+    // What was chosen, once something has been. Named on the mark itself, because the
+    // library window closes and the popup is then the only place that could say whether
+    // this mark is finished or still half-asked.
+    const chosen = broughtIn(mark);
+    if (sourceOf(mark) === "library") {
+      const said = document.createElement("button");
+      said.type = "button";
+      said.className = chosen ? "row row-quiet chosen-row" : "row row-quiet chosen-row chosen-none";
+      said.textContent = chosen
+        ? `${chosen.name} — from ${chosen.library}`
+        : "Choose one from the library…";
+      said.addEventListener("click", () => openLibrary(mark));
+      rows.push(said);
+    }
+
     const kind = kindOf(mark);
     const line = document.createElement("div");
     line.className = "popup-dest-line";
