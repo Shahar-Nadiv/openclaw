@@ -1821,6 +1821,36 @@ describe("taking a conversation back", () => {
   });
 });
 
+describe("a list longer than the screen", () => {
+  const css = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+  const compose = readFileSync(
+    new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+    "utf8",
+  );
+
+  test("every long list in a menu scrolls, by the one rule that says how", () => {
+    // A menu can hold forty prompts or a dozen conversations, and either runs off the
+    // bottom of the screen. One spelling of "scrolls", so the second list built here
+    // cannot quietly be the one that does not.
+    expect(css).toMatch(/\.scrolls \{[^}]*overflow-y: auto/);
+    expect(css).toMatch(/\.scrolls \{[^}]*max-height/);
+    const rule = css.match(/\.scrolls \{[^}]*\}/)?.[0] ?? "";
+    // Held inside itself rather than passing the scroll on to the desktop underneath.
+    expect(rule).toContain("overscroll-behavior: contain");
+  });
+
+  test("the prompts scroll, and the sentence above them does not", () => {
+    // What that sentence says — this touches the conversation, not the files — has to
+    // still be on screen at the moment somebody picks a row. A panel that scrolls whole
+    // is one where the warning has left the screen by the time it matters.
+    expect(compose).toContain('list.className = "prompt-list scrolls"');
+    const bare = compose.indexOf("bare.textContent = REWIND_SAYS");
+    const scroller = compose.indexOf('"prompt-list scrolls"');
+    expect(bare).toBeGreaterThan(-1);
+    expect(scroller).toBeGreaterThan(bare);
+  });
+});
+
 describe("every tool has a key somebody can find", () => {
   const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
   const keys = new Set([...rail.matchAll(/\bkey\("(\w+)"/g)].map((found) => found[1]!));

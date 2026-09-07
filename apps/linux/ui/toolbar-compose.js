@@ -390,6 +390,12 @@ function drawPoints() {
     // saying so beats an empty list somebody stares at.
     rows.push(saying("No prompts here to go back to."));
   } else {
+    // The prompts scroll and the two lines above them do not. What that sentence says —
+    // that this touches the conversation and not the files — has to still be on screen
+    // at the moment somebody picks a row, and a panel that scrolls as a whole is a panel
+    // where the warning has left the screen by the time it matters.
+    const list = document.createElement("div");
+    list.className = "prompt-list scrolls";
     const now = Date.now();
     for (const point of [...found.list].reverse()) {
       const item = document.createElement("button");
@@ -411,8 +417,9 @@ function drawPoints() {
       }
       item.title = point.said || "";
       item.addEventListener("click", () => void goBack(point));
-      rows.push(item);
+      list.append(item);
     }
+    rows.push(list);
   }
   el.flyPoints.replaceChildren(...rows);
 }

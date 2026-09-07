@@ -426,23 +426,28 @@ body {
   text-transform: uppercase;
   color: #8e8e93;
 }
+/* A list inside a menu that has more in it than the screen has room for.
+   It scrolls rather than running off the bottom, and `boxAround` takes it as a leaf for
+   exactly that reason: its rows below the fold still report boxes past its edge, and
+   counting them would claim a strip of desktop that shows nothing. */
+.scrolls {
+  max-height: 46vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.scrolls::-webkit-scrollbar {
+  width: 8px;
+}
+.scrolls::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgb(255 255 255 / 16%);
+}
+
 .agent-rows {
   display: flex;
   flex-direction: column;
   gap: 1px;
   padding: 0 6px 6px;
-  /* Two lists in one menu outgrow the screen; the menu scrolls rather than running off
-     the bottom of it. `boxAround` treats this as a leaf for exactly this reason. */
-  max-height: 46vh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.agent-rows::-webkit-scrollbar {
-  width: 8px;
-}
-.agent-rows::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgb(255 255 255 / 16%);
 }
 
 /* A folder that opens, and the conversations sitting inside it. */
@@ -720,9 +725,15 @@ body {
  * it, and a list of rows all ending in the same ellipsis is a list nobody can choose
  * from — which is what a single line of a three-hundred-pixel panel produces.
  */
+.prompt-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px;
+}
 .prompt-row {
   align-items: flex-start;
   text-align: left;
+  width: 100%;
 }
 .prompt-said {
   display: -webkit-box;
