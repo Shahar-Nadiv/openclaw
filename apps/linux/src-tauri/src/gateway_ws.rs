@@ -327,75 +327,123 @@ pub(crate) struct Rewound {
     pub editor_text: Option<String>,
 }
 
-/// The user messages in a transcript, read without insisting on a shape.
+/// The prompts in a transcript, read the way the Gateway actually sends them.
 ///
-/// Deliberately forgiving. `chat.history` is a large, evolving surface and this needs
-/// exactly three fields out of it — which message was somebody's, what it said, and the
-/// id that names it. Written against a schema rather than an observed response, because
-/// there was no session on the machine to observe one from; so it looks for each field
-/// under the handful of names it could plausibly carry, and finding nothing produces
-/// nothing rather than a guess.
+/// Written against `chat.history` as it is served — `src/gateway/session-transcript-message.ts`
+/// projects each stored event onto the message itself and stamps the event's own id into
+/// `__openclaw`, which is the id `sessions.rewind` takes back. An earlier version of this
+/// guessed at `entryId` and friends, found nothing, and left the panel empty on a
+/// conversation full of prompts; so every name below is one this code has been shown.
 ///
-/// The failure mode is the point: a conversation whose entries carry no id it recognises
-/// comes back empty, and the toolbar says there is nowhere to go back to. That is a
-/// useless answer but a true one, which is the right way round for something that
-/// discards work.
+/// The failure mode is still the point: an entry whose id it cannot find produces
+/// nothing rather than a guess, because the toolbar would otherwise offer to discard
+/// work at an address it made up.
 fn points_in(payload: &Value) -> Vec<Point> {
-    let rows = ["messages", "entries", "history", "items", "log"]
-        .iter()
-        .find_map(|key| payload.get(key).and_then(Value::as_array))
-        .or_else(|| payload.as_array());
-    let Some(rows) = rows else {
+    let Some(rows) = payload.get("messages").and_then(Value::as_array) else {
         return Vec::new();
     };
     rows.iter()
         .filter_map(|row| {
-            // A message may be the row, or may be nested under one.
+            // A page carries the message itself; a delta wraps it in an envelope.
             let inner = row.get("message").unwrap_or(row);
-            let role = ["role", "author", "from"]
-                .iter()
-                .find_map(|key| inner.get(key).or_else(|| row.get(key)))
+            let meta = inner.get("__openclaw");
+            if inner
+                .get("role")
                 .and_then(Value::as_str)
-                .unwrap_or_default();
-            if !role.eq_ignore_ascii_case("user") {
+                .unwrap_or_default()
+                != "user"
+            {
                 return None;
             }
-            let id = ["entryId", "entry_id", "eventId", "event_id", "id"]
-                .iter()
-                .find_map(|key| row.get(key).or_else(|| inner.get(key)))
-                .and_then(Value::as_str)
-                .map(str::to_string)?;
+            let id = meta
+                .and_then(|meta| meta.get("id"))
+                .or_else(|| row.get("messageId"))
+                .and_then(Value::as_str)?;
+            // Typed but not yet a turn. The Gateway lists these separately and there is
+            // nothing behind them to go back to.
+            if id.starts_with(PENDING_PROMPT) {
+                return None;
+            }
             Some(Point {
-                said: said_in(inner).or_else(|| said_in(row)).unwrap_or_default(),
-                at: ["ts", "at", "createdAt", "createdAtMs", "timestamp"]
-                    .iter()
-                    .find_map(|key| row.get(key).or_else(|| inner.get(key)))
-                    .and_then(Value::as_i64),
-                id,
+                said: said_in(inner).unwrap_or_default(),
+                at: meta
+                    .and_then(|meta| meta.get("recordTimestampMs"))
+                    .or_else(|| inner.get("timestamp"))
+                    .and_then(when_in),
+                id: id.to_string(),
             })
         })
         .collect()
 }
 
-/// What a message says, whether it is a string or the usual list of parts.
+/// Input the Gateway is holding rather than a turn it has recorded.
+const PENDING_PROMPT: &str = "pending:";
+
+/// When something happened, whether it arrived as milliseconds or as a date.
+///
+/// Both are real: a projected page carries `recordTimestampMs`, and a stored message
+/// carries an ISO string the moment it comes from anywhere else.
+fn when_in(value: &Value) -> Option<i64> {
+    if let Some(millis) = value.as_i64() {
+        return Some(millis);
+    }
+    let text = value.as_str()?;
+    let (date, rest) = text.split_once('T')?;
+    let mut date = date.split('-');
+    let year: i64 = date.next()?.parse().ok()?;
+    let month: i64 = date.next()?.parse().ok()?;
+    let day: i64 = date.next()?.parse().ok()?;
+    let clock = rest.trim_end_matches('Z');
+    let mut clock = clock.split(':');
+    let hour: i64 = clock.next()?.parse().ok()?;
+    let minute: i64 = clock.next()?.parse().ok()?;
+    let second: f64 = clock.next()?.parse().ok()?;
+    // Days since the epoch by Howard Hinnant's civil-day algorithm, which is exact for
+    // every date this will ever see and saves taking a date library for one field.
+    let year = year - i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    Some(((days * 86_400 + hour * 3_600 + minute * 60) * 1_000) + (second * 1_000.0) as i64)
+}
+
+/// What a prompt said, in the words somebody would recognise it by.
+///
+/// `content` is a plain string on every user message this has been shown, and a list of
+/// parts on the ones the Gateway composes; both are read because both are served.
+///
+/// An attachment sent without words arrives as markup rather than as nothing, so it is
+/// stripped here. Otherwise the panel offers a row of HTML to choose between, which is
+/// worse than admitting there were no words.
 fn said_in(message: &Value) -> Option<String> {
-    for key in ["text", "content", "body"] {
-        match message.get(key) {
-            Some(Value::String(text)) => return Some(text.trim().to_string()),
-            Some(Value::Array(parts)) => {
-                let joined = parts
-                    .iter()
-                    .filter_map(|part| part.get("text").and_then(Value::as_str))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                if !joined.trim().is_empty() {
-                    return Some(joined.trim().to_string());
-                }
-            }
+    let said = match message.get("content") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => return None,
+    };
+    let words = without_markup(&said);
+    (!words.is_empty()).then_some(words)
+}
+
+/// The same words with any tags taken out of them.
+fn without_markup(said: &str) -> String {
+    let mut words = String::with_capacity(said.len());
+    let mut inside = false;
+    for letter in said.chars() {
+        match letter {
+            '<' => inside = true,
+            '>' => inside = false,
+            _ if !inside => words.push(letter),
             _ => {}
         }
     }
-    None
+    words.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// An automation, as the toolbar asks for one.
@@ -2854,42 +2902,54 @@ esac
         assert_eq!(reconnect_backoff(100), MAX_RECONNECT_DELAY);
     }
 
+    /// One page of `chat.history` in the shape the Gateway serves it.
+    ///
+    /// Copied from a real transcript on this machine rather than composed: the id under
+    /// `__openclaw`, the timestamp beside it, `content` as a plain string. The previous
+    /// version of these tests agreed with a parser that read none of this, and both were
+    /// wrong together — which is what an invented fixture buys.
+    fn a_page() -> Value {
+        json!({"messages": [
+            {
+                "role": "user",
+                "content": "ok go on to the next stage",
+                "timestamp": 1_788_695_901_289i64,
+                "idempotencyKey": "run-1",
+                "__openclaw": {
+                    "senderIsOwner": true,
+                    "id": "9c720ea7-a79d-46fe-845a-0552b181818d",
+                    "recordTimestampMs": 1_788_695_901_361i64,
+                    "seq": 161
+                }
+            },
+            {
+                "role": "assistant",
+                "content": "done",
+                "__openclaw": {"id": "69c5a8fb-d8c3-4ccf-8745-6d042b011aef", "seq": 162}
+            }
+        ]})
+    }
+
     #[test]
-    fn a_transcript_gives_up_its_user_messages_whatever_it_calls_them() {
-        // Written against a schema rather than an observed response, because there was
-        // no session on the machine to observe one from. So each shape it could
-        // plausibly arrive in is a row here, and the ones it must refuse are too.
-        for (what, payload) in [
-            (
-                "entries under `messages`, ids under `entryId`",
-                json!({"messages": [
-                    {"entryId": "e1", "role": "user", "text": "fix the header gap", "ts": 111},
-                    {"entryId": "e2", "role": "assistant", "text": "done"}
-                ]}),
-            ),
-            (
-                "entries under `entries`, ids under `id`, message nested",
-                json!({"entries": [
-                    {"id": "e1", "message": {"role": "user", "content": "fix the header gap"}, "at": 111}
-                ]}),
-            ),
-            (
-                "a bare array with content parts",
-                json!([
-                    {"eventId": "e1", "role": "user",
-                     "content": [{"type": "text", "text": "fix the header"}, {"type": "text", "text": "gap"}]}
-                ]),
-            ),
-        ] {
-            let points = points_in(&payload);
-            assert_eq!(points.len(), 1, "{what}");
-            assert_eq!(points[0].id, "e1", "{what}");
-            assert!(
-                points[0].said.contains("header"),
-                "{what}: {}",
-                points[0].said
-            );
-        }
+    fn a_page_gives_up_the_prompts_and_the_ids_rewind_takes() {
+        let points = points_in(&a_page());
+        assert_eq!(points.len(), 1, "only the prompt, not the answer");
+        assert_eq!(points[0].id, "9c720ea7-a79d-46fe-845a-0552b181818d");
+        assert_eq!(points[0].said, "ok go on to the next stage");
+        assert_eq!(points[0].at, Some(1_788_695_901_361));
+    }
+
+    #[test]
+    fn a_delta_envelope_is_read_as_well_as_a_page() {
+        // The streaming path wraps the message and stamps the id beside it.
+        let points = points_in(&json!({"messages": [{
+            "sessionKey": "main:1",
+            "messageId": "e1",
+            "message": {"role": "user", "content": "fix the header gap"}
+        }]}));
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].id, "e1");
+        assert_eq!(points[0].said, "fix the header gap");
     }
 
     #[test]
@@ -2898,22 +2958,43 @@ esac
         // one that is not, for something whose next step discards work.
         assert!(points_in(&json!({})).is_empty());
         assert!(points_in(&json!({"messages": []})).is_empty());
-        // An entry with no id it recognises cannot be rewound to, so it is not offered.
-        assert!(points_in(&json!({"messages": [{"role": "user", "text": "hello"}]})).is_empty());
-        // And only the operator's own messages are places to go back to.
-        assert!(
-            points_in(&json!({"messages": [{"id": "e1", "role": "assistant", "text": "hi"}]}))
-                .is_empty()
-        );
+        // An entry with no id cannot be rewound to, so it is not offered.
+        assert!(points_in(&json!({"messages": [{"role": "user", "content": "hello"}]})).is_empty());
+        // Input the Gateway is holding is not yet a turn to go back to.
+        assert!(points_in(&json!({"messages": [{
+            "role": "user",
+            "content": "queued",
+            "__openclaw": {"id": "pending:abc"}
+        }]}))
+        .is_empty());
     }
 
     #[test]
-    fn a_point_with_no_words_is_still_a_point() {
-        // An attachment-only message has an id and a place in the transcript, and being
-        // unable to summarise it is no reason to make it unreachable.
-        let points = points_in(&json!({"messages": [{"id": "e1", "role": "user"}]}));
-        assert_eq!(points.len(), 1);
+    fn a_prompt_that_was_only_an_attachment_says_so_rather_than_showing_markup() {
+        // Sending a picture with no words stores the markup that displays it. Offering
+        // that as a row to choose between is worse than admitting there were no words.
+        let points = points_in(&json!({"messages": [{
+            "role": "user",
+            "content": "<img class=\"image\" src=\"http://127.0.0.1:18789/x.png\" />",
+            "__openclaw": {"id": "e1"}
+        }]}));
+        assert_eq!(points.len(), 1, "it still has a place in the transcript");
         assert_eq!(points[0].said, "");
+    }
+
+    #[test]
+    fn a_date_is_read_as_well_as_a_number() {
+        // Stored events carry ISO strings; projected pages carry milliseconds.
+        assert_eq!(
+            when_in(&json!(1_788_695_901_361i64)),
+            Some(1_788_695_901_361)
+        );
+        assert_eq!(
+            when_in(&json!("2026-09-06T11:58:21.361Z")),
+            Some(1_788_695_901_361)
+        );
+        assert_eq!(when_in(&json!("1970-01-01T00:00:00.000Z")), Some(0));
+        assert_eq!(when_in(&json!("not a date")), None);
     }
 
     #[test]
