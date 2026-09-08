@@ -154,6 +154,38 @@ impl GatewaySleepCycleController {
         }
     }
 
+    /// Hand back a lease we are still holding, because colai is closing.
+    ///
+    /// A suspension is a lease on somebody else's Gateway, and only `did_wake` gives it
+    /// back. Quitting between the two — the machine never actually slept, or the app was
+    /// closed mid-cycle — used to abandon it: the Gateway stayed suspended, closing every
+    /// socket with "closed due to suspension", and nothing left running knew to resume
+    /// it. From the outside that is OpenClaw dead with its process still up.
+    ///
+    /// One attempt, no retries. This runs while the app is exiting, and a resume that
+    /// needs three tries and six seconds will not get them.
+    pub(crate) async fn release_on_exit(&self) {
+        let suspension = {
+            let mut state = self
+                .state
+                .lock()
+                .expect("gateway sleep state mutex poisoned");
+            // Bump the generation so an in-flight `will_sleep` treats its own lease as
+            // late and hands that one back itself, rather than storing it after we have
+            // stopped looking.
+            state.generation = state.generation.wrapping_add(1);
+            state.suspension.take()
+        };
+        let Some(suspension) = suspension else {
+            return;
+        };
+        if let Err(error) = (self.resume)(suspension.id).await {
+            (self.log)(format!(
+                "could not hand back the gateway sleep lease: {error}"
+            ));
+        }
+    }
+
     async fn resume_with_retries(&self, suspension_id: String, generation: u64) {
         for attempt in 1..=RESUME_ATTEMPTS {
             // A new sleep cycle owns the connection; abandoned leases self-expire.
@@ -201,6 +233,82 @@ mod tests {
 
     fn no_delay(_: Duration) -> impl Future<Output = ()> + Send {
         std::future::ready(())
+    }
+
+    #[tokio::test]
+    async fn quitting_hands_back_a_suspension_it_is_still_holding() {
+        /*
+         * The bug this is about: the Gateway alive with every socket closed, saying
+         * "WebSocket is closed due to suspension", and nothing running that knows how to
+         * undo it.
+         *
+         * A suspension is a lease on somebody else's Gateway, and only `did_wake` gave it
+         * back. Quitting between the two halves — the machine never actually slept, or
+         * colai was closed mid-cycle — abandoned it, and the lease outlived the process
+         * that took it.
+         */
+        let route = route_state(Some("ws://127.0.0.1:18789"));
+        let resumed = Arc::new(Mutex::new(Vec::new()));
+        let noted = Arc::clone(&resumed);
+        let controller = GatewaySleepCycleController::new(
+            "linux-sleep-exit".into(),
+            current_route(&route),
+            |_| async {
+                Ok(SleepPrepareOutcome::Ready {
+                    suspension_id: "suspension-held".into(),
+                })
+            },
+            move |suspension_id: String| {
+                noted.lock().unwrap().push(suspension_id);
+                async { Ok(()) }
+            },
+            || async {},
+            no_delay,
+            |_| {},
+        );
+
+        controller.will_sleep().await;
+        assert!(
+            resumed.lock().unwrap().is_empty(),
+            "still asleep, nothing to give back yet"
+        );
+
+        controller.release_on_exit().await;
+        assert_eq!(
+            resumed.lock().unwrap().as_slice(),
+            ["suspension-held"],
+            "the lease has to go back on the way out"
+        );
+
+        // And only once: a second quit, or a wake that arrives after it, must not resume
+        // a lease that is no longer ours.
+        controller.release_on_exit().await;
+        controller.did_wake().await;
+        assert_eq!(resumed.lock().unwrap().len(), 1, "handed back exactly once");
+    }
+
+    #[tokio::test]
+    async fn quitting_with_nothing_held_asks_the_gateway_for_nothing() {
+        // Every ordinary quit takes this path. Sending a resume for a lease that was
+        // never taken would be colai talking about a sleep that never happened.
+        let route = route_state(Some("ws://127.0.0.1:18789"));
+        let resumed = Arc::new(Mutex::new(Vec::new()));
+        let noted = Arc::clone(&resumed);
+        let controller = GatewaySleepCycleController::new(
+            "linux-sleep-exit-idle".into(),
+            current_route(&route),
+            |_| async { Ok(SleepPrepareOutcome::Busy) },
+            move |suspension_id: String| {
+                noted.lock().unwrap().push(suspension_id);
+                async { Ok(()) }
+            },
+            || async {},
+            no_delay,
+            |_| {},
+        );
+
+        controller.release_on_exit().await;
+        assert!(resumed.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
