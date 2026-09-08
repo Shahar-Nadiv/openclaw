@@ -158,13 +158,6 @@ type ToolbarHelpers = {
     now: number,
   ) => { words: string; when: string | null };
   agoSaid: (at: number, now: number) => string;
-  heldSaid: (forMs: number) => string;
-  heldWhere: (surface: string, front: InFront | null) => string;
-  sharingSaid: (
-    sharing: { kind?: string; why?: string } | null,
-  ) => { ok: boolean; said: string } | null;
-  handHue: (agent: string) => number;
-  HAND_HUES: number[];
   REWIND_SAYS: string;
   KEEPS_MARKING: string[];
   MOODS: Record<string, { colour: string; says: (many: number) => string }>;
@@ -276,7 +269,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid, heldSaid, heldWhere, sharingSaid, handHue, HAND_HUES };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
   context,
 );
 const {
@@ -337,11 +330,6 @@ const {
   rewindRefused,
   pointSaid,
   agoSaid,
-  heldSaid,
-  heldWhere,
-  sharingSaid,
-  handHue,
-  HAND_HUES,
   REWIND_SAYS,
   KEEPS_MARKING,
   numberOf,
@@ -2009,77 +1997,6 @@ describe("taking a conversation back", () => {
     expect(agoSaid(now - 3_600_000, now)).toBe("1 hour ago");
     expect(agoSaid(now - 100_000, now)).toBe("2 minutes ago");
     expect(agoSaid(now - 86_400_000, now)).toBe("1 day ago");
-  });
-
-  test("how long an agent has held a window counts up rather than rounding to nothing", () => {
-    // The reason this is not agoSaid: "just now" is exactly wrong here. The panel is on
-    // screen because something is happening now, so the number has to move.
-    expect(heldSaid(0)).toBe("0s");
-    expect(heldSaid(3_000)).toBe("3s");
-    expect(heldSaid(59_400)).toBe("59s");
-    expect(heldSaid(60_000)).toBe("1m 0s");
-    expect(heldSaid(95_000)).toBe("1m 35s");
-    expect(heldSaid(3_600_000)).toBe("1h 0m");
-    expect(heldSaid(5_400_000)).toBe("1h 30m");
-    // A clock that ran backwards is a clock, not a negative duration.
-    expect(heldSaid(-500)).toBe("0s");
-  });
-
-  test("a held window is named when it is the one being looked at, and not guessed at otherwise", () => {
-    const front: InFront = { id: "0x400001", title: "Firefox" };
-    expect(heldWhere("0x400001", front)).toBe("Firefox — in front of you");
-    // Same window, no title to use: still say the part that matters.
-    expect(heldWhere("0x400001", { id: "0x400001" })).toBe("the window in front of you");
-    // Another window: the id, unadorned. Inventing a name for a window nobody asked
-    // about would be a guess wearing the clothes of a fact.
-    expect(heldWhere("0x400002", front)).toBe("0x400002");
-    expect(heldWhere("0x400002", null)).toBe("0x400002");
-    // Nothing is in front — an answer, not the absence of one, and not a match either.
-    expect(heldWhere("0x400002", { id: "" })).toBe("0x400002");
-  });
-
-  test("whether agents get a cursor each is three answers, not two", () => {
-    // Not measured yet. Silence, because a claim about the desktop made before anything
-    // was tried is a guess, and this is the fact the whole feature stands on.
-    expect(sharingSaid(null)).toBe(null);
-    expect(sharingSaid({})).toBe(null);
-
-    expect(sharingSaid({ kind: "yes" })).toEqual({
-      ok: true,
-      said: "Each agent works with a cursor of its own.",
-    });
-
-    // A no carries its reason: "your desktop refused" and "there is no X here" send
-    // somebody to completely different places.
-    expect(
-      sharingSaid({ kind: "no", why: "this desktop's X server made no second pointer" }),
-    ).toEqual({
-      ok: false,
-      said: "Agents share this desktop's one cursor — this desktop's X server made no second pointer.",
-    });
-    // A no with nothing to say is still a no, and still says the part that matters.
-    expect(sharingSaid({ kind: "no" })).toEqual({
-      ok: false,
-      said: "Agents share this desktop's one cursor.",
-    });
-    expect(sharingSaid({ kind: "no", why: "   " })?.said).toBe(
-      "Agents share this desktop's one cursor.",
-    );
-  });
-
-  test("an agent keeps the same cursor colour every time it is asked", () => {
-    // Two agents at once are told apart by colour and name. A colour that changed
-    // between two looks would be worse than none at all, and one handed out by position
-    // would move the moment another agent finished.
-    expect(handHue("ana")).toBe(handHue("ana"));
-    expect(handHue("ana")).not.toBe(handHue("ben"));
-    // Same after a restart, because it comes from the name and nothing else.
-    expect(handHue("deploy-worker-3")).toBe(handHue("deploy-worker-3"));
-    // Always one of the hues that were actually chosen — none of them the accent's red,
-    // so an agent's cursor is never mistaken for something colai wants.
-    for (const agent of ["a", "ben", "", "🙂", "deploy-worker-3", "Ana"]) {
-      expect(HAND_HUES).toContain(handHue(agent));
-    }
   });
 });
 

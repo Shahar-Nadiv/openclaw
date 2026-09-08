@@ -25,7 +25,6 @@ const el = {
   work: document.getElementById("work"),
   toasts: document.getElementById("toasts"),
   flights: document.getElementById("flights"),
-  hands: document.getElementById("hands"),
   flyHow: document.getElementById("fly-how"),
   flyAutomate: document.getElementById("fly-automate"),
   flyAgents: document.getElementById("fly-agents"),
@@ -121,16 +120,6 @@ const state = {
   // this toolbar started. Null until the Gateway has answered once: no light is the
   // honest state before anything is known, and a green one would be a claim.
   atWork: null,
-  // Where each working agent's cursor is. Empty unless somebody is acting.
-  hands: [],
-  // Whether this desktop lets an agent have a cursor of its own, as measured rather
-  // than as hoped. Null until it has been tried once — "not asked yet" and "no" are
-  // different things to say to somebody.
-  sharing: null,
-  // Which agent is holding which window, right now. Several of them can be working at
-  // once, and the whole point of saying so is that an agent typing into a window
-  // somebody cannot see is what makes a shared desktop feel haunted rather than shared.
-  holding: [],
   // Windows that were asked what they are showing and had nothing to say. Asking again
   // is a quarter of a second spent learning what the last answer already said.
   mute: new Set(),
@@ -631,15 +620,6 @@ async function start() {
   // the second one meant a toolbar opened onto a desktop nobody then switched away from
   // never learned which window was in front, so every mark stayed pinned to the screen
   // exactly as it had before any of this was written.
-  // Asked once, on the way up. The whole of parallel working rests on the answer, and
-  // it is measured on this machine rather than assumed from the fact that X supports it.
-  void invoke("colai_shares_input")
-    .then((says) => {
-      state.sharing = says || null;
-      render();
-    })
-    .catch(() => {});
-
   void invoke("colai_in_front")
     .then((front) => {
       // Only if nothing has been heard since: an event that arrived while this was in
@@ -652,18 +632,6 @@ async function start() {
   void listen("colai:front", (event) => {
     state.front = (event && event.payload) || null;
     redrawMarksSoon();
-  }).catch(() => {});
-
-  void listen("colai:hands", (event) => {
-    state.hands = (event && event.payload) || [];
-    // Only the cursors are redrawn. A pointer moving sixty times a second must not drag
-    // the whole toolbar through a render with it.
-    drawHands();
-  }).catch(() => {});
-
-  void listen("colai:holding", (event) => {
-    state.holding = (event && event.payload) || [];
-    render();
   }).catch(() => {});
 
   void listen("colai:ended", (event) => {

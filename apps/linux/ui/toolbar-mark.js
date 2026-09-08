@@ -313,56 +313,6 @@ function accentNow() {
   return said || undefined;
 }
 
-/**
- * Every agent's cursor, drawn because nothing else will.
- *
- * GNOME moves extra master pointers and then declines to render them, so an agent
- * working is invisible on this desktop — which is the one thing that must not be true of
- * a machine several of them are sharing with a person. colai already holds a transparent
- * sheet over the whole desk, and X will say where any pointer is, so it draws them
- * itself.
- *
- * Better than the cursor GNOME would have drawn, as it turns out: this one carries the
- * agent's name, so two of them working at once are told apart at a glance rather than
- * guessed at.
- *
- * Painted, not caught. These are never in the clickable region — an agent's cursor must
- * not be a thing the person can click on, and a sheet of glass that followed one around
- * would take the desktop away from them, which is the whole problem being solved.
- */
-function drawHands() {
-  const hands = state.hands || [];
-  el.hands.hidden = hands.length === 0;
-  if (hands.length === 0) {
-    el.hands.replaceChildren();
-    return;
-  }
-  el.hands.replaceChildren(
-    ...hands.map((hand) => {
-      const one = document.createElement("div");
-      one.className = "hand";
-      one.style.setProperty("--hand", String(handHue(hand.agent)));
-      one.style.transform = `translate(${Math.round(hand.x)}px, ${Math.round(hand.y)}px)`;
-
-      const arrow = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      arrow.setAttribute("class", "hand-arrow");
-      arrow.setAttribute("viewBox", "0 0 12 18");
-      arrow.setAttribute("width", "12");
-      arrow.setAttribute("height", "18");
-      const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      // The ordinary arrow everybody already reads as "a pointer is here".
-      shape.setAttribute("d", "M1 1 L1 15 L4.6 11.6 L7 17 L9.6 15.8 L7.2 10.7 L11 10.6 Z");
-      arrow.append(shape);
-
-      const name = document.createElement("span");
-      name.className = "hand-name";
-      name.textContent = hand.agent;
-      one.append(arrow, name);
-      return one;
-    }),
-  );
-}
-
 function drawMarks() {
   const live = document.getElementById("live");
   const drawn = [];

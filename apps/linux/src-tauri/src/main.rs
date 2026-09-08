@@ -3,8 +3,6 @@ mod colai;
 mod colai_attach;
 mod colai_capture;
 mod colai_files;
-mod colai_hands;
-mod colai_input;
 #[cfg(target_os = "linux")]
 mod colai_inspect;
 mod colai_library;
@@ -1389,17 +1387,6 @@ fn main() {
         // on the application it was made on and nowhere else.
         colai_attach::watch_the_front(app.handle());
 
-        // Somewhere to send agent cursor positions. GNOME does not draw extra master
-        // pointers, so colai draws them on its own glass; this is how the thread that
-        // owns the display learns where to send them.
-        #[cfg(target_os = "linux")]
-        colai_hands::watch(app.handle().clone());
-
-        // And the door a node worker asks through, which is the only way anything
-        // outside this process can move a cursor.
-        #[cfg(target_os = "linux")]
-        colai_hands::open_the_door();
-
         #[cfg(target_os = "linux")]
         app.manage(gateway_sleep_logind::SleepBridge::start(
             app.handle().clone(),
@@ -1490,14 +1477,6 @@ fn main() {
         colai_files::colai_describe_files,
         colai_receivers::colai_at_work,
         colai_attach::colai_in_front,
-        colai_input::colai_claim_surface,
-        colai_input::colai_free_surface,
-        colai_input::colai_agent_gone,
-        colai_input::colai_who_is_working,
-        #[cfg(target_os = "linux")]
-        colai_input::colai_shares_input,
-        #[cfg(target_os = "linux")]
-        colai_input::colai_agent_act,
         colai_library::colai_library_search,
         colai_library::colai_libraries,
         colai_files::colai_pick_files,
@@ -1545,10 +1524,6 @@ fn main() {
     app.run(|app, event| {
         #[cfg(target_os = "linux")]
         if matches!(event, tauri::RunEvent::Exit) {
-            // Before anything else, and waited on. A master pair outlives the process
-            // that made it: skip this and somebody is left with a second cursor on their
-            // desktop that no running program accounts for, until they log out.
-            colai_hands::unmake_all();
             if let Some(bridge) = app.try_state::<gateway_sleep_logind::SleepBridge>() {
                 bridge.shutdown();
             }
