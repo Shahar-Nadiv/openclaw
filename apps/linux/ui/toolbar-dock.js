@@ -178,6 +178,7 @@ function remember() {
         dock: state.dock,
         tucked: state.tucked,
         showing: state.work.showing,
+        workAt: state.work.at,
       }),
     );
   } catch {
@@ -200,6 +201,7 @@ function recall() {
       // Off unless somebody turned it on. A screen with marks on it is the thing this
       // was built to stop being the default.
       state.work.showing = put.showing === true;
+      state.work.at = put.workAt || null;
       return;
     }
   } catch {

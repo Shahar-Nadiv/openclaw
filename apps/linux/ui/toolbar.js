@@ -37,7 +37,6 @@ const el = {
   recordingLeft: document.getElementById("recording-left"),
   capture: document.getElementById("capture"),
   popup: document.getElementById("popup"),
-  answers: document.getElementById("answers"),
 
 };
 
@@ -105,7 +104,7 @@ const state = {
   // The library window, while it is open, and which mark it will answer.
   library: null,
   // The Work window: what is waiting, what has been sent, and whether marks are drawn.
-  work: { open: false, showing: false },
+  work: { open: false, showing: false, at: null },
   // What has been sent, newest first. Kept for the session — surviving a restart is a
   // store, and a store is decided on purpose rather than in passing.
   history: [],
@@ -312,7 +311,6 @@ function render() {
   }
 
   drawMarks();
-  drawAnswers();
   drawPopup();
   drawLibrary();
   drawWork();
@@ -346,9 +344,31 @@ function redrawMarksSoon() {
   });
 }
 
+/**
+ * The line by the rail about the last thing that happened, and its way out.
+ *
+ * It had none. "Stopped main." was set, drawn, and then sat beside the toolbar for the
+ * rest of the session — every message here is about a moment, and none of them said so.
+ * A banner that outlives the thing it is about stops being read at all.
+ *
+ * Timed from the words rather than from the render, because this runs on every frame and
+ * restarting the clock each time would mean it never ran out.
+ */
+let saidLast = "";
+let fadingTrouble = null;
 function drawTrouble() {
-  el.trouble.hidden = !state.trouble;
-  el.trouble.textContent = state.trouble || "";
+  const said = state.trouble || "";
+  el.trouble.hidden = !said;
+  el.trouble.textContent = said;
+  if (said === saidLast) return;
+  saidLast = said;
+  if (fadingTrouble !== null) clearTimeout(fadingTrouble);
+  fadingTrouble = said
+    ? setTimeout(() => {
+        state.trouble = null;
+        render();
+      }, TOAST_FOR)
+    : null;
 }
 
 /**
@@ -376,7 +396,6 @@ function shape() {
   if (state.library !== null && !el.library.hidden) rects.push(boxAround(el.library));
   if (state.work.open && !el.work.hidden) rects.push(boxAround(el.work));
   if (state.toasts.length && !el.toasts.hidden) rects.push(boxAround(el.toasts));
-  for (const answer of el.answers.children) rects.push(boxAround(answer));
   const key = JSON.stringify(rects);
   if (key === shaped) return;
   shaped = key;

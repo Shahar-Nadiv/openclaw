@@ -8,8 +8,8 @@
 // So an answer says so. Once, briefly, with a way into it — and then it gets out of the
 // way, because a notification that has to be dismissed is a second thing to do.
 
-/** How long one stays up. */
-const TOAST_FOR = 7000;
+/** How long anything the toolbar says about itself stays up. */
+const TOAST_FOR = 5000;
 
 /** What is on screen saying something arrived, and the timers that will take them off. */
 const fading = new Map();

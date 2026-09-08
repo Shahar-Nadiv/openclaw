@@ -95,12 +95,6 @@ type ToolbarHelpers = {
     screen: { width: number; height: number },
   ) => { x: number; y: number; w: number; h: number };
   RECORD_CLEAR: number;
-  answerAt: (
-    at: Point,
-    box: { width: number; height: number },
-    room: { left: number; top: number; right: number; bottom: number },
-  ) => { left: number; top: number };
-  ANSWER_AWAY: number;
   DESIGNS: Record<
     string,
     {
@@ -273,7 +267,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
   context,
 );
 const {
@@ -297,8 +291,6 @@ const {
   secondsLeft,
   recordFrame,
   RECORD_CLEAR,
-  answerAt,
-  ANSWER_AWAY,
   DESIGNS,
   DESIGN_FIRST,
   labelOf,
@@ -908,72 +900,6 @@ describe("what a recording shows while it runs", () => {
     // A capture that runs past its length — the frames are taken against a live
     // desktop — shows nought rather than counting into negative numbers.
     expect(secondsLeft(10_000, 12_500)).toBe(0);
-  });
-});
-
-describe("where an answer opens", () => {
-  // One display, and a second one to its right — the shape of the desk this is used on.
-  const left = { x: 0, y: 0, width: 1920, height: 1080 };
-  const right = { x: 1920, y: 0, width: 1920, height: 1080 };
-  const panel = { width: 320, height: 260 };
-  const room = (screen: Screen) => usable(screen);
-
-  test("in the middle it opens down and to the right, where the eye already is", () => {
-    expect(answerAt({ x: 600, y: 400 }, panel, room(left))).toEqual({
-      left: 600 + ANSWER_AWAY,
-      top: 400 + ANSWER_AWAY,
-    });
-  });
-
-  test("against the right edge it opens to the left instead of off the screen", () => {
-    // The bug this exists for: an answer about something near the edge ran past it, and
-    // the half nobody could see was the end with Accept and Decline on it.
-    const put = answerAt({ x: 1900, y: 400 }, panel, room(left));
-    expect(put.left).toBe(1900 - ANSWER_AWAY - panel.width);
-    expect(put.left + panel.width).toBeLessThan(left.width);
-  });
-
-  test("against the bottom it opens upward", () => {
-    const put = answerAt({ x: 600, y: 1060 }, panel, room(left));
-    expect(put.top).toBe(1060 - ANSWER_AWAY - panel.height);
-    expect(put.top + panel.height).toBeLessThan(left.height);
-  });
-
-  test("a corner flips both ways at once", () => {
-    const put = answerAt({ x: 1900, y: 1060 }, panel, room(left));
-    expect(put.left).toBeLessThan(1900);
-    expect(put.top).toBeLessThan(1060);
-  });
-
-  test("the edge of a display is an edge, even with another display beyond it", () => {
-    // The overlay is every screen at once, so "there is room to the right" can mean
-    // "there is room on the next monitor". A panel opened across a bezel is a panel
-    // read in two halves.
-    const put = answerAt({ x: 1900, y: 400 }, panel, room(left));
-    expect(put.left + panel.width).toBeLessThanOrEqual(left.width);
-    // And a pin on the second display opens inside the second display, not the first.
-    const over = answerAt({ x: 3800, y: 400 }, panel, room(right));
-    expect(over.left).toBeGreaterThanOrEqual(right.x);
-  });
-
-  test("a panel wider than its screen still starts on it", () => {
-    // Nothing here can make it fit, so the one thing that must hold is that the corner
-    // somebody reads from first is on the display they are looking at.
-    const narrow = { x: 0, y: 0, width: 260, height: 400 };
-    const put = answerAt({ x: 250, y: 380 }, panel, room(narrow));
-    expect(put.left).toBeGreaterThanOrEqual(0);
-    expect(put.top).toBeGreaterThanOrEqual(0);
-  });
-
-  test("a panel keeps clear of a panel or taskbar the desktop has reserved", () => {
-    // `usable` already knows about reserved edges, and an answer pushed under a dock is
-    // as unreadable as one pushed off the screen.
-    const docked = {
-      ...left,
-      reserved: { top: 0, right: 0, bottom: 60, left: 0 },
-    };
-    const put = answerAt({ x: 600, y: 1050 }, panel, room(docked));
-    expect(put.top + panel.height).toBeLessThanOrEqual(left.height - 60);
   });
 });
 
@@ -2204,35 +2130,33 @@ describe("the tray entry for the toolbar", () => {
   });
 });
 
-describe("what a pin says while it waits", () => {
+describe("the crab walks in one place, by one rule", () => {
   const css = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
-  const answers = readFileSync(
-    new URL("../apps/linux/ui/toolbar-answers.js", import.meta.url),
-    "utf8",
-  );
 
-  test("it walks while waiting, and not once it has answered", () => {
+  test("nothing on the desktop waits with a crab any more", () => {
     /*
-     * The pin said "…", which means *something is happening* and nothing more. A crab
-     * that walks says the same and one better: a crab that has stopped walking says it
-     * stopped. So the gait is tied to having heard nothing back, and to nothing else.
+     * The pin was the second place a crab walked, and briefly the nicer one. Then every
+     * mark moved into the Work window and a circle left on somebody's screen became the
+     * thing being complained about rather than the exception to it.
+     *
+     * The gait stayed general, because it cost nothing to leave it that way and the
+     * mascot is drawn in more than one size regardless.
      */
-    expect(answers).toContain("dot.dataset.walking = String(!latest)");
-    expect(answers).toContain("openclawMark(14)");
-    // The ellipsis is gone from what the pin draws. Comments still quote it, so the
-    // check is on the assignment rather than on the file.
-    expect(answers).not.toMatch(/textContent = [^;]*"…"/);
+    const answers = readFileSync(
+      new URL("../apps/linux/ui/toolbar-answers.js", import.meta.url),
+      "utf8",
+    );
+    expect(answers).not.toContain("answer-dot");
+    expect(answers).not.toContain("openclawMark");
   });
 
-  test("one trigger drives the gait wherever the crab is drawn", () => {
-    // The tray icon at seventeen pixels and this pin at fourteen. Tying the animation to
-    // the tray key's own state meant the second place had to restate the whole gait, and
-    // two copies of a walk drift.
+  test("one trigger drives the gait wherever it is drawn", () => {
+    // Tying it to the tray key's own state meant a second place would have to restate
+    // the whole walk, and two copies of a walk drift apart.
     for (const part of ["crab-body", "crab-leg-a", "crab-claw-b"]) {
       const rule = new RegExp(`([^\\n{]*)\\.${part}\\s*\\{`, "g");
       for (const found of css.matchAll(rule)) {
         const selector = found[1]!.trim();
-        // Either the shared trigger, or the bare declaration that gives it an origin.
         expect(
           selector === "" || selector.startsWith("[data-walking"),
           `${part} is driven by ${selector || "(bare)"}`,
@@ -2386,6 +2310,63 @@ describe("a mark goes somewhere rather than vanishing", () => {
     expect(shape).not.toContain("el.flights");
     const css = readFileSync(new URL("toolbar.css", dir), "utf8");
     expect(css).toMatch(/\.flights \{[^}]*pointer-events: none/);
+  });
+});
+
+describe("nothing the toolbar says about itself outstays it", () => {
+  const dir = new URL("../apps/linux/ui/", import.meta.url);
+  const page = readFileSync(new URL("toolbar.js", dir), "utf8");
+  const toast = readFileSync(new URL("toolbar-toast.js", dir), "utf8");
+
+  test("five seconds, and one number saying so", () => {
+    expect(toast).toContain("const TOAST_FOR = 5000");
+    // The banner by the rail uses the same clock. Two numbers for "how long something
+    // the toolbar said stays up" would drift, and there is no reason for them to differ.
+    expect(page).toContain("}, TOAST_FOR)");
+  });
+
+  test("the banner takes itself away", () => {
+    /*
+     * It had no way out at all. "Stopped main." was set, drawn, and then sat beside the
+     * toolbar for the rest of the session — every message there is about a moment, and
+     * none of them said so. A banner that outlives what it is about stops being read.
+     */
+    const drawn = page.slice(page.indexOf("function drawTrouble()"));
+    expect(drawn).toContain("state.trouble = null");
+  });
+
+  test("its clock runs from the words, not from the frame", () => {
+    // `drawTrouble` runs on every render. Restarting the timer each time would mean it
+    // never ran out, which is the bug with extra steps.
+    const drawn = page.slice(page.indexOf("function drawTrouble()"));
+    const guard = drawn.indexOf("if (said === saidLast) return");
+    const scheduled = drawn.indexOf("setTimeout");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(scheduled);
+  });
+});
+
+describe("the Work window can be moved", () => {
+  const work = readFileSync(new URL("../apps/linux/ui/toolbar-work.js", import.meta.url), "utf8");
+
+  test("picked up by the bar with its name on it", () => {
+    // Where every other window on this desktop is picked up from. A window meant to stay
+    // open all day that cannot be moved is a window in the way for the whole day.
+    expect(work).toContain('head.addEventListener("pointerdown", startWorkDrag)');
+    // Not by its close button, which is on that bar and means the opposite.
+    expect(work).toContain('event.target.closest(".popup-shut")');
+  });
+
+  test("held inside the screen it is being carried over", () => {
+    // The desktop spans several. A window dragged off the edge of one has to stop at the
+    // edge of *that* one, not at the edge of all of them.
+    const drag = work.slice(work.indexOf("function startWorkDrag"));
+    expect(drag.slice(0, 900)).toContain("usable(screenAt(state.screens,");
+  });
+
+  test("and stays where it was put", () => {
+    expect(work).toMatch(/const up = \(\) => \{[\s\S]*?remember\(\);/);
+    expect(work).toContain("state.work.at ||");
   });
 });
 

@@ -39,7 +39,10 @@ function drawWork() {
   if (!open) return;
 
   const head = document.createElement("div");
-  head.className = "library-head";
+  head.className = "library-head work-head";
+  // The head is the handle. A window meant to stay open all day has to be movable, and
+  // the bar with its name on it is where everything else on this desktop is picked up.
+  head.addEventListener("pointerdown", startWorkDrag);
   const title = document.createElement("p");
   title.className = "agents-title";
   title.textContent = "Work";
@@ -131,18 +134,8 @@ function entryRow(entry, now) {
   row.append(said);
 
   const answer = entry.answer;
-  const latest = answer && lastTurn(answer);
-  if (latest) {
-    const came = document.createElement("p");
-    came.className = "work-back";
-    came.textContent = latest;
-    row.append(came);
-  } else if (answer) {
-    // The same thing the pin says, in words rather than in a crab: this one is still out.
-    const still = document.createElement("p");
-    still.className = "work-waiting-on";
-    still.textContent = `Waiting on ${entry.who}`;
-    row.append(still);
+  if (answer) {
+    row.append(...answerRows(entry, answer));
   }
 
   // Rewind, beside the prompt it would take you back to — which is where it was always
@@ -165,6 +158,80 @@ function entryRow(entry, now) {
   });
   row.append(rewind);
   return row;
+}
+
+/**
+ * What came back, and the way to say something to it.
+ *
+ * This used to be a panel hanging off a pin on the desktop. The pin is gone: once every
+ * mark is in this window there is no reason for a second place to read a reply, and a
+ * circle left on somebody's screen is the thing this whole change is about.
+ *
+ * Every turn, not the first. An agent says what it is doing before it says what it
+ * found, and keeping only the first threw away the two that usually matter.
+ */
+function answerRows(entry, answer) {
+  const rows = [];
+  const turns = answer.turns || [];
+  if (turns.length === 0) {
+    const still = document.createElement("p");
+    still.className = "work-waiting-on";
+    still.textContent = `Waiting on ${entry.who}`;
+    rows.push(still);
+    return rows;
+  }
+  const said = document.createElement("div");
+  said.className = "work-turns";
+  for (const turn of turns) {
+    const line = document.createElement("p");
+    line.className = "answer-turn";
+    line.dataset.mine = String(turn.mine === true);
+    line.textContent = turn.said;
+    said.append(line);
+  }
+  rows.push(said);
+
+  // A reply in words, because most of what an agent says back is not a proposal to
+  // accept or refuse. It asks which of two things you meant, or what a value should be —
+  // and none of those have an answer that fits in two fixed buttons.
+  const asking = asksSomething(lastTurn(answer) || "");
+  const box = document.createElement("textarea");
+  box.className = "popup-note answer-say";
+  box.rows = 2;
+  box.placeholder = asking ? "Answer them…" : "Say something back…";
+  box.value = answer.saying_text || "";
+  box.addEventListener("input", () => {
+    answer.saying_text = box.value;
+    render();
+  });
+  rows.push(box);
+
+  const foot = document.createElement("div");
+  foot.className = "popup-foot";
+  // Still there, because "yes, go on" is the commonest answer in the world — but they
+  // fill the box rather than being the only two things sayable.
+  for (const [label, words, why] of [
+    ["No", "Declined — that is not what I meant.", "Tell them this is not it"],
+    ["Yes", "Accepted — go ahead.", "Tell them to go ahead"],
+  ]) {
+    const quick = document.createElement("button");
+    quick.type = "button";
+    quick.className = "popup-do answer-quick";
+    quick.disabled = Boolean(answer.saying);
+    quick.textContent = label;
+    quick.title = why;
+    quick.addEventListener("click", () => void verdict(answer, words));
+    foot.append(quick);
+  }
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "popup-do popup-go";
+  go.disabled = Boolean(answer.saying) || !(answer.saying_text || "").trim();
+  go.textContent = answer.saying ? "Sending…" : "Reply";
+  go.addEventListener("click", () => void verdict(answer, answer.saying_text || ""));
+  foot.append(go);
+  rows.push(foot);
+  return rows;
 }
 
 /**
@@ -223,15 +290,57 @@ function flyToWork(marks) {
 }
 
 /**
- * Against the side of the screen the rail is on, not the middle of it.
+ * Pick the window up and put it somewhere else.
+ *
+ * The same shape as the rail's own drag: hold the pointer, follow it, and hold the
+ * window inside the room of whichever screen it is being carried over — the desktop
+ * spans several, and a window dragged off the edge of one has to stop at the edge of
+ * that one rather than at the edge of all of them.
+ */
+function startWorkDrag(event) {
+  // Not the close button, and not a right click on the bar.
+  if (event.button !== 0 || event.target.closest(".popup-shut")) return;
+  event.preventDefault();
+  const box = el.work.getBoundingClientRect();
+  const grabX = event.clientX - box.left;
+  const grabY = event.clientY - box.top;
+
+  const move = (moved) => {
+    const size = el.work.getBoundingClientRect();
+    const room = usable(screenAt(state.screens, { x: moved.clientX, y: moved.clientY }));
+    state.work.at = {
+      x: Math.max(room.left, Math.min(room.right - size.width, moved.clientX - grabX)),
+      y: Math.max(room.top, Math.min(room.bottom - size.height, moved.clientY - grabY)),
+    };
+    placeWork();
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    // Where somebody put it is how they set this up, and it is kept with the rest of it.
+    remember();
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
+/**
+ * Where it sits: where it was put, or against the side of the screen the rail is on.
  *
  * The library window is centred because it is opened, used and closed. This one is meant
- * to stay open while somebody works, and a window that sits in the middle of the screen
- * for an hour is a window in the way.
+ * to stay open while somebody works, and a window in the middle of the screen for an
+ * hour is a window in the way — so it starts out of the way and then goes wherever it is
+ * carried.
  */
 function placeWork() {
-  const room = usable(screenAt(state.screens, state.at || { x: 0, y: 0 }));
+  const room = usable(screenAt(state.screens, state.work.at || state.at || { x: 0, y: 0 }));
   const box = el.work.getBoundingClientRect();
-  el.work.style.left = `${Math.round(room.right - box.width - EDGE)}px`;
-  el.work.style.top = `${Math.round(room.top + Math.max(0, room.bottom - room.top - box.height) / 2)}px`;
+  const put = state.work.at || {
+    x: room.right - box.width - EDGE,
+    y: room.top + Math.max(0, room.bottom - room.top - box.height) / 2,
+  };
+  // Held inside the room whatever it was last told, so a window remembered from a
+  // desktop with another monitor on it does not open off the side of this one.
+  el.work.style.left = `${Math.round(Math.max(room.left, Math.min(room.right - box.width, put.x)))}px`;
+  el.work.style.top = `${Math.round(Math.max(room.top, Math.min(room.bottom - box.height, put.y)))}px`;
 }

@@ -1128,6 +1128,15 @@ body {
   margin-right: 0;
   width: 100%;
 }
+/* The bar with the window's name on it is the handle, which is where every other window
+   on this desktop is picked up from. */
+.work-head {
+  cursor: grab;
+  touch-action: none;
+}
+.work-head:active {
+  cursor: grabbing;
+}
 .work-history {
   display: flex;
   flex-direction: column;
@@ -1195,6 +1204,20 @@ body {
 .work-rewind {
   margin-top: 2px;
 }
+/* The conversation so far, inside the entry it belongs to. Scrolled rather than grown:
+   a run that talks six times must not push everything else out of the window. */
+.work-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 2px 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--accent, #ff6b6b);
+}
+
 .work-foot {
   display: flex;
   align-items: center;
@@ -1507,53 +1530,13 @@ body {
   cursor: default;
 }
 
-/* ── answers, on the regions they are about ───────────────────────────────── */
+/* ── what came back, inside the Work window ───────────────────────────────── */
 
 /*
- * The layer takes no pointer at all; the pins and panels in it take their own. Anything
- * else and a full-screen sheet would sit between somebody and their desktop for as long
- * as they were waiting on an agent.
+ * The pin and the panel it opened are gone with the marks. A turn and the box you answer
+ * it in kept their names, because they are the same two things — read in the window now
+ * rather than on the desktop.
  */
-.answers {
-  position: absolute;
-  inset: 0;
-  z-index: 65;
-  pointer-events: none;
-}
-.answer-at {
-  position: absolute;
-  transform: translate(-50%, -50%);
-}
-.answer-dot {
-  all: unset;
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
-  cursor: pointer;
-  pointer-events: auto;
-  font-size: 11px;
-  color: #1c1c1e;
-  background: var(--accent, #ff6b6b);
-  box-shadow: 0 2px 12px rgb(0 0 0 / 50%);
-}
-/* Still waiting: it breathes, so it reads as pending rather than as an answer nobody
-   has opened. */
-.answer-dot[data-waiting="true"] {
-  background: rgb(28 28 30 / 97%);
-  color: #f7f7f8;
-  border: 1px solid var(--accent, #ff6b6b);
-  animation: breathe 1.8s ease-in-out infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .answer-dot[data-waiting="true"] {
-    animation: none;
-  }
-}
-
-/* Every turn, and whose it was. What somebody typed back is indented and quieter, so a
-   panel with four turns in it reads as a conversation rather than as one long reply. */
 .answer-turn {
   margin: 0 0 8px;
 }
@@ -1575,53 +1558,6 @@ body {
   padding-right: 10px;
 }
 
-.answer-said {
-  /* Placed by `placeAnswer`, in the coordinates of the layer rather than of the pin:
-     an answer at the edge of a display opens on the side that fits, which is not a
-     fixed offset from anything. */
-  position: absolute;
-  width: 320px;
-  max-height: 40vh;
-  /* The panel does not scroll; the reply inside it does. A long answer used to carry
-     Accept and Decline off the bottom of its own box, so deciding meant scrolling to
-     the end of something you had already read. */
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 11px 12px;
-  border-radius: 12px;
-  pointer-events: auto;
-  background: rgb(20 20 22 / 98%);
-  border: 1px solid rgb(255 255 255 / 12%);
-  box-shadow: 0 24px 60px rgb(0 0 0 / 60%);
-}
-.answer-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-.answer-head .popup-shut {
-  margin-left: auto;
-}
-.answer-who {
-  flex: 1;
-  margin: 0 0 6px;
-  font-size: 10.5px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #8e8e93;
-}
-.answer-text {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  margin: 0 0 4px;
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: #f7f7f8;
-  white-space: pre-wrap;
-}
 
 /* A measurement's number, sitting on the line it belongs to. */
 .span-label {
