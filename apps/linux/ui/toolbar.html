@@ -41,7 +41,6 @@
         <div id="fly-row" class="flyout flyout-wide" role="menu" hidden></div>
         <div id="fly-points" class="flyout flyout-send" role="menu" hidden></div>
         <div id="fly-how" class="flyout flyout-wide" role="menu" hidden></div>
-        <div id="fly-send" class="flyout flyout-send" role="dialog" hidden></div>
         <div
           id="fly-automate"
           class="flyout flyout-send"
@@ -120,6 +119,14 @@
       recognised by its picture and not by its name. Centred on the screen rather than
       hung off a key: it is not about the rail, it is about the mark that opened it.
     -->
+    <!--
+      Where the work lives once it has stopped living on somebody's screen: what is
+      waiting to be sent, what has been sent, what came back, and the way back to an
+      earlier prompt. Against the side of the screen rather than the middle of it,
+      because it is meant to stay open while somebody works.
+    -->
+    <div id="work" class="work" role="dialog" aria-label="Work" hidden></div>
+
     <div
       id="library"
       class="library"
@@ -142,6 +149,7 @@
     <script src="toolbar-answers.js"></script>
     <script src="toolbar-compose.js"></script>
     <script src="toolbar-library.js"></script>
+    <script src="toolbar-work.js"></script>
     <script src="toolbar-send.js"></script>
     <script src="toolbar-dock.js"></script>
     <script src="toolbar.js"></script>

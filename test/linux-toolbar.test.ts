@@ -184,7 +184,12 @@ type ToolbarHelpers = {
   anchorOf: (where: Front | null) => Anchor | null;
   intoWindow: (box: Placed, at: Rect, screen: Size) => Placed;
   ontoScreen: (box: Placed, at: Rect, screen: Size) => Placed;
-  showingNow: (mark: { tool: string; on?: Anchor | null }, front: InFront | null) => boolean;
+  showingNow: (
+    mark: { tool: string; on?: Anchor | null },
+    front: InFront | null,
+    look?: { tool?: string; showing?: boolean },
+  ) => boolean;
+  entrySaid: (entry: { said?: string; shots?: unknown[] }) => string;
   asDrawn: (mark: Held, front: InFront | null, screen: Size) => Held;
   unchosen: (
     marks: { tool: string; design?: string; source?: string; fromLibrary?: Chosen | null }[],
@@ -268,7 +273,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, answerAt, ANSWER_AWAY, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
   context,
 );
 const {
@@ -348,6 +353,7 @@ const {
   ontoScreen,
   showingNow,
   asDrawn,
+  entrySaid,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -1409,8 +1415,15 @@ describe("nothing is reachable only by right click", () => {
   // vouch for its own destinations and the second test would prove nothing.
   const offers = /howRow\([\s\S]{0,400}?\n {2}\}?\);/g;
 
-  const opens = (source: string) =>
-    [...source.matchAll(/flyout\("(\w+)"\)/g)].map((found) => found[1]!);
+  /*
+   * Where a press goes. A flyout by name, or the Work window, which is opened by its own
+   * function rather than through `flyout` — it is a window, not a menu, and does not
+   * pretend to be one.
+   */
+  const opens = (source: string) => [
+    ...[...source.matchAll(/flyout\("(\w+)"\)/g)].map((found) => found[1]!),
+    ...[...source.matchAll(/\b(?:openWork|toggleWork)\b/g)].map(() => "work"),
+  ];
   const hidden = new Set([...page.matchAll(RIGHT_CLICK)].flatMap((block) => opens(block[0])));
   const offered = [...page.matchAll(offers)].flatMap((block) => opens(block[0]));
   const shown = new Set(opens(page.replaceAll(RIGHT_CLICK, "").replaceAll(offers, "")));
@@ -2226,6 +2239,89 @@ describe("what a pin says while it waits", () => {
         ).toBe(true);
       }
     }
+  });
+});
+
+describe("the work leaves the screen", () => {
+  const ON = {
+    id: "0x1",
+    at: { x: 0, y: 0, width: 800, height: 600 },
+    title: "Prices",
+    url: null,
+  };
+  const pin = { tool: "pointAt", on: ON };
+  const front = { id: "0x1", title: "Prices" };
+
+  test("marks are drawn while a tool is out, and not once it is away", () => {
+    /*
+     * The whole complaint. Making four marks needs them visible; everything after that
+     * does not, and a screen carrying yesterday's annotations is a screen somebody works
+     * around rather than one they work on.
+     */
+    expect(showingNow(pin, front, { tool: "pointAt", showing: false })).toBe(true);
+    expect(showingNow(pin, front, { tool: "pointer", showing: false })).toBe(false);
+  });
+
+  test("and always when the Work window has been asked to show them", () => {
+    // The way to look at what is waiting without picking a tool up.
+    expect(showingNow(pin, front, { tool: "pointer", showing: true })).toBe(true);
+  });
+
+  test("a screenshot is not a mark on somebody's screen and is unaffected", () => {
+    expect(showingNow({ tool: "screenshot", on: ON }, front, { tool: "pointer" })).toBe(true);
+  });
+
+  test("nothing asked means nothing changed", () => {
+    // Every caller passes it; a caller that did not would get what it got before rather
+    // than an empty screen it never asked for.
+    expect(showingNow(pin, front)).toBe(true);
+  });
+
+  test("a sent piece of work is called by its words, or by what went", () => {
+    expect(entrySaid({ said: "  the gap under the  header ", shots: [null] })).toBe(
+      "the gap under the header",
+    );
+    // A send with no note is a send whose whole content is the pictures, and that is
+    // what it is called — not an empty line somebody has to hover to identify.
+    expect(entrySaid({ said: "", shots: [null, null] })).toBe("2 marks");
+    expect(entrySaid({ shots: [null] })).toBe("1 mark");
+    expect(entrySaid({})).toContain("nothing marked");
+  });
+});
+
+describe("where the work is assembled", () => {
+  const dir = new URL("../apps/linux/ui/", import.meta.url);
+  const rail = readFileSync(new URL("toolbar-rail.js", dir), "utf8");
+  const send = readFileSync(new URL("toolbar-send.js", dir), "utf8");
+  const compose = readFileSync(new URL("toolbar-compose.js", dir), "utf8");
+
+  test("one place, not two", () => {
+    // The composer had a flyout of its own and the window has a section for it. Both
+    // would be two places to assemble the same send, which is the thing this replaces.
+    expect(rail).toContain('send.addEventListener("click", toggleWork)');
+    expect(compose).toContain("function drawComposer(into)");
+    expect(compose).not.toContain("el.flySend");
+  });
+
+  test("what was sent is kept before what was sent is cleared", () => {
+    /*
+     * The marks and the words are cleared the moment a send lands. An entry assembled
+     * after that is an entry about pictures nobody can see and words nobody typed, so
+     * both are held before anything is dispatched.
+     */
+    const held = send.indexOf("const said = state.text");
+    const dispatched = send.indexOf('await invoke("colai_send"');
+    const cleared = send.indexOf('state.text = ""');
+    expect(held).toBeGreaterThan(-1);
+    expect(held).toBeLessThan(dispatched);
+    expect(held).toBeLessThan(cleared);
+  });
+
+  test("the answer the pin holds is the answer the history holds", () => {
+    // One object, so a reply landing on the pin lands in the list too. Two copies would
+    // be two truths about the same conversation.
+    expect(send).toContain("if (answer) state.answers.push(answer)");
+    expect(send).toMatch(/state\.history = \[\s*\{[\s\S]*?answer,/);
   });
 });
 

@@ -22,6 +22,7 @@ const el = {
   flyRow: document.getElementById("fly-row"),
   flyPoints: document.getElementById("fly-points"),
   library: document.getElementById("library"),
+  work: document.getElementById("work"),
   flyHow: document.getElementById("fly-how"),
   flyAutomate: document.getElementById("fly-automate"),
   flyAgents: document.getElementById("fly-agents"),
@@ -35,7 +36,7 @@ const el = {
   capture: document.getElementById("capture"),
   popup: document.getElementById("popup"),
   answers: document.getElementById("answers"),
-  flySend: document.getElementById("fly-send"),
+
 };
 
 const state = {
@@ -101,6 +102,11 @@ const state = {
   runs: [],
   // The library window, while it is open, and which mark it will answer.
   library: null,
+  // The Work window: what is waiting, what has been sent, and whether marks are drawn.
+  work: { open: false, showing: false },
+  // What has been sent, newest first. Kept for the session — surviving a restart is a
+  // store, and a store is decided on purpose rather than in passing.
+  history: [],
   // The window somebody is looking at, as the watcher last reported it. Null until it
   // has spoken, which is a reason to leave every mark alone rather than to hide them —
   // a window with an empty id is the other thing, and means nothing is in front.
@@ -275,12 +281,12 @@ function render() {
     button.setAttribute("aria-pressed", String(Number(button.dataset.seconds) === state.recordFor));
   }
   el.flyAgents.hidden = state.open !== "agents";
-  el.flySend.hidden = state.open !== "send";
+
   // Filled before it is placed. A menu is measured to decide whether it fits on the
   // screen, and measuring it empty answers a question about a different menu — which is
   // how a full list of conversations came to hang off the bottom of the display while
   // the same code, run again a moment later, put it back.
-  if (state.open === "send") drawComposer();
+
   if (state.open === "agents") drawWho();
   // Under the key that opened it, measured rather than guessed. Four hand-tuned
   // offsets used to stand here, and they were four chances to drift: adding the record
@@ -295,7 +301,7 @@ function render() {
     [el.flyPoints, buttons.agents],
     [el.flyHow, buttons.send],
     [el.flyAutomate, buttons.send],
-    [el.flySend, buttons.send],
+
     [el.flyAgents, buttons.agents],
   ]) {
     placeFlyout(node, vertical, vertical ? anchor.offsetTop : anchor.offsetLeft);
@@ -305,6 +311,7 @@ function render() {
   drawAnswers();
   drawPopup();
   drawLibrary();
+  drawWork();
   drawTrouble();
   // Left mounted while a popup is open, which is how a click off the popup is heard at
   // all — the popup is stacked above it, so its own controls still get their clicks.
@@ -362,6 +369,7 @@ function shape() {
       : [boxAround(el.wrap)];
   if (state.popup !== null && !el.popup.hidden) rects.push(boxAround(el.popup));
   if (state.library !== null && !el.library.hidden) rects.push(boxAround(el.library));
+  if (state.work.open && !el.work.hidden) rects.push(boxAround(el.work));
   for (const answer of el.answers.children) rects.push(boxAround(answer));
   const key = JSON.stringify(rects);
   if (key === shaped) return;

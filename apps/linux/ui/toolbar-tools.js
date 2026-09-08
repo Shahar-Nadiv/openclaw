@@ -255,6 +255,21 @@ function ontoScreen(box, at, screen) {
 }
 
 /**
+ * What a sent piece of work is called in the list of things that have been sent.
+ *
+ * The words somebody typed, when there were any. Failing that, what was marked — which
+ * is the honest fallback rather than a clever one: a send with no note is a send whose
+ * whole content is the pictures, and "3 marks" is what it is.
+ */
+function entrySaid(entry) {
+  const words = (entry.said || "").trim().replace(/\s+/g, " ");
+  if (words) return words;
+  const many = entry.shots ? entry.shots.length : 0;
+  if (many) return counted(many, "mark");
+  return "Sent with nothing marked";
+}
+
+/**
  * A mark as it should be drawn now: at its window's rectangle, not the desktop's.
  *
  * The mark itself is never changed. `region.box` is where this was on the screen at the
@@ -287,8 +302,19 @@ function asDrawn(mark, front, screen) {
  * the active window, so a rule that only asked "is your window in front" would erase
  * every mark the instant anybody reached for the toolbar.
  */
-function showingNow(mark, front) {
+function showingNow(mark, front, look) {
   if (!FOLLOWS_WINDOW.includes(mark.tool)) return true;
+  /*
+   * Marks are for making, not for living on somebody's desktop.
+   *
+   * Making four of them needs them visible; everything after that does not, and a screen
+   * with yesterday's annotations on it is a screen somebody works around. So they are
+   * drawn while a marking tool is out, and otherwise only when asked for.
+   *
+   * `look` rather than reading the state directly, so which marks are drawn stays a
+   * decision that can be shown to be right rather than one buried in a renderer.
+   */
+  if (look && !look.showing && (!look.tool || look.tool === "pointer")) return false;
   const on = mark.on;
   if (!on || front === undefined || front === null) return true;
   // The toolbar is not something else. Opening a popup makes the overlay the active

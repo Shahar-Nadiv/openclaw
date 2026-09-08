@@ -759,11 +759,19 @@ async function createAutomation() {
   }
 }
 
-function drawComposer() {
+/**
+ * What is waiting to be sent, drawn into whatever is holding it.
+ *
+ * It held one place — its own flyout — and now it is a section of the Work window. The
+ * panel did not change; where it hangs did.
+ */
+function drawComposer(into) {
   const rows = [];
   const title = document.createElement("p");
   title.className = "agents-title";
-  title.textContent = "Send what you marked";
+  // It is a section of the Work window now, and the window is already called Work. What
+  // this part says is which of it has not gone yet.
+  title.textContent = "Waiting to send";
   rows.push(title);
 
   if (state.marks.length === 0) {
@@ -944,7 +952,7 @@ function drawComposer() {
   foot.append(to, go);
   rows.push(foot);
 
-  el.flySend.replaceChildren(...rows);
+  into.replaceChildren(...rows);
 }
 
 

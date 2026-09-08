@@ -322,8 +322,11 @@ function drawMarks() {
   // what it is pointing at.
   const front = state.front;
   const screen = screenSize();
+  // Whether marks are on the screen at all: while a tool is out, or when the Work window
+  // has been asked to show them.
+  const look = { tool: state.tool, showing: state.work.showing };
   for (const held of state.marks) {
-    if (!showingNow(held, front)) continue;
+    if (!showingNow(held, front, look)) continue;
     const mark = asDrawn(held, front, screen);
     // A span has no region — it is two points and the distance between them — so the
     // shape cannot be read off the mark the way a box's can. Without this the number
@@ -364,7 +367,7 @@ function drawMarks() {
   // One mark on screen needed none of this; four of them are unreadable without it.
   const drawnPins = state.marks
     .map((held) => {
-      if (!showingNow(held, front)) return null;
+      if (!showingNow(held, front, look)) return null;
       const mark = asDrawn(held, front, screen);
       const spot = badgeAt(mark);
       // Numbered from the mark itself, not from the copy: the number has to be the one
@@ -385,7 +388,7 @@ function drawMarks() {
   // unit square stretched to the display and would stretch the text with it.
   for (const held of state.marks) {
     if (held.tool !== "measure" || typeof held.px !== "number") continue;
-    if (!showingNow(held, front)) continue;
+    if (!showingNow(held, front, look)) continue;
     // The label rides with its line, so it is placed from the drawn copy too. The number
     // it says does not change: a measurement is of the thing, not of the screen it
     // happens to be on, and a window somebody resized did not re-measure anything.

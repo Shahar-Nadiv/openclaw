@@ -147,6 +147,10 @@ async function sendMarks(ids) {
     render();
     return;
   }
+  // Held before anything is dispatched: the words and the pictures are cleared the
+  // moment the send lands, and the record of what was sent is assembled after that.
+  const said = state.text;
+  const shots = going.map((mark) => mark.thumb || null);
   state.sending = true;
   render();
   try {
@@ -204,15 +208,28 @@ async function sendMarks(ids) {
     // Only when the answer can actually come back. A pin waiting on a reply that will
     // never arrive here looks exactly like an agent still thinking, which is the one
     // thing it must not look like.
-    if (sent.watching) {
-      state.answers.push({
+    const named = state.receiving.name || who.id;
+    const answer = sent.watching
+      ? { sessionKey: sent.sessionKey, at: middleOf(going), who: named, turns: [], open: false }
+      : null;
+    if (answer) state.answers.push(answer);
+    // And the same work, kept where it can be looked at afterwards.
+    //
+    // Built here rather than later because this is the last moment what went is still
+    // known: the marks are cleared two lines down, and an entry assembled after that
+    // would be an entry about pictures nobody can see any more. The answer is the same
+    // object the pin holds, so a reply landing on one lands on both.
+    state.history = [
+      {
+        at: Date.now(),
+        who: named,
         sessionKey: sent.sessionKey,
-        at: middleOf(going),
-        who: state.receiving.name || who.id,
-        turns: [],
-        open: false,
-      });
-    }
+        said,
+        shots,
+        answer,
+      },
+      ...state.history,
+    ];
     state.trouble = sent.watching
       ? null
       : `Sent, but the reply will only be in ${state.receiving.name || who.id} — colai could not listen for it here.`;

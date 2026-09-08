@@ -174,7 +174,9 @@ function buildRail() {
   send.title = "Send what you marked";
   send.innerHTML =
     icon("send") + '<span class="send-many"></span><span class="caret">▾</span>';
-  send.addEventListener("click", () => flyout("send"));
+  // The Work window rather than a flyout of its own: one place where work is assembled,
+  // and the same place it is reviewed afterwards.
+  send.addEventListener("click", toggleWork);
   // Sending is what this key does; scheduling the same thing is what it is also for. A
   // right click, the same as every other key with more behind it — "more about this
   // key" rather than another key.
@@ -217,12 +219,7 @@ function buildRail() {
   for (const [id, kind] of Object.entries(DESIGNS)) {
     designRow(el.flyDesign, id, kind);
   }
-  howRow(
-    "send",
-    "Send now",
-    "hand it to the agent straight away",
-    () => flyout("send"),
-  );
+  howRow("send", "Send now", "hand it to the agent straight away", openWork);
   howRow("schedule", "Create an automation…", "the same thing, on a schedule", () => {
     // Fresh every time. An automation is about one piece of work, and a half-filled
     // schedule left over from the last one is a job somebody creates by accident.
