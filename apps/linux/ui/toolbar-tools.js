@@ -870,6 +870,28 @@ function stillRunning(runs, now) {
   return (runs || []).filter((run) => now - run.heard < RUN_QUIET);
 }
 
+/**
+ * Which runs are still underway, once the Gateway has been asked.
+ *
+ * `stillRunning` alone is an inference: this toolbar started something, has not been
+ * told it ended, and it has not yet gone quiet. All three can be true of a run that
+ * finished — a terminal frame that never arrived leaves the rail claiming work for the
+ * whole four minutes, with a stop key over a run there is nothing left to stop.
+ *
+ * But the Gateway *knows*, and it is already being asked every few seconds for the
+ * light. So its answer settles it: nothing running anywhere means nothing running here,
+ * whatever was last heard. Only zero is treated as authoritative — a Gateway busy with
+ * somebody else's agent says nothing about this one, and clearing on that would put the
+ * light out while work was genuinely underway.
+ *
+ * The quiet timeout stays underneath, for the case this cannot cover: a Gateway that
+ * cannot be reached at all, where `work` is whatever was last known and may be stale.
+ */
+function runsNow(runs, work, now) {
+  if (work && work.running === 0) return [];
+  return stillRunning(runs, now);
+}
+
 /*
  * ── what the whole Gateway is doing ──────────────────────────────────────────
  *
@@ -910,6 +932,19 @@ function moodOf(work) {
     if (count > 0) return { mood: name, many: count };
   }
   return null;
+}
+
+/**
+ * What to mark the mascot with, or nothing at all.
+ *
+ * Null, not an empty string. The stylesheet keys the pulse off the *presence* of
+ * `data-mood`, so clearing it to "" left the attribute on the element and the animation
+ * running for ever over no agent at all — a light quietly breathing about nothing. The
+ * caller removes the attribute on null; there is no such thing as an empty mood.
+ */
+function moodMark(work) {
+  const mood = moodOf(work);
+  return mood ? mood.mood : null;
 }
 
 /** What the icon's tooltip says, given everything happening at once. */

@@ -143,6 +143,7 @@ type ToolbarHelpers = {
   spotSaid: (spot: Spot | null) => string | null;
   samePlace: (one: Front | null, two: Front | null) => boolean;
   stillRunning: (runs: Run[] | undefined, now: number) => Run[];
+  runsNow: (runs: Run[] | undefined, work: Work | null, now: number) => Run[];
   runningSaid: (runs: Run[] | undefined) => string | null;
   RUN_QUIET: number;
   sheeted: (mark: { tool: string; frames?: number }) => boolean;
@@ -162,6 +163,7 @@ type ToolbarHelpers = {
   MOODS: Record<string, { colour: string; says: (many: number) => string }>;
   moodOf: (work: Work | null) => { mood: string; many: number } | null;
   moodSaid: (work: Work | null) => string;
+  moodMark: (work: Work | null) => string | null;
   SOURCES: Record<string, { label: string; says: string }>;
   TAKES_SOURCE: string[];
   sourceOf: (mark: { design?: string; source?: string; fromLibrary?: Chosen | null }) => string;
@@ -267,7 +269,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
   context,
 );
 const {
@@ -319,6 +321,7 @@ const {
   spotSaid,
   samePlace,
   stillRunning,
+  runsNow,
   runningSaid,
   RUN_QUIET,
   sheeted,
@@ -333,6 +336,7 @@ const {
   MOODS,
   moodOf,
   moodSaid,
+  moodMark,
   SOURCES,
   TAKES_SOURCE,
   sourceOf,
@@ -1659,7 +1663,9 @@ describe("the page and the commands it calls", () => {
   /** Every command the back end declares, and which of its arguments it insists on. */
   const commands = new Map<string, string[]>();
   for (const found of rust.matchAll(
-    /#\[tauri::command\]\s*(?:pub\(crate\)\s*)?(?:async\s*)?fn (\w+)\(([\s\S]*?)\)\s*->/g,
+    // A command that returns nothing has no `->`, and matching only on one made this
+    // sweep run past it and swallow the command after it — which then read as missing.
+    /#\[tauri::command\]\s*(?:pub\(crate\)\s*)?(?:async\s*)?fn (\w+)\(([\s\S]*?)\)\s*(?:->|\{)/g,
   )) {
     const required = found[2]!
       .replaceAll(/\/\/[^\n]*/g, "")
@@ -1742,6 +1748,73 @@ describe("knowing an agent is working", () => {
     // not happening. `session.ended` is the usual way it stops; this is the net beneath.
     const now = 1_000_000;
     expect(stillRunning([run("a", now - RUN_QUIET - 1)], now)).toHaveLength(0);
+  });
+
+  test("no agent working leaves no mood on the mascot at all", () => {
+    /*
+     * The bug this is about: the agent finishes and the icon keeps breathing green.
+     *
+     * The stylesheet pulses on `.home-key[data-mood]` — the attribute being *present* —
+     * and the render cleared it by assigning "". An empty string is still an attribute,
+     * so the selector went on matching and `minding` went on animating for ever over a
+     * desktop where nothing was happening.
+     */
+    expect(moodMark(null)).toBe(null);
+    expect(moodMark({ running: 0, waiting: 0, trouble: 0 })).toBe(null);
+    // And it still says the mood when there is one to say.
+    expect(moodMark({ running: 2, waiting: 0, trouble: 0 })).toBe("working");
+    expect(moodMark({ running: 1, waiting: 1, trouble: 0 })).toBe("waiting");
+    expect(moodMark({ running: 1, waiting: 1, trouble: 1 })).toBe("trouble");
+  });
+
+  test("the mascot's mood is removed, not emptied, because the stylesheet keys on it being there", () => {
+    // A pure helper cannot catch this on its own: the defect was the assignment, and it
+    // is only wrong because of what the stylesheet does with a bare attribute. So the
+    // two files are asserted against each other.
+    const style = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+    const render = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
+    // The stylesheet does key an animation off the attribute simply being present.
+    expect(style).toMatch(/\.home-key\[data-mood\]\s*\{[^}]*animation:/);
+    // So the render must delete it rather than assign a falsy value to it.
+    expect(render).toMatch(/delete\s+buttons\.settings\.dataset\.mood/);
+    expect(render).not.toMatch(/dataset\.mood\s*=\s*["'`]["'`]/);
+    expect(render).not.toMatch(/dataset\.mood\s*=\s*\w+\s*\?[^;]*:\s*["'`]["'`]/);
+  });
+
+  test("when the Gateway says nothing is running, nothing is running", () => {
+    /*
+     * The bug this is about: an agent finishes, and the stop key stays over a run there
+     * is nothing left to stop while the crab keeps walking green. Every ingredient of
+     * `stillRunning` is still true — this toolbar started it, was never told it ended,
+     * and it spoke a moment ago — because all three are inferences, and the terminal
+     * frame that would have settled it never arrived.
+     *
+     * The Gateway knows, and is already asked every few seconds for the light.
+     */
+    const now = 1_000_000;
+    const just = [run("a", now - 1000)];
+    expect(stillRunning(just, now)).toHaveLength(1);
+    expect(runsNow(just, { running: 0, waiting: 0, trouble: 0 }, now)).toHaveLength(0);
+  });
+
+  test("somebody else's agent working is not this one still working", () => {
+    // Only zero is taken as the answer. The light counts every agent on the Gateway, so
+    // a busy count says nothing about this run — and clearing on it would put the stop
+    // key out while work was genuinely underway.
+    const now = 1_000_000;
+    const just = [run("a", now - 1000)];
+    expect(runsNow(just, { running: 3, waiting: 0, trouble: 0 }, now)).toHaveLength(1);
+    // Busy, but this one has gone quiet: the net underneath still catches it.
+    expect(
+      runsNow([run("a", now - RUN_QUIET - 1)], { running: 3, waiting: 0, trouble: 0 }, now),
+    ).toHaveLength(0);
+  });
+
+  test("a Gateway that has not answered yet decides nothing", () => {
+    // Null is "not asked", not "nothing running". Treating it as zero would put the
+    // light out for the first seconds after launch, every launch.
+    const now = 1_000_000;
+    expect(runsNow([run("a", now - 1000)], null, now)).toHaveLength(1);
   });
 
   test("the net is slack enough not to give up on a thinking agent", () => {
@@ -2674,7 +2747,10 @@ describe("one light for every agent at once", () => {
     // itself. The gait itself is shared now — the pin waiting on a reply walks too — so
     // the mood that earns it is decided in the page rather than in the selector.
     const page = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
-    expect(page).toContain('mood.mood === "working"');
+    expect(page).toContain('mark === "working"');
+    // And the mark it walks on is the same one the glow is keyed to, so the gait and the
+    // colour can never disagree about whether anything is happening.
+    expect(page).toContain("const mark = moodMark(state.atWork);");
   });
 
   test("a desktop that asked for less movement gets none of it", () => {

@@ -212,7 +212,7 @@ function render() {
   // What is actually still running, rather than what was last started. A run that has
   // gone quiet for minutes is one the toolbar has lost track of, and claiming it is
   // still working is a worse lie than never having said so.
-  state.runs = stillRunning(state.runs, Date.now());
+  state.runs = runsNow(state.runs, state.atWork, Date.now());
   const working = runningSaid(state.runs);
   buttons.agents.dataset.working = String(state.runs.length > 0);
   buttons.stop.hidden = state.runs.length === 0;
@@ -221,12 +221,16 @@ function render() {
   // The mascot carries what the whole Gateway is doing, including the agents somebody
   // is not looking at. `data-mood` rather than a class, so the stylesheet holds the one
   // table of what each state looks like and this holds none of it.
-  const mood = moodOf(state.atWork);
-  buttons.settings.dataset.mood = mood ? mood.mood : "";
+  // Removed rather than emptied. The stylesheet pulses on `[data-mood]` being *there*,
+  // so an empty one is still a mood as far as CSS is concerned — and left the glow
+  // breathing over a desktop where nothing at all was happening.
+  const mark = moodMark(state.atWork);
+  if (mark) buttons.settings.dataset.mood = mark;
+  else delete buttons.settings.dataset.mood;
   // The one trigger for the gait, wherever the crab is drawn. Working is the only mood
   // it walks in: a crab scuttling under a red light would be the toolbar contradicting
   // itself.
-  buttons.settings.dataset.walking = String(Boolean(mood) && mood.mood === "working");
+  buttons.settings.dataset.walking = String(mark === "working");
   buttons.settings.title = moodSaid(state.atWork);
   buttons.settings.setAttribute("aria-label", buttons.settings.title);
 
