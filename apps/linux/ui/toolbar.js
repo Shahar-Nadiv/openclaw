@@ -120,6 +120,10 @@ const state = {
   // this toolbar started. Null until the Gateway has answered once: no light is the
   // honest state before anything is known, and a green one would be a claim.
   atWork: null,
+  // Whether this desktop lets an agent have a cursor of its own, as measured rather
+  // than as hoped. Null until it has been tried once — "not asked yet" and "no" are
+  // different things to say to somebody.
+  sharing: null,
   // Which agent is holding which window, right now. Several of them can be working at
   // once, and the whole point of saying so is that an agent typing into a window
   // somebody cannot see is what makes a shared desktop feel haunted rather than shared.
@@ -624,6 +628,15 @@ async function start() {
   // the second one meant a toolbar opened onto a desktop nobody then switched away from
   // never learned which window was in front, so every mark stayed pinned to the screen
   // exactly as it had before any of this was written.
+  // Asked once, on the way up. The whole of parallel working rests on the answer, and
+  // it is measured on this machine rather than assumed from the fact that X supports it.
+  void invoke("colai_shares_input")
+    .then((says) => {
+      state.sharing = says || null;
+      render();
+    })
+    .catch(() => {});
+
   void invoke("colai_in_front")
     .then((front) => {
       // Only if nothing has been heard since: an event that arrived while this was in

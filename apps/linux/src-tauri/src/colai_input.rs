@@ -206,7 +206,58 @@ pub(crate) fn colai_free_surface(app: AppHandle, holder: String, window: String)
 #[tauri::command]
 pub(crate) fn colai_agent_gone(app: AppHandle, holder: String) {
     with_desk(|desk| desk.dropped(&holder));
+    // Its hands go with it. A pair left behind outlives the agent that used it, and
+    // shows up as a cursor on the desktop belonging to nobody.
+    #[cfg(target_os = "linux")]
+    crate::colai_hands::unmake(&holder);
     say_who(&app);
+}
+
+/// Whether an agent can have a cursor of its own on this desktop.
+///
+/// Asked by the page so it can say so, because the honest answer is sometimes no and a
+/// feature that quietly does nothing is worse than one that explains itself.
+///
+/// Async, and that is not a detail. Tauri runs a synchronous command on the main thread,
+/// and this one waits on a background thread that creates an X device and syncs with the
+/// server twice — which froze the whole toolbar for as long as that took, on every
+/// launch. Nothing that waits on X belongs on the thread that draws.
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub(crate) async fn colai_shares_input() -> crate::colai_hands::Honours {
+    crate::colai_hands::honours()
+}
+
+/// One agent, doing one thing, in one window — the whole of it in one call.
+///
+/// This is the seam the `computer` tool's actions land on. Claiming and acting are one
+/// step on purpose: two calls would let an agent act without ever claiming, and a rule
+/// that can be skipped by forgetting to ask is not a rule. Refused with the name of
+/// whoever holds it, so the caller has something to wait for rather than a bare no.
+///
+/// Async for the same reason as `colai_shares_input`: it waits on the display thread,
+/// and a command that waits must not be holding the thread that draws.
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub(crate) async fn colai_agent_act(
+    app: AppHandle,
+    holder: String,
+    window: String,
+    act: crate::colai_hands::Act,
+) -> Result<(), String> {
+    let got =
+        with_desk(|desk| desk.claim(&holder, Surface::window(window.clone()), Instant::now()));
+    if let Claimed::Busy { holder } = got {
+        return Err(format!("{holder} is working in that window"));
+    }
+    say_who(&app);
+    // Hex as X and the rest of the toolbar write it; 0 means "wherever the focus is",
+    // which is what a click needs and a keystroke must never silently get.
+    let id = window
+        .strip_prefix("0x")
+        .and_then(|hex| u64::from_str_radix(hex, 16).ok())
+        .unwrap_or(0);
+    crate::colai_hands::act(&holder, id, &act)
 }
 
 #[tauri::command]

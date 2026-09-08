@@ -825,6 +825,28 @@ function agoSaid(at, now) {
 }
 
 /**
+ * What to say about whether agents can work beside somebody rather than instead of them.
+ *
+ * Three states, not two. "Not asked yet" is silence — a claim about the desktop made
+ * before anything was measured would be a guess, and this is the one fact the whole
+ * feature stands on. A no carries the reason, because "your desktop refused" and "there
+ * is no X here" send somebody to completely different places.
+ */
+function sharingSaid(sharing) {
+  if (!sharing || !sharing.kind) return null;
+  if (sharing.kind === "yes") {
+    return { ok: true, said: "Each agent works with a cursor of its own." };
+  }
+  const why = (sharing.why || "").trim();
+  return {
+    ok: false,
+    said: why
+      ? `Agents share this desktop's one cursor — ${why}.`
+      : "Agents share this desktop's one cursor.",
+  };
+}
+
+/**
  * How long an agent has been holding a window, said the way somebody reads it.
  *
  * Seconds, then minutes, and never "just now" — the whole reason this is on screen is

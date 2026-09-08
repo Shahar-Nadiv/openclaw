@@ -3,6 +3,7 @@ mod colai;
 mod colai_attach;
 mod colai_capture;
 mod colai_files;
+mod colai_hands;
 mod colai_input;
 #[cfg(target_os = "linux")]
 mod colai_inspect;
@@ -1482,6 +1483,10 @@ fn main() {
         colai_input::colai_free_surface,
         colai_input::colai_agent_gone,
         colai_input::colai_who_is_working,
+        #[cfg(target_os = "linux")]
+        colai_input::colai_shares_input,
+        #[cfg(target_os = "linux")]
+        colai_input::colai_agent_act,
         colai_library::colai_library_search,
         colai_library::colai_libraries,
         colai_files::colai_pick_files,
@@ -1529,6 +1534,10 @@ fn main() {
     app.run(|app, event| {
         #[cfg(target_os = "linux")]
         if matches!(event, tauri::RunEvent::Exit) {
+            // Before anything else, and waited on. A master pair outlives the process
+            // that made it: skip this and somebody is left with a second cursor on their
+            // desktop that no running program accounts for, until they log out.
+            colai_hands::unmake_all();
             if let Some(bridge) = app.try_state::<gateway_sleep_logind::SleepBridge>() {
                 bridge.shutdown();
             }

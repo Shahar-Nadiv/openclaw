@@ -160,6 +160,9 @@ type ToolbarHelpers = {
   agoSaid: (at: number, now: number) => string;
   heldSaid: (forMs: number) => string;
   heldWhere: (surface: string, front: InFront | null) => string;
+  sharingSaid: (
+    sharing: { kind?: string; why?: string } | null,
+  ) => { ok: boolean; said: string } | null;
   REWIND_SAYS: string;
   KEEPS_MARKING: string[];
   MOODS: Record<string, { colour: string; says: (many: number) => string }>;
@@ -271,7 +274,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid, heldSaid, heldWhere };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid, heldSaid, heldWhere, sharingSaid };`,
   context,
 );
 const {
@@ -334,6 +337,7 @@ const {
   agoSaid,
   heldSaid,
   heldWhere,
+  sharingSaid,
   REWIND_SAYS,
   KEEPS_MARKING,
   numberOf,
@@ -2028,6 +2032,35 @@ describe("taking a conversation back", () => {
     expect(heldWhere("0x400002", null)).toBe("0x400002");
     // Nothing is in front — an answer, not the absence of one, and not a match either.
     expect(heldWhere("0x400002", { id: "" })).toBe("0x400002");
+  });
+
+  test("whether agents get a cursor each is three answers, not two", () => {
+    // Not measured yet. Silence, because a claim about the desktop made before anything
+    // was tried is a guess, and this is the fact the whole feature stands on.
+    expect(sharingSaid(null)).toBe(null);
+    expect(sharingSaid({})).toBe(null);
+
+    expect(sharingSaid({ kind: "yes" })).toEqual({
+      ok: true,
+      said: "Each agent works with a cursor of its own.",
+    });
+
+    // A no carries its reason: "your desktop refused" and "there is no X here" send
+    // somebody to completely different places.
+    expect(
+      sharingSaid({ kind: "no", why: "this desktop's X server made no second pointer" }),
+    ).toEqual({
+      ok: false,
+      said: "Agents share this desktop's one cursor — this desktop's X server made no second pointer.",
+    });
+    // A no with nothing to say is still a no, and still says the part that matters.
+    expect(sharingSaid({ kind: "no" })).toEqual({
+      ok: false,
+      said: "Agents share this desktop's one cursor.",
+    });
+    expect(sharingSaid({ kind: "no", why: "   " })?.said).toBe(
+      "Agents share this desktop's one cursor.",
+    );
   });
 });
 

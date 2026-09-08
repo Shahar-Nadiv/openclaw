@@ -89,8 +89,27 @@ function drawWork() {
   said.textContent = "Show marks on screen";
   foot.append(tick, said);
 
-  el.work.replaceChildren(head, holdingRows(), waiting, past, foot);
+  el.work.replaceChildren(head, holdingRows(), waiting, past, foot, sharingRow());
   placeWork();
+}
+
+/**
+ * Whether agents get a cursor each, or take turns with the one everybody shares.
+ *
+ * At the very foot, in small type, because it is a standing fact about the machine
+ * rather than news. It earns its place by explaining the behaviour somebody is about to
+ * see: on a desktop that refuses a second pointer, agents working "in parallel" queue
+ * instead, and being told why beats discovering it.
+ */
+function sharingRow() {
+  const says = sharingSaid(state.sharing);
+  const row = document.createElement("p");
+  row.className = "work-sharing";
+  row.hidden = !says;
+  if (!says) return row;
+  row.dataset.ok = String(says.ok);
+  row.textContent = says.said;
+  return row;
 }
 
 /**

@@ -39,6 +39,8 @@ commands.allow = [
   "colai_free_surface",
   "colai_agent_gone",
   "colai_who_is_working",
+  "colai_shares_input",
+  "colai_agent_act",
   "colai_library_search",
   "colai_libraries",
   "colai_pick_files",
