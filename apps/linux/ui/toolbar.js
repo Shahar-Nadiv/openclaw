@@ -25,6 +25,7 @@ const el = {
   work: document.getElementById("work"),
   toasts: document.getElementById("toasts"),
   flights: document.getElementById("flights"),
+  hands: document.getElementById("hands"),
   flyHow: document.getElementById("fly-how"),
   flyAutomate: document.getElementById("fly-automate"),
   flyAgents: document.getElementById("fly-agents"),
@@ -120,6 +121,8 @@ const state = {
   // this toolbar started. Null until the Gateway has answered once: no light is the
   // honest state before anything is known, and a green one would be a claim.
   atWork: null,
+  // Where each working agent's cursor is. Empty unless somebody is acting.
+  hands: [],
   // Whether this desktop lets an agent have a cursor of its own, as measured rather
   // than as hoped. Null until it has been tried once — "not asked yet" and "no" are
   // different things to say to somebody.
@@ -649,6 +652,13 @@ async function start() {
   void listen("colai:front", (event) => {
     state.front = (event && event.payload) || null;
     redrawMarksSoon();
+  }).catch(() => {});
+
+  void listen("colai:hands", (event) => {
+    state.hands = (event && event.payload) || [];
+    // Only the cursors are redrawn. A pointer moving sixty times a second must not drag
+    // the whole toolbar through a render with it.
+    drawHands();
   }).catch(() => {});
 
   void listen("colai:holding", (event) => {

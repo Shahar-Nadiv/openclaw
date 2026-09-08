@@ -5,7 +5,7 @@
 //! boundary is `Doing` — a resolved intention with no protocol in it — which is also why
 //! the whole vocabulary can be tested with no display attached.
 
-use super::{Doing, Honours, Spot};
+use super::{Doing, Hand, Honours, Spot};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_double, c_int, c_uchar, c_uint, c_ulong, c_void, CStr, CString};
 
@@ -327,6 +327,36 @@ impl Crew {
             )
         };
         (ok != 0).then_some((rx, ry))
+    }
+
+    /// Whether any agent currently has hands.
+    ///
+    /// The gate on polling at all: with nobody working there is nothing to draw, and a
+    /// desktop at rest should cost no X round trips whatever.
+    pub(super) fn busy(&self) -> bool {
+        !self.hands.is_empty()
+    }
+
+    /// Where every agent's cursor is now.
+    ///
+    /// Sorted by name so the list does not reorder itself between two identical looks —
+    /// a `HashMap` iterates differently every time, and that alone would read as movement
+    /// and keep the fast poll running for ever.
+    pub(super) fn cursors(&self) -> Vec<Hand> {
+        let mut all: Vec<Hand> = self
+            .hands
+            .iter()
+            .filter_map(|(agent, hands)| {
+                let (x, y) = self.at(hands.pointer)?;
+                Some(Hand {
+                    agent: agent.clone(),
+                    x,
+                    y,
+                })
+            })
+            .collect();
+        all.sort_by(|a, b| a.agent.cmp(&b.agent));
+        all
     }
 
     /// The desktop's own pointer — the one in somebody's hand.

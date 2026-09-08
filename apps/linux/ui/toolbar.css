@@ -993,6 +993,47 @@ body {
  * Inert and brief. The layer takes no pointer events and is not part of the clickable
  * region: it is a third of a second of explanation, not a thing to press.
  */
+/* Agents' cursors. GNOME will not draw an extra master pointer, so these are ours —
+   painted on the glass and never in the clickable region, because a cursor somebody can
+   click on would take the desktop away from them again. */
+.hands {
+  position: fixed;
+  inset: 0;
+  z-index: 86;
+  pointer-events: none;
+}
+.hand {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 3px;
+  /* Snapped to the position X reported rather than eased toward it: a cursor that
+     glides to where it already is reads as lag, not as smoothness. */
+  will-change: transform;
+}
+.hand-arrow {
+  flex: none;
+  fill: hsl(var(--hand) 85% 60%);
+  stroke: rgb(0 0 0 / 55%);
+  stroke-width: 1;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 45%));
+}
+/* The name is the point. Two agents at once are told apart by this, not by the arrow. */
+.hand-name {
+  margin-top: 10px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+  color: #0d0d0f;
+  background: hsl(var(--hand) 85% 60%);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 35%);
+}
+
 .flights {
   position: fixed;
   inset: 0;

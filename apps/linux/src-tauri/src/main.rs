@@ -1389,6 +1389,12 @@ fn main() {
         // on the application it was made on and nowhere else.
         colai_attach::watch_the_front(app.handle());
 
+        // Somewhere to send agent cursor positions. GNOME does not draw extra master
+        // pointers, so colai draws them on its own glass; this is how the thread that
+        // owns the display learns where to send them.
+        #[cfg(target_os = "linux")]
+        colai_hands::watch(app.handle().clone());
+
         #[cfg(target_os = "linux")]
         app.manage(gateway_sleep_logind::SleepBridge::start(
             app.handle().clone(),

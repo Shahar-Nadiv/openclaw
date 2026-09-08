@@ -21,8 +21,10 @@
 
 use std::sync::mpsc::{channel, Sender};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter as _};
 
 /// What this desktop does with a second pointer, once somebody has actually tried.
 ///
@@ -210,8 +212,40 @@ fn spot(x: Option<f64>, y: Option<f64>) -> Spot {
     }
 }
 
+/// Where one agent's cursor is, for drawing it.
+///
+/// GNOME does not render extra master pointers — the protocol moves them, the
+/// compositor ignores them — so an agent working is invisible unless colai draws it. It
+/// already holds a transparent sheet over the whole desktop, and X will say where any
+/// pointer is, so the two halves were already here.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Hand {
+    pub agent: String,
+    pub x: f64,
+    pub y: f64,
+}
+
+/// The event the page listens for.
+pub(crate) const HANDS_EVENT: &str = "colai:hands";
+
+/// How often cursors are looked at while one is moving.
+///
+/// A drawn cursor that updates on its own slower clock trails the real one, and a
+/// pointer lagging behind itself reads as broken rather than as attached. Nothing is
+/// polled at all unless some agent actually has hands, so the idle cost is zero.
+const WHILE_MOVING: Duration = Duration::from_millis(16);
+
+/// And while every agent is holding still, which is most of the time even mid-task.
+const WHEN_STILL: Duration = Duration::from_millis(100);
+
+/// How long after the last movement to keep looking quickly.
+const STAYS_LIVELY: Duration = Duration::from_millis(400);
+
 /// What the thread that owns the display is asked to do.
 enum Order {
+    /// Somewhere to send cursor positions. Sent once, when the app is up.
+    Watch(AppHandle),
     Honours(Sender<Honours>),
     Act(String, u64, Doing, Sender<Result<(), String>>),
     Unmake(String),
@@ -251,22 +285,74 @@ fn hands_thread(hear: &std::sync::mpsc::Receiver<Order>) {
                 Order::UnmakeAll(back) => {
                     let _ = back.send(());
                 }
-                Order::Unmake(_) => {}
+                Order::Unmake(_) | Order::Watch(_) => {}
             }
         }
         return;
     };
-    while let Ok(order) = hear.recv() {
+    // Where to send cursor positions, and when they last moved. Both stay unset until
+    // there is an app to tell and an agent to watch, which is what keeps an idle colai
+    // from polling X at all.
+    let mut watching: Option<AppHandle> = None;
+    let mut said: Vec<Hand> = Vec::new();
+    let mut moved = Instant::now();
+    loop {
+        // Blocking while nothing has hands. A desktop with no agent working costs one
+        // parked thread and no round trips at all.
+        let order = if watching.is_some() && crew.busy() {
+            let waiting = if moved.elapsed() < STAYS_LIVELY {
+                WHILE_MOVING
+            } else {
+                WHEN_STILL
+            };
+            match hear.recv_timeout(waiting) {
+                Ok(order) => Some(order),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        } else {
+            match hear.recv() {
+                Ok(order) => Some(order),
+                Err(_) => break,
+            }
+        };
+
         match order {
-            Order::Honours(back) => {
+            None => {
+                // Nothing asked; this is the look. Sent only when it differs, because a
+                // cursor that has not moved is not news and the page redraws on every one.
+                let now = crew.cursors();
+                if now != said {
+                    moved = Instant::now();
+                    said = now.clone();
+                    if let Some(app) = &watching {
+                        let _ = app.emit_to(crate::colai::OVERLAY_LABEL, HANDS_EVENT, now);
+                    }
+                }
+            }
+            Some(Order::Watch(app)) => watching = Some(app),
+            Some(Order::Honours(back)) => {
                 let _ = back.send(crew.honours());
             }
-            Order::Act(agent, window, act, back) => {
+            Some(Order::Act(agent, window, act, back)) => {
                 let _ = back.send(crew.act(&agent, window, &act));
+                // Acting is the one moment a cursor certainly moved, so look promptly
+                // rather than waiting out the still-pace.
+                moved = Instant::now();
             }
-            Order::Unmake(agent) => crew.unmake(&agent),
-            Order::UnmakeAll(back) => {
+            Some(Order::Unmake(agent)) => {
+                crew.unmake(&agent);
+                said.clear();
+                if let Some(app) = &watching {
+                    let _ = app.emit_to(crate::colai::OVERLAY_LABEL, HANDS_EVENT, &said);
+                }
+            }
+            Some(Order::UnmakeAll(back)) => {
                 crew.unmake_all();
+                said.clear();
+                if let Some(app) = &watching {
+                    let _ = app.emit_to(crate::colai::OVERLAY_LABEL, HANDS_EVENT, &said);
+                }
                 let _ = back.send(());
             }
         }
@@ -319,6 +405,13 @@ pub(crate) fn act(agent: &str, window: u64, what: &Act) -> Result<(), String> {
         move |back| Order::Act(agent, window, doing, back),
         Err(SILENT.into()),
     )
+}
+
+/// Tell the display thread where to send cursor positions.
+pub(crate) fn watch(app: AppHandle) {
+    if let Some(orders) = orders() {
+        let _ = orders.send(Order::Watch(app));
+    }
 }
 
 pub(crate) fn unmake(agent: &str) {

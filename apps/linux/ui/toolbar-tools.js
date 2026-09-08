@@ -825,6 +825,26 @@ function agoSaid(at, now) {
 }
 
 /**
+ * A colour for an agent, the same one every time.
+ *
+ * Two agents working at once are only telling apart by colour and name, and a colour
+ * that changed between two looks would be worse than none. Derived from the name rather
+ * than assigned in order, so an agent keeps its colour across restarts and however many
+ * others come and go — and so two agents are never handed the same one by an index that
+ * happened to reset.
+ *
+ * Hues only, spread around the wheel, staying clear of the accent's red so an agent's
+ * cursor is never mistaken for something colai wants.
+ */
+const HAND_HUES = [140, 200, 265, 40, 175, 310, 95, 230];
+
+function handHue(agent) {
+  let sum = 0;
+  for (const letter of String(agent)) sum = (sum * 31 + letter.codePointAt(0)) % 100_003;
+  return HAND_HUES[sum % HAND_HUES.length];
+}
+
+/**
  * What to say about whether agents can work beside somebody rather than instead of them.
  *
  * Three states, not two. "Not asked yet" is silence — a claim about the desktop made

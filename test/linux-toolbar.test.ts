@@ -163,6 +163,8 @@ type ToolbarHelpers = {
   sharingSaid: (
     sharing: { kind?: string; why?: string } | null,
   ) => { ok: boolean; said: string } | null;
+  handHue: (agent: string) => number;
+  HAND_HUES: number[];
   REWIND_SAYS: string;
   KEEPS_MARKING: string[];
   MOODS: Record<string, { colour: string; says: (many: number) => string }>;
@@ -274,7 +276,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid, heldSaid, heldWhere, sharingSaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid, heldSaid, heldWhere, sharingSaid, handHue, HAND_HUES };`,
   context,
 );
 const {
@@ -338,6 +340,8 @@ const {
   heldSaid,
   heldWhere,
   sharingSaid,
+  handHue,
+  HAND_HUES,
   REWIND_SAYS,
   KEEPS_MARKING,
   numberOf,
@@ -2061,6 +2065,21 @@ describe("taking a conversation back", () => {
     expect(sharingSaid({ kind: "no", why: "   " })?.said).toBe(
       "Agents share this desktop's one cursor.",
     );
+  });
+
+  test("an agent keeps the same cursor colour every time it is asked", () => {
+    // Two agents at once are told apart by colour and name. A colour that changed
+    // between two looks would be worse than none at all, and one handed out by position
+    // would move the moment another agent finished.
+    expect(handHue("ana")).toBe(handHue("ana"));
+    expect(handHue("ana")).not.toBe(handHue("ben"));
+    // Same after a restart, because it comes from the name and nothing else.
+    expect(handHue("deploy-worker-3")).toBe(handHue("deploy-worker-3"));
+    // Always one of the hues that were actually chosen — none of them the accent's red,
+    // so an agent's cursor is never mistaken for something colai wants.
+    for (const agent of ["a", "ben", "", "🙂", "deploy-worker-3", "Ana"]) {
+      expect(HAND_HUES).toContain(handHue(agent));
+    }
   });
 });
 
