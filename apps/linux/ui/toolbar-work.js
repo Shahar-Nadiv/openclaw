@@ -168,6 +168,61 @@ function entryRow(entry, now) {
 }
 
 /**
+ * A mark going where marks go.
+ *
+ * The screen is quiet now, which is what was asked for and which has one cost: a mark
+ * that simply stops being drawn reads as a mark that was lost. So it visibly *goes*
+ * somewhere — to the window when it is open, to the key that opens it when it is not —
+ * and where it went is taught once, by watching, without a sentence about it.
+ *
+ * Decoration is not the point. This is the only thing standing between "my marks
+ * disappeared" and knowing where they are.
+ *
+ * Painted, not caught: these are inert and last a third of a second, so they are left
+ * out of the clickable region entirely rather than briefly claiming a strip of desktop.
+ */
+const FLIGHT = 380;
+
+function flyToWork(marks) {
+  // A desktop that asked for less movement is not told about this in motion; the marks
+  // are in the window either way, and the window is one press from here.
+  if (still() || typeof el.flights.animate !== "function") return;
+  const going = marks.filter((mark) => badgeAt(mark));
+  if (going.length === 0) return;
+  const screen = screenSize();
+  const nest = state.work.open ? el.work : buttons.send;
+  const to = nest.getBoundingClientRect();
+  for (const mark of going) {
+    const spot = badgeAt(asDrawn(mark, state.front, screen));
+    const flying = document.createElement("span");
+    flying.className = "flight";
+    if (mark.thumb) {
+      const picture = document.createElement("img");
+      picture.src = mark.thumb;
+      picture.alt = "";
+      flying.append(picture);
+    }
+    flying.style.left = `${spot.x * screen.width}px`;
+    flying.style.top = `${spot.y * screen.height}px`;
+    el.flights.append(flying);
+    const across = to.left + to.width / 2 - spot.x * screen.width;
+    const down = to.top + to.height / 2 - spot.y * screen.height;
+    const run = flying.animate(
+      [
+        { transform: "translate(-50%, -50%) scale(1)", opacity: 1 },
+        {
+          transform: `translate(calc(-50% + ${across}px), calc(-50% + ${down}px)) scale(0.25)`,
+          opacity: 0,
+        },
+      ],
+      { duration: FLIGHT, easing: "cubic-bezier(0.4, 0, 0.2, 1)" },
+    );
+    const drop = () => flying.remove();
+    run.finished.then(drop, drop);
+  }
+}
+
+/**
  * Against the side of the screen the rail is on, not the middle of it.
  *
  * The library window is centred because it is opened, used and closed. This one is meant

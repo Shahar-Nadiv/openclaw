@@ -2355,6 +2355,40 @@ describe("an answer says that it arrived", () => {
   });
 });
 
+describe("a mark goes somewhere rather than vanishing", () => {
+  const dir = new URL("../apps/linux/ui/", import.meta.url);
+  const work = readFileSync(new URL("toolbar-work.js", dir), "utf8");
+  const rail = readFileSync(new URL("toolbar-rail.js", dir), "utf8");
+  const page = readFileSync(new URL("toolbar.js", dir), "utf8");
+
+  test("it flies on the way out and not on the way back in", () => {
+    // Picking a tool up puts the marks back on the screen. A flight then would be
+    // describing the opposite of what just happened.
+    const use = rail.slice(rail.indexOf("function use(tool)"));
+    expect(use).toContain('tool === "pointer" && state.tool !== "pointer"');
+    expect(use.slice(0, 400)).toContain("flyToWork(state.marks)");
+  });
+
+  test("a desktop that asked for stillness is not told in motion", () => {
+    // The marks are in the window either way, and the window is one press away.
+    const fly = work.slice(work.indexOf("function flyToWork"));
+    // Before anything is built: a guard after the work is a guard that did the work.
+    expect(fly.indexOf("if (still()")).toBeLessThan(fly.indexOf("createElement"));
+  });
+
+  test("it is painted, not caught", () => {
+    /*
+     * Inert, and gone a third of a second later. Putting it in the clickable region
+     * would claim a strip of somebody's desktop for the length of an animation — the
+     * exact failure the recording frame already avoids.
+     */
+    const shape = page.slice(page.indexOf("function shape()"));
+    expect(shape).not.toContain("el.flights");
+    const css = readFileSync(new URL("toolbar.css", dir), "utf8");
+    expect(css).toMatch(/\.flights \{[^}]*pointer-events: none/);
+  });
+});
+
 describe("hidden means hidden", () => {
   const css = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
 

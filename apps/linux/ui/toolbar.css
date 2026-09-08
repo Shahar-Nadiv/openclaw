@@ -988,6 +988,37 @@ body {
 /* ── the popup that opens on a mark ───────────────────────────────────────── */
 
 /*
+ * A mark on its way to the window.
+ *
+ * Inert and brief. The layer takes no pointer events and is not part of the clickable
+ * region: it is a third of a second of explanation, not a thing to press.
+ */
+.flights {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  pointer-events: none;
+}
+.flight {
+  position: absolute;
+  display: block;
+  width: 54px;
+  height: 38px;
+  border-radius: 6px;
+  overflow: hidden;
+  transform: translate(-50%, -50%);
+  background: rgb(28 28 30 / 97%);
+  border: 1px solid var(--accent, #ff6b6b);
+  box-shadow: 0 10px 26px rgb(0 0 0 / 55%);
+}
+.flight img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/*
  * ── an answer saying so ──────────────────────────────────────────────────────
  *
  * Low on the screen and out of the way. It says who and the first line of what, and it

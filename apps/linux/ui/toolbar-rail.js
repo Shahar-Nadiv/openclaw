@@ -384,8 +384,13 @@ function row(into, tool, label, glyph, press) {
  * apologised for.
  */
 function use(tool) {
+  // Putting the tool away takes the marks off the screen, so they are shown going where
+  // they went. Only on the way out: picking a tool up puts them back, and a flight then
+  // would be describing the opposite of what happened.
+  const away = tool === "pointer" && state.tool !== "pointer";
   state.tool = tool;
   state.open = null;
+  if (away) flyToWork(state.marks);
   render();
 }
 

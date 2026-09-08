@@ -24,6 +24,7 @@ const el = {
   library: document.getElementById("library"),
   work: document.getElementById("work"),
   toasts: document.getElementById("toasts"),
+  flights: document.getElementById("flights"),
   flyHow: document.getElementById("fly-how"),
   flyAutomate: document.getElementById("fly-automate"),
   flyAgents: document.getElementById("fly-agents"),

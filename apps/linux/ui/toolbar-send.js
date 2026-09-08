@@ -189,7 +189,9 @@ async function sendMarks(ids) {
     // asked for rather than waited for.
     void watchEverything();
     // What went is gone; what was left unticked is still there, which is the whole
-    // point of being able to untick it.
+    // point of being able to untick it. Shown going, because a mark that vanishes at the
+    // moment of sending is the one most likely to be read as a mark that was lost.
+    flyToWork(going);
     state.marks = state.marks.filter((mark) => !ids.includes(mark.id));
     state.files = [];
     state.text = "";
