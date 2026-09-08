@@ -6,6 +6,13 @@ use std::time::Duration;
 const RESUME_ATTEMPTS: usize = 3;
 const RESUME_RETRY_DELAY: Duration = Duration::from_secs(2);
 
+/// How long awake before we conclude the sleep we prepared for never happened.
+///
+/// Measured on the monotonic clock, which does not advance while the machine is
+/// suspended — so this can only elapse if the host genuinely stayed up. A real sleep,
+/// however long, cannot trip it.
+const AWAKE_AFTER_PREPARING: Duration = Duration::from_secs(60);
+
 type PrepareFuture = Pin<Box<dyn Future<Output = Result<SleepPrepareOutcome, String>> + Send>>;
 type ResumeFuture = Pin<Box<dyn Future<Output = Result<(), String>> + Send>>;
 type RefreshFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -186,6 +193,50 @@ impl GatewaySleepCycleController {
         }
     }
 
+    /// Give the lease back if the sleep we prepared for never arrived.
+    ///
+    /// `will_sleep` takes a lease and only `did_wake` gives it back, so a `PrepareForSleep`
+    /// with no matching wake strands the Gateway: process alive, every socket closed with
+    /// "closed due to suspension", and nothing running that knows to undo it. That is not
+    /// hypothetical — it happened here with the journal showing the machine never slept.
+    ///
+    /// The clock is what makes this safe. Monotonic time stops while a host is suspended,
+    /// so waiting on it cannot expire during a genuine sleep however long it lasts; the
+    /// delay only elapses if we are still awake, which is exactly the case being caught.
+    ///
+    /// Spawned by the caller, never awaited by it: the listener releases logind's delay
+    /// inhibitor right after preparing, and blocking here would hold up every real
+    /// suspend by a minute.
+    pub(crate) async fn watch_for_a_sleep_that_never_came(&self) {
+        let generation = self
+            .state
+            .lock()
+            .expect("gateway sleep state mutex poisoned")
+            .generation;
+        (self.retry_delay)(AWAKE_AFTER_PREPARING).await;
+        let suspension = {
+            let mut state = self
+                .state
+                .lock()
+                .expect("gateway sleep state mutex poisoned");
+            // A wake, a newer cycle, or quitting already dealt with this one.
+            if state.generation != generation {
+                return;
+            }
+            state.generation = state.generation.wrapping_add(1);
+            state.suspension.take()
+        };
+        let Some(suspension) = suspension else {
+            return;
+        };
+        (self.log)("the host never slept; handing the gateway sleep lease back".into());
+        if let Err(error) = (self.resume)(suspension.id).await {
+            (self.log)(format!(
+                "could not hand back the stale sleep lease: {error}"
+            ));
+        }
+    }
+
     async fn resume_with_retries(&self, suspension_id: String, generation: u64) {
         for attempt in 1..=RESUME_ATTEMPTS {
             // A new sleep cycle owns the connection; abandoned leases self-expire.
@@ -233,6 +284,160 @@ mod tests {
 
     fn no_delay(_: Duration) -> impl Future<Output = ()> + Send {
         std::future::ready(())
+    }
+
+    #[tokio::test]
+    async fn a_sleep_that_never_arrives_gives_the_lease_back() {
+        /*
+         * Observed here: logind announced a sleep, the Gateway was suspended, and the
+         * journal showed the host never actually slept. No wake ever came, so the lease
+         * was held for ever — Gateway process alive, every socket closed with "closed due
+         * to suspension", nothing running that knew to undo it.
+         */
+        let route = route_state(Some("ws://127.0.0.1:18789"));
+        let resumed = Arc::new(Mutex::new(Vec::new()));
+        let noted = Arc::clone(&resumed);
+        let controller = GatewaySleepCycleController::new(
+            "linux-sleep-watchdog".into(),
+            current_route(&route),
+            |_| async {
+                Ok(SleepPrepareOutcome::Ready {
+                    suspension_id: "stranded".into(),
+                })
+            },
+            move |suspension_id: String| {
+                noted.lock().unwrap().push(suspension_id);
+                async { Ok(()) }
+            },
+            || async {},
+            no_delay,
+            |_| {},
+        );
+
+        controller.will_sleep().await;
+        assert!(
+            resumed.lock().unwrap().is_empty(),
+            "nothing to give back yet"
+        );
+
+        controller.watch_for_a_sleep_that_never_came().await;
+        assert_eq!(
+            resumed.lock().unwrap().as_slice(),
+            ["stranded"],
+            "still awake, so the sleep did not happen and the lease goes back"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_real_sleep_and_wake_leaves_the_watchdog_nothing_to_do() {
+        // The ordinary path, and the one that must not double-resume. A wake bumps the
+        // generation, so a watchdog still in flight from that cycle finds the lease is no
+        // longer its business and says nothing to the Gateway.
+        let route = route_state(Some("ws://127.0.0.1:18789"));
+        let resumed = Arc::new(Mutex::new(Vec::new()));
+        let noted = Arc::clone(&resumed);
+        let controller = GatewaySleepCycleController::new(
+            "linux-sleep-real".into(),
+            current_route(&route),
+            |_| async {
+                Ok(SleepPrepareOutcome::Ready {
+                    suspension_id: "slept".into(),
+                })
+            },
+            move |suspension_id: String| {
+                noted.lock().unwrap().push(suspension_id);
+                async { Ok(()) }
+            },
+            || async {},
+            no_delay,
+            |_| {},
+        );
+
+        controller.will_sleep().await;
+        controller.did_wake().await;
+        assert_eq!(
+            resumed.lock().unwrap().as_slice(),
+            ["slept"],
+            "wake resumed it"
+        );
+
+        controller.watch_for_a_sleep_that_never_came().await;
+        assert_eq!(
+            resumed.lock().unwrap().len(),
+            1,
+            "the watchdog must not resume a lease the wake already handed back"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_watchdog_from_an_earlier_cycle_leaves_the_current_lease_alone() {
+        /*
+         * Sleep, wake, sleep again quickly — a lid closed and reopened, or a suspend
+         * logind retries. The first cycle's watchdog is still counting when the second
+         * takes a fresh lease, and without the generation check it would wake up and hand
+         * back a lease that is currently in use, un-suspending a Gateway that is meant to
+         * be asleep.
+         *
+         * The wait is a gate rather than a clock: the whole question is what happens
+         * while one task waits and another runs, and holding that still beats timing it.
+         */
+        let route = route_state(Some("ws://127.0.0.1:18789"));
+        let leases = Arc::new(Mutex::new(0_usize));
+        let issuing = Arc::clone(&leases);
+        let resumed = Arc::new(Mutex::new(Vec::new()));
+        let noted = Arc::clone(&resumed);
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let waiting = Arc::clone(&gate);
+        let controller = Arc::new(GatewaySleepCycleController::new(
+            "linux-sleep-overlap".into(),
+            current_route(&route),
+            move |_| {
+                let suspension_id = {
+                    let mut count = issuing.lock().unwrap();
+                    *count += 1;
+                    format!("lease-{count}")
+                };
+                async move { Ok(SleepPrepareOutcome::Ready { suspension_id }) }
+            },
+            move |suspension_id: String| {
+                noted.lock().unwrap().push(suspension_id);
+                async { Ok(()) }
+            },
+            || async {},
+            move |_| {
+                let gate = Arc::clone(&waiting);
+                async move { gate.notified().await }
+            },
+            |_| {},
+        ));
+
+        // First cycle, and its watchdog starts counting.
+        controller.will_sleep().await;
+        let watching = Arc::clone(&controller);
+        let watchdog = tokio::spawn(async move {
+            watching.watch_for_a_sleep_that_never_came().await;
+        });
+        // Let the watchdog reach the gate before anything else moves.
+        tokio::task::yield_now().await;
+
+        // Woke, and went straight back to sleep: a second lease is now the live one.
+        controller.did_wake().await;
+        controller.will_sleep().await;
+        assert_eq!(
+            resumed.lock().unwrap().as_slice(),
+            ["lease-1"],
+            "the wake resumed the first"
+        );
+
+        // Now let the first cycle's watchdog come due.
+        gate.notify_one();
+        watchdog.await.expect("watchdog task");
+
+        assert_eq!(
+            resumed.lock().unwrap().as_slice(),
+            ["lease-1"],
+            "the stale watchdog must not hand back the lease the current sleep is holding"
+        );
     }
 
     #[tokio::test]

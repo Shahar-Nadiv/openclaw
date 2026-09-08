@@ -57,6 +57,16 @@ async fn run_listener_on_connection(
             controller.will_sleep().await;
             // Releasing the delay inhibitor lets logind continue into sleep.
             inhibitor.take();
+            // And watch for the sleep that never comes. logind can announce one that
+            // does not happen, and without a wake to pair with it the lease we just took
+            // would strand the Gateway for as long as colai keeps running. Spawned, not
+            // awaited: the inhibitor is already gone and a real suspend must not wait on
+            // us. See `watch_for_a_sleep_that_never_came` for why its clock cannot
+            // misfire during a genuine sleep.
+            let watching = Arc::clone(&controller);
+            tauri::async_runtime::spawn(async move {
+                watching.watch_for_a_sleep_that_never_came().await;
+            });
         } else {
             let controller = Arc::clone(&controller);
             let end_sleep_cycle = Arc::clone(&end_sleep_cycle);
