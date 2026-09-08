@@ -45,7 +45,15 @@ function drawAnswers() {
         : asking
           ? `${answer.who} asked you something`
           : `Reply from ${answer.who}`;
-      dot.textContent = !latest ? "…" : asking ? "?" : "";
+      // Waiting looks like the thing that is doing the waiting.
+      //
+      // It said "…", which means *something is happening* and nothing more. A crab that
+      // walks says the same thing and one better: a crab that has stopped walking says
+      // it stopped. The same drawing as the tray icon and the same gait, seven pixels
+      // smaller — nothing new is invented for it.
+      dot.dataset.walking = String(!latest);
+      if (!latest) dot.innerHTML = openclawMark(14);
+      else dot.textContent = asking ? "?" : "";
       dot.addEventListener("click", () => {
         answer.open = !answer.open;
         render();

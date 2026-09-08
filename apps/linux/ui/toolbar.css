@@ -303,6 +303,10 @@ body {
  *
  * Only while it is green. A crab merrily scuttling under a red light would be the
  * toolbar contradicting itself.
+ *
+ * `data-walking` rather than the tray key's own state, because the same crab walks in
+ * more than one place now — the tray icon at seventeen pixels and the pin waiting on a
+ * reply at fourteen. One trigger, so the second place did not have to restate the gait.
  */
 .crab-leg,
 .crab-claw,
@@ -311,21 +315,21 @@ body {
   transform-origin: center;
 }
 /* One stride pair. Everything below is a division of it, so the parts cannot drift. */
-.home-key[data-mood="working"] .crab-body {
+[data-walking="true"] .crab-body {
   animation: crab-walk 0.68s ease-in-out infinite;
 }
-.home-key[data-mood="working"] .crab-leg-a {
+[data-walking="true"] .crab-leg-a {
   animation: crab-step 0.68s ease-in-out infinite;
 }
-.home-key[data-mood="working"] .crab-leg-b {
+[data-walking="true"] .crab-leg-b {
   animation: crab-step 0.68s ease-in-out -0.34s infinite;
 }
 /* Counter to the leg on their own side, so it looks pleased with itself rather than
    merely mobile. */
-.home-key[data-mood="working"] .crab-claw-a {
+[data-walking="true"] .crab-claw-a {
   animation: crab-wave 0.68s ease-in-out -0.34s infinite;
 }
-.home-key[data-mood="working"] .crab-claw-b {
+[data-walking="true"] .crab-claw-b {
   animation: crab-wave 0.68s ease-in-out infinite;
 }
 @keyframes crab-walk {
@@ -362,9 +366,9 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .home-key[data-mood],
-  .home-key[data-mood] .crab-leg,
-  .home-key[data-mood] .crab-claw,
-  .home-key[data-mood] .crab-body {
+  [data-walking] .crab-leg,
+  [data-walking] .crab-claw,
+  [data-walking] .crab-body {
     animation: none;
   }
 }

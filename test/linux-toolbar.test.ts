@@ -2191,6 +2191,44 @@ describe("the tray entry for the toolbar", () => {
   });
 });
 
+describe("what a pin says while it waits", () => {
+  const css = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+  const answers = readFileSync(
+    new URL("../apps/linux/ui/toolbar-answers.js", import.meta.url),
+    "utf8",
+  );
+
+  test("it walks while waiting, and not once it has answered", () => {
+    /*
+     * The pin said "…", which means *something is happening* and nothing more. A crab
+     * that walks says the same and one better: a crab that has stopped walking says it
+     * stopped. So the gait is tied to having heard nothing back, and to nothing else.
+     */
+    expect(answers).toContain("dot.dataset.walking = String(!latest)");
+    expect(answers).toContain("openclawMark(14)");
+    // The ellipsis is gone from what the pin draws. Comments still quote it, so the
+    // check is on the assignment rather than on the file.
+    expect(answers).not.toMatch(/textContent = [^;]*"…"/);
+  });
+
+  test("one trigger drives the gait wherever the crab is drawn", () => {
+    // The tray icon at seventeen pixels and this pin at fourteen. Tying the animation to
+    // the tray key's own state meant the second place had to restate the whole gait, and
+    // two copies of a walk drift.
+    for (const part of ["crab-body", "crab-leg-a", "crab-claw-b"]) {
+      const rule = new RegExp(`([^\\n{]*)\\.${part}\\s*\\{`, "g");
+      for (const found of css.matchAll(rule)) {
+        const selector = found[1]!.trim();
+        // Either the shared trigger, or the bare declaration that gives it an origin.
+        expect(
+          selector === "" || selector.startsWith("[data-walking"),
+          `${part} is driven by ${selector || "(bare)"}`,
+        ).toBe(true);
+      }
+    }
+  });
+});
+
 describe("hidden means hidden", () => {
   const css = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
 
@@ -2492,12 +2530,10 @@ describe("one light for every agent at once", () => {
 
   test("it only walks while it is working", () => {
     // A crab merrily scuttling under a red light would be the toolbar contradicting
-    // itself, so the gait is tied to the one mood that asks nothing of anybody.
-    for (const part of ["crab-body", "crab-leg-a", "crab-claw-b"]) {
-      const rule = new RegExp(`\\.home-key\\[data-mood="(\\w+)"\\] \\.${part}\\s*\\{`, "g");
-      const moods = [...css.matchAll(rule)].map((found) => found[1]!);
-      expect(moods, part).toEqual(["working"]);
-    }
+    // itself. The gait itself is shared now — the pin waiting on a reply walks too — so
+    // the mood that earns it is decided in the page rather than in the selector.
+    const page = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
+    expect(page).toContain('mood.mood === "working"');
   });
 
   test("a desktop that asked for less movement gets none of it", () => {

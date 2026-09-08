@@ -214,6 +214,10 @@ function render() {
   // table of what each state looks like and this holds none of it.
   const mood = moodOf(state.atWork);
   buttons.settings.dataset.mood = mood ? mood.mood : "";
+  // The one trigger for the gait, wherever the crab is drawn. Working is the only mood
+  // it walks in: a crab scuttling under a red light would be the toolbar contradicting
+  // itself.
+  buttons.settings.dataset.walking = String(Boolean(mood) && mood.mood === "working");
   buttons.settings.title = moodSaid(state.atWork);
   buttons.settings.setAttribute("aria-label", buttons.settings.title);
 
