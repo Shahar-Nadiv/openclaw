@@ -89,8 +89,44 @@ function drawWork() {
   said.textContent = "Show marks on screen";
   foot.append(tick, said);
 
-  el.work.replaceChildren(head, waiting, past, foot);
+  el.work.replaceChildren(head, holdingRows(), waiting, past, foot);
   placeWork();
+}
+
+/**
+ * Who is working on what, right now.
+ *
+ * Several agents can be acting at once, each on its own window, and the one thing a
+ * person needs before touching the keyboard is whether one of them is in the window
+ * they are about to type into. So this sits at the top, above everything that has
+ * already happened, and it is empty nearly always — which is the point. A panel that
+ * says something only when something is happening is a panel worth glancing at.
+ */
+function holdingRows() {
+  const held = state.holding || [];
+  const box = document.createElement("div");
+  box.className = "work-holding";
+  box.hidden = held.length === 0;
+  if (held.length === 0) return box;
+
+  for (const one of held) {
+    const row = document.createElement("div");
+    row.className = "work-held";
+    const dot = document.createElement("span");
+    dot.className = "work-held-dot";
+    const who = document.createElement("span");
+    who.className = "work-who";
+    who.textContent = one.holder;
+    const where = document.createElement("span");
+    where.className = "row-under";
+    where.textContent = heldWhere(one.surface, state.front);
+    const forHow = document.createElement("span");
+    forHow.className = "work-held-for";
+    forHow.textContent = heldSaid(one.forMs);
+    row.append(dot, who, where, forHow);
+    box.append(row);
+  }
+  return box;
 }
 
 /** One thing that was sent, and whatever has come back about it. */

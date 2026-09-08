@@ -3,6 +3,7 @@ mod colai;
 mod colai_attach;
 mod colai_capture;
 mod colai_files;
+mod colai_input;
 #[cfg(target_os = "linux")]
 mod colai_inspect;
 mod colai_library;
@@ -1477,6 +1478,10 @@ fn main() {
         colai_files::colai_describe_files,
         colai_receivers::colai_at_work,
         colai_attach::colai_in_front,
+        colai_input::colai_claim_surface,
+        colai_input::colai_free_surface,
+        colai_input::colai_agent_gone,
+        colai_input::colai_who_is_working,
         colai_library::colai_library_search,
         colai_library::colai_libraries,
         colai_files::colai_pick_files,

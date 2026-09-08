@@ -120,6 +120,10 @@ const state = {
   // this toolbar started. Null until the Gateway has answered once: no light is the
   // honest state before anything is known, and a green one would be a claim.
   atWork: null,
+  // Which agent is holding which window, right now. Several of them can be working at
+  // once, and the whole point of saying so is that an agent typing into a window
+  // somebody cannot see is what makes a shared desktop feel haunted rather than shared.
+  holding: [],
   // Windows that were asked what they are showing and had nothing to say. Asking again
   // is a quarter of a second spent learning what the last answer already said.
   mute: new Set(),
@@ -632,6 +636,11 @@ async function start() {
   void listen("colai:front", (event) => {
     state.front = (event && event.payload) || null;
     redrawMarksSoon();
+  }).catch(() => {});
+
+  void listen("colai:holding", (event) => {
+    state.holding = (event && event.payload) || [];
+    render();
   }).catch(() => {});
 
   void listen("colai:ended", (event) => {

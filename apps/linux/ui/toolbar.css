@@ -1147,6 +1147,51 @@ body {
   padding-top: 8px;
   border-top: 1px solid rgb(255 255 255 / 8%);
 }
+/* Who is working, right now. Above everything that already happened, because it is the
+   only part of this window that is about the next thirty seconds. Green rather than the
+   accent: the accent means "colai wants you", and this means "something else is busy". */
+.work-holding {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgb(80 220 130 / 9%);
+  box-shadow: 0 0 0 1px rgb(80 220 130 / 22%) inset;
+}
+.work-held {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+/* Breathing, so a held window reads as ongoing rather than as a status that got stuck. */
+.work-held-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4ade80;
+  animation: work-held-pulse 1.8s ease-in-out infinite;
+}
+.work-held .row-under {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work-held-for {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: #a9a9b2;
+}
+@keyframes work-held-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .work-held-dot { animation: none; }
+}
 .work-entry {
   display: flex;
   flex-direction: column;
