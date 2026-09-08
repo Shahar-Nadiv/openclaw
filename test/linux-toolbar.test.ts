@@ -2325,6 +2325,36 @@ describe("where the work is assembled", () => {
   });
 });
 
+describe("an answer says that it arrived", () => {
+  const page = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
+  const toast = readFileSync(new URL("../apps/linux/ui/toolbar-toast.js", import.meta.url), "utf8");
+
+  test("once per answer, not once per turn", () => {
+    /*
+     * An agent says what it is doing before it says what it found, so one send that
+     * talks four times is one thing that happened. Four toasts for it would be the
+     * toolbar shouting about its own progress.
+     */
+    const heard = page.slice(page.indexOf('listen("colai:reply"'));
+    expect(heard).toContain("const spoken = turns.some((turn) => !turn.mine)");
+    expect(heard).toMatch(/if \(!spoken\) raiseToast\(/);
+  });
+
+  test("it leaves on its own, and takes its timer with it", () => {
+    // A notification that has to be dismissed is a second thing to do. And a timer left
+    // running for a toast somebody already pressed fires into an empty list.
+    expect(toast).toMatch(/setTimeout\(\(\) => dropToast\(id\), TOAST_FOR\)/);
+    expect(toast).toContain("clearTimeout(timer)");
+    expect(toast).toContain("fading.delete(id)");
+  });
+
+  test("pressing it opens the answer where it was asked", () => {
+    // The pin is how a reply is read in the place it is about; the toast is only how you
+    // find out there is one.
+    expect(toast).toContain("answer.open = true");
+  });
+});
+
 describe("hidden means hidden", () => {
   const css = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
 

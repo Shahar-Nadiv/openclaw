@@ -23,6 +23,7 @@ const el = {
   flyPoints: document.getElementById("fly-points"),
   library: document.getElementById("library"),
   work: document.getElementById("work"),
+  toasts: document.getElementById("toasts"),
   flyHow: document.getElementById("fly-how"),
   flyAutomate: document.getElementById("fly-automate"),
   flyAgents: document.getElementById("fly-agents"),
@@ -107,6 +108,8 @@ const state = {
   // What has been sent, newest first. Kept for the session — surviving a restart is a
   // store, and a store is decided on purpose rather than in passing.
   history: [],
+  // What is on screen saying an answer arrived. Empty nearly always.
+  toasts: [],
   // The window somebody is looking at, as the watcher last reported it. Null until it
   // has spoken, which is a reason to leave every mark alone rather than to hide them —
   // a window with an empty id is the other thing, and means nothing is in front.
@@ -312,6 +315,7 @@ function render() {
   drawPopup();
   drawLibrary();
   drawWork();
+  drawToasts();
   drawTrouble();
   // Left mounted while a popup is open, which is how a click off the popup is heard at
   // all — the popup is stacked above it, so its own controls still get their clicks.
@@ -370,6 +374,7 @@ function shape() {
   if (state.popup !== null && !el.popup.hidden) rects.push(boxAround(el.popup));
   if (state.library !== null && !el.library.hidden) rects.push(boxAround(el.library));
   if (state.work.open && !el.work.hidden) rects.push(boxAround(el.work));
+  if (state.toasts.length && !el.toasts.hidden) rects.push(boxAround(el.toasts));
   for (const answer of el.answers.children) rects.push(boxAround(answer));
   const key = JSON.stringify(rects);
   if (key === shaped) return;
@@ -634,7 +639,12 @@ async function start() {
     // The same turn can arrive twice on a reconnect, and a pin that repeats itself reads
     // as an agent that repeated itself.
     if (turns.some((turn) => !turn.mine && turn.said === said)) return;
+    // The first thing back is the thing worth interrupting somebody for. An agent says
+    // what it is doing before it says what it found, and one send that talks four times
+    // is one thing that happened.
+    const spoken = turns.some((turn) => !turn.mine);
     waiting.turns = [...turns, { said, mine: false }];
+    if (!spoken) raiseToast(waiting, said);
     render();
   }).catch(() => {});
 
