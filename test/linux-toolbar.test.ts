@@ -1,5 +1,6 @@
 // Exercises the pure decisions extracted from the Linux toolbar webview script.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import vm from "node:vm";
 import { describe, expect, it as test } from "vitest";
@@ -2742,53 +2743,133 @@ describe("one light for every agent at once", () => {
     expect(new Set(painted.values()).size).toBe(painted.size);
   });
 
-  test("every script the page loads actually parses", () => {
+  /**
+   * Every script every page of the app loads, and whether it has a scope of its own.
+   *
+   * Not just the toolbar: Quick Chat and the setup window load scripts too, and a page
+   * that cannot parse is a window that does nothing. The toolbar is only the one whose
+   * failure takes the desktop with it.
+   *
+   * The distinction matters. A `type="module"` script gets its own scope, so two of them
+   * may freely declare the same name; the toolbar's are classic scripts sharing one
+   * global, where that is a fatal redeclaration.
+   */
+  function everyPageScript(): { page: string; script: string; isModule: boolean }[] {
+    const dir = new URL("../apps/linux/ui/", import.meta.url);
+    const pages = readdirSync(dir).filter((file) => file.endsWith(".html"));
+    expect(pages.length).toBeGreaterThan(1);
+    const found: { page: string; script: string; isModule: boolean }[] = [];
+    for (const page of pages) {
+      const html = readFileSync(new URL(page, dir), "utf8");
+      for (const tag of html.matchAll(/<script([^>]*)\ssrc="([^"]+\.js)"/g)) {
+        found.push({
+          page,
+          script: tag[2]!,
+          isModule: tag[1]!.includes('type="module"'),
+        });
+      }
+    }
+    return found;
+  }
+
+  function sourceOfScript(script: string): string {
+    return readFileSync(new URL(`../apps/linux/ui/${script}`, import.meta.url), "utf8");
+  }
+
+  test("every script every page loads actually parses", () => {
     /*
      * The bug this is about: a second `const mark` in the same function. `toolbar.js`
      * stopped parsing, so nothing in it ran — including the call that tells the overlay
      * what to catch. A transparent always-on-top window the size of every display then
      * kept X's default input region, which is the whole window, and swallowed every
-     * click on the desktop. The machine looked completely normal and nothing on it
-     * worked.
+     * click on the desktop. The machine looked completely normal and nothing worked.
      *
-     * Every other test here reads these files as text. None of them would notice that
-     * the page cannot be loaded at all, which is the one failure that takes the desktop
-     * with it.
+     * Every other test here reads these files as text. None would notice that a page
+     * cannot be loaded at all, which is the one failure that takes the desktop with it.
      */
-    const html = readFileSync(new URL("../apps/linux/ui/toolbar.html", import.meta.url), "utf8");
-    const scripts = [...html.matchAll(/src="([^"]+\.js)"/g)].map((found) => found[1]!);
+    const scripts = everyPageScript();
     expect(scripts.length).toBeGreaterThan(5);
-    for (const script of scripts) {
-      const source = readFileSync(new URL(`../apps/linux/ui/${script}`, import.meta.url), "utf8");
-      // `new vm.Script` parses without running, which is what "can the browser load
-      // this" means. A redeclaration is a parse error, so it is caught here.
-      expect(() => new vm.Script(source, { filename: script }), script).not.toThrow();
+    for (const { script, isModule } of scripts) {
+      const source = sourceOfScript(script);
+      if (isModule) {
+        // Modules may use top-level await and imports, which a classic parse rejects.
+        // Node's own checker is the honest arbiter of "would this load".
+        expect(() => {
+          execFileSync(process.execPath, ["--input-type=module", "--check", "-"], {
+            input: source,
+            stdio: ["pipe", "ignore", "pipe"],
+          });
+        }, script).not.toThrow();
+      } else {
+        // Parses without running, which is exactly what "can the browser load this"
+        // means. A redeclaration is a parse error, so it is caught here.
+        expect(() => new vm.Script(source, { filename: script }), script).not.toThrow();
+      }
     }
   });
 
-  test("the page's scripts share one scope, so nothing may be declared twice across them", () => {
-    // They are classic scripts, not modules: every top-level `const`, `let` and
-    // `function` lands in the same global. Two files declaring the same name is the same
+  test("classic scripts on one page share a scope, so none may declare the same name twice", () => {
+    // The toolbar's twelve files are classic scripts: every top-level `const`, `let` and
+    // `function` lands in one global. Two files declaring the same name is the same
     // failure as declaring it twice in one file, and it has bitten this codebase
-    // repeatedly — `saying`, `remember`, `chosen`, `back`, and `mark`.
-    const html = readFileSync(new URL("../apps/linux/ui/toolbar.html", import.meta.url), "utf8");
-    const scripts = [...html.matchAll(/src="([^"]+\.js)"/g)].map((found) => found[1]!);
-    const declared = new Map<string, string>();
+    // repeatedly — `saying`, `remember`, `chosen`, `back`, and now `mark`.
+    //
+    // Grouped by page, because that is the boundary a scope actually has, and modules
+    // are excluded because each of them has one of its own.
+    const byPage = new Map<string, string[]>();
+    for (const { page, script, isModule } of everyPageScript()) {
+      if (isModule) {
+        continue;
+      }
+      byPage.set(page, [...(byPage.get(page) ?? []), script]);
+    }
+    expect([...byPage.keys()]).toContain("toolbar.html");
+
     const clashes: string[] = [];
-    for (const script of scripts) {
-      const source = readFileSync(new URL(`../apps/linux/ui/${script}`, import.meta.url), "utf8");
-      // Top-level only: no leading whitespace means column zero means global scope.
-      for (const found of source.matchAll(/^(?:const|let|function)\s+(\w+)/gm)) {
-        const name = found[1]!;
-        const already = declared.get(name);
-        if (already && already !== script) {
-          clashes.push(`${name}: ${already} and ${script}`);
-        } else {
-          declared.set(name, script);
+    for (const [page, scripts] of byPage) {
+      const declared = new Map<string, string>();
+      for (const script of scripts) {
+        // Top-level only: no leading whitespace means column zero means global scope.
+        for (const found of sourceOfScript(script).matchAll(/^(?:const|let|function)\s+(\w+)/gm)) {
+          const name = found[1]!;
+          const already = declared.get(name);
+          if (already && already !== script) {
+            clashes.push(`${page}: ${name} in both ${already} and ${script}`);
+          } else {
+            declared.set(name, script);
+          }
         }
       }
     }
     expect(clashes).toEqual([]);
+  });
+
+  test("the overlay is inert before the page has run a line", () => {
+    /*
+     * This is the one that turned a broken script into a lost desktop.
+     *
+     * A new X window's input region is the whole window, and `colai_shape` is only ever
+     * called by the page. So between creating a transparent always-on-top window the
+     * size of every display and the page's first render, every click on the desktop was
+     * being swallowed — and a page that never rendered made that permanent, with nothing
+     * visibly wrong.
+     *
+     * Asserted against the source because the behaviour needs a live GTK window: what
+     * matters is that *something other than the page* sets the shape, and that it
+     * happens where the window is made.
+     */
+    const overlay = readFileSync(
+      new URL("../apps/linux/src-tauri/src/colai.rs", import.meta.url),
+      "utf8",
+    );
+    const making = overlay.slice(
+      overlay.indexOf("pub(crate) fn ensure_overlay"),
+      overlay.indexOf("/// Cover every display"),
+    );
+    expect(making).not.toBe("");
+    expect(making, "the overlay must claim its shape as it is built").toMatch(
+      /apply_shape\(&window, &\[\]\)/,
+    );
   });
 
   test("it only walks while it is working", () => {

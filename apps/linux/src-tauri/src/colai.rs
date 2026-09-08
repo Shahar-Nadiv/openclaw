@@ -306,6 +306,25 @@ pub(crate) fn colai_shape(app: AppHandle, rects: Vec<Rect>) -> Result<(), String
     Ok(())
 }
 
+/// What the overlay's input region must actually be made of.
+///
+/// **An empty shape is not "no shape".** Clearing the input region entirely hands the
+/// window *everything* back, and this window is transparent, always on top, and the size
+/// of every display put together — so "catch nothing" written the obvious way produces a
+/// sheet of glass over the whole desktop that swallows every click, with nothing visibly
+/// wrong. When colai is drawing nothing it exists nowhere, and nowhere is one pixel
+/// rather than zero rectangles.
+///
+/// Pulled out of the GTK call so the rule is a function with tests on it. It is the one
+/// piece of this file where being wrong costs somebody their machine, and it was
+/// previously only expressible by reading the code.
+fn shape_rects(rects: &[(i32, i32, i32, i32)]) -> Vec<(i32, i32, i32, i32)> {
+    if rects.is_empty() {
+        return vec![(0, 0, 1, 1)];
+    }
+    rects.to_vec()
+}
+
 #[cfg(target_os = "linux")]
 fn apply_shape(window: &WebviewWindow, rects: &[(i32, i32, i32, i32)]) -> Result<(), String> {
     use gtk::prelude::WidgetExt;
@@ -314,20 +333,8 @@ fn apply_shape(window: &WebviewWindow, rects: &[(i32, i32, i32, i32)]) -> Result
         .gtk_window()
         .map_err(|error| format!("Could not reach the overlay's GTK window: {error}"))?;
 
-    /*
-     * An empty shape is not "no shape".
-     *
-     * Clearing the input region entirely gives the window *everything* back, which
-     * turns the overlay into a sheet that swallows the desktop. When Colai is drawing
-     * nothing, it exists nowhere — which is one pixel, not zero rectangles.
-     */
     let region = cairo::Region::create();
-    if rects.is_empty() {
-        region
-            .union_rectangle(&cairo::RectangleInt::new(0, 0, 1, 1))
-            .map_err(|error| format!("Could not build the overlay's shape: {error}"))?;
-    }
-    for (x, y, width, height) in rects {
+    for (x, y, width, height) in &shape_rects(rects) {
         region
             .union_rectangle(&cairo::RectangleInt::new(*x, *y, *width, *height))
             .map_err(|error| format!("Could not build the overlay's shape: {error}"))?;
@@ -814,6 +821,43 @@ fn gsetting(schema: &str, key: &str) -> Option<String> {
 
 #[cfg(test)]
 mod where_tests {
+    use super::shape_rects;
+
+    #[test]
+    fn drawing_nothing_still_claims_one_pixel_and_never_nothing() {
+        /*
+         * The bug this stands against: an overlay that catches the whole desktop while
+         * looking completely normal.
+         *
+         * Clearing the input region hands the window everything back, and this window is
+         * transparent, always on top, and spans every display. So "no rectangles" must
+         * never reach the compositor as "no shape" — it has to be somewhere, and the
+         * smallest somewhere is one pixel in a corner.
+         */
+        assert_eq!(shape_rects(&[]), vec![(0, 0, 1, 1)]);
+        assert!(
+            !shape_rects(&[]).is_empty(),
+            "an empty shape is never zero rectangles"
+        );
+    }
+
+    #[test]
+    fn what_is_drawn_is_claimed_exactly_and_nothing_is_added_to_it() {
+        // The other direction, and the one a mistake would make silently worse: colai
+        // must never claim more than it drew. No padding, no union with the screen, no
+        // helpful rounding out to the whole window.
+        let rail = vec![(12, 300, 48, 420)];
+        assert_eq!(shape_rects(&rail), rail);
+
+        let with_a_popup = vec![(12, 300, 48, 420), (70, 320, 260, 180)];
+        assert_eq!(shape_rects(&with_a_popup), with_a_popup);
+
+        // Including the deliberate full-screen claim a drawing tool makes: passed
+        // through as given, so the one caller that means it is the only one that gets it.
+        let whole_desk = vec![(0, 0, 3840, 1080)];
+        assert_eq!(shape_rects(&whole_desk), whole_desk);
+    }
+
     use super::*;
 
     // What xwininfo actually prints, trimmed to the lines that are read.
