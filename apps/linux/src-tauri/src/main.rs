@@ -1395,6 +1395,11 @@ fn main() {
         #[cfg(target_os = "linux")]
         colai_hands::watch(app.handle().clone());
 
+        // And the door a node worker asks through, which is the only way anything
+        // outside this process can move a cursor.
+        #[cfg(target_os = "linux")]
+        colai_hands::open_the_door();
+
         #[cfg(target_os = "linux")]
         app.manage(gateway_sleep_logind::SleepBridge::start(
             app.handle().clone(),

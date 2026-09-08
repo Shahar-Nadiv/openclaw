@@ -53,7 +53,7 @@ pub(crate) enum Honours {
 /// Only the actions a pointer and a keyboard can carry out. Screenshots, window lists
 /// and the accessibility tree are all real `computer.act` actions and none of them are
 /// this file's business.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(
     tag = "action",
     rename_all = "snake_case",
@@ -407,6 +407,15 @@ pub(crate) fn act(agent: &str, window: u64, what: &Act) -> Result<(), String> {
     )
 }
 
+/// Open the private socket a node worker asks through.
+///
+/// Separate from `watch` because they answer to different owners: one is colai telling
+/// its own page what to draw, the other is the only way anything outside this process
+/// can move a cursor at all.
+pub(crate) fn open_the_door() {
+    door::open();
+}
+
 /// Tell the display thread where to send cursor positions.
 pub(crate) fn watch(app: AppHandle) {
     if let Some(orders) = orders() {
@@ -425,6 +434,9 @@ pub(crate) fn unmake(agent: &str) {
 /// Waited on deliberately: this runs as colai exits, and a process that exits while the
 /// request is still sitting in the channel leaves the masters behind for good.
 pub(crate) fn unmake_all() {
+    // The door first: a caller that connects between the pairs going away and the
+    // process ending would be asking for hands that no longer exist.
+    door::close();
     ask(Order::UnmakeAll, ());
 }
 
@@ -576,4 +588,5 @@ mod meaning_tests {
     }
 }
 
+mod door;
 mod x11;
