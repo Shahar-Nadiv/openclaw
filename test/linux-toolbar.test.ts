@@ -2742,15 +2742,64 @@ describe("one light for every agent at once", () => {
     expect(new Set(painted.values()).size).toBe(painted.size);
   });
 
+  test("every script the page loads actually parses", () => {
+    /*
+     * The bug this is about: a second `const mark` in the same function. `toolbar.js`
+     * stopped parsing, so nothing in it ran — including the call that tells the overlay
+     * what to catch. A transparent always-on-top window the size of every display then
+     * kept X's default input region, which is the whole window, and swallowed every
+     * click on the desktop. The machine looked completely normal and nothing on it
+     * worked.
+     *
+     * Every other test here reads these files as text. None of them would notice that
+     * the page cannot be loaded at all, which is the one failure that takes the desktop
+     * with it.
+     */
+    const html = readFileSync(new URL("../apps/linux/ui/toolbar.html", import.meta.url), "utf8");
+    const scripts = [...html.matchAll(/src="([^"]+\.js)"/g)].map((found) => found[1]!);
+    expect(scripts.length).toBeGreaterThan(5);
+    for (const script of scripts) {
+      const source = readFileSync(new URL(`../apps/linux/ui/${script}`, import.meta.url), "utf8");
+      // `new vm.Script` parses without running, which is what "can the browser load
+      // this" means. A redeclaration is a parse error, so it is caught here.
+      expect(() => new vm.Script(source, { filename: script }), script).not.toThrow();
+    }
+  });
+
+  test("the page's scripts share one scope, so nothing may be declared twice across them", () => {
+    // They are classic scripts, not modules: every top-level `const`, `let` and
+    // `function` lands in the same global. Two files declaring the same name is the same
+    // failure as declaring it twice in one file, and it has bitten this codebase
+    // repeatedly — `saying`, `remember`, `chosen`, `back`, and `mark`.
+    const html = readFileSync(new URL("../apps/linux/ui/toolbar.html", import.meta.url), "utf8");
+    const scripts = [...html.matchAll(/src="([^"]+\.js)"/g)].map((found) => found[1]!);
+    const declared = new Map<string, string>();
+    const clashes: string[] = [];
+    for (const script of scripts) {
+      const source = readFileSync(new URL(`../apps/linux/ui/${script}`, import.meta.url), "utf8");
+      // Top-level only: no leading whitespace means column zero means global scope.
+      for (const found of source.matchAll(/^(?:const|let|function)\s+(\w+)/gm)) {
+        const name = found[1]!;
+        const already = declared.get(name);
+        if (already && already !== script) {
+          clashes.push(`${name}: ${already} and ${script}`);
+        } else {
+          declared.set(name, script);
+        }
+      }
+    }
+    expect(clashes).toEqual([]);
+  });
+
   test("it only walks while it is working", () => {
     // A crab merrily scuttling under a red light would be the toolbar contradicting
     // itself. The gait itself is shared now — the pin waiting on a reply walks too — so
     // the mood that earns it is decided in the page rather than in the selector.
     const page = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
-    expect(page).toContain('mark === "working"');
-    // And the mark it walks on is the same one the glow is keyed to, so the gait and the
+    expect(page).toContain('mood === "working"');
+    // And the mood it walks on is the same one the glow is keyed to, so the gait and the
     // colour can never disagree about whether anything is happening.
-    expect(page).toContain("const mark = moodMark(state.atWork);");
+    expect(page).toContain("const mood = moodMark(state.atWork);");
   });
 
   test("a desktop that asked for less movement gets none of it", () => {

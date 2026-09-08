@@ -224,13 +224,13 @@ function render() {
   // Removed rather than emptied. The stylesheet pulses on `[data-mood]` being *there*,
   // so an empty one is still a mood as far as CSS is concerned — and left the glow
   // breathing over a desktop where nothing at all was happening.
-  const mark = moodMark(state.atWork);
-  if (mark) buttons.settings.dataset.mood = mark;
+  const mood = moodMark(state.atWork);
+  if (mood) buttons.settings.dataset.mood = mood;
   else delete buttons.settings.dataset.mood;
   // The one trigger for the gait, wherever the crab is drawn. Working is the only mood
   // it walks in: a crab scuttling under a red light would be the toolbar contradicting
   // itself.
-  buttons.settings.dataset.walking = String(mark === "working");
+  buttons.settings.dataset.walking = String(mood === "working");
   buttons.settings.title = moodSaid(state.atWork);
   buttons.settings.setAttribute("aria-label", buttons.settings.title);
 

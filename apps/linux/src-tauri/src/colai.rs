@@ -130,6 +130,25 @@ pub(crate) fn ensure_overlay(app: &AppHandle) -> Result<WebviewWindow, String> {
             .map_err(|error| format!("Could not create the colai overlay: {error}"))?;
 
     cover_everything(&window)?;
+
+    /*
+     * Catch nothing, until the page says otherwise.
+     *
+     * A new X window's input region is the whole window, and this one is transparent,
+     * always on top, and the size of every display put together. Between creating it and
+     * the page's first `colai_shape` there was therefore an invisible sheet of glass over
+     * the entire desktop swallowing every click — and if the page were slow to start, or
+     * threw once before its first render, that sheet stayed there for the life of the
+     * process. The desktop looked completely normal and nothing on it could be used.
+     *
+     * So the shape is set here, before the webview has run a line: colai starts out
+     * catching nothing and only ever claims what it has drawn. Failing closed is the
+     * only safe direction for a window this size — the cost of being wrong the other way
+     * is somebody's whole machine.
+     */
+    #[cfg(target_os = "linux")]
+    apply_shape(&window, &[])?;
+
     /*
      * Wake the Gateway connection, the way Quick Chat does when its window opens.
      *
