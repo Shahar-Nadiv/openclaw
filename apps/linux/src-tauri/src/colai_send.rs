@@ -82,13 +82,19 @@ pub(crate) async fn colai_send(
         &shots,
         &mark_ids,
         &sheets.unwrap_or_default(),
-        &accent.unwrap_or_else(|| "#ff6b6b".to_string()),
+        &accent.unwrap_or_else(|| "#ff5c5c".to_string()),
     )?;
     let pictures = attachments.len();
     // After the pictures, in the order the message describes them. The message has
     // already decided which of these travel and which are only named; anything in this
     // list is one that travels.
-    attachments.extend(crate::colai_files::carry(&files.unwrap_or_default()));
+    // What may be read is decided against the folders the Gateway says are worked in,
+    // never against a list the page supplied.
+    let roots = crate::colai_receivers::work_roots(&gateway).await;
+    attachments.extend(crate::colai_files::carry(
+        &files.unwrap_or_default(),
+        &roots,
+    ));
     let carried = attachments.len() - pictures;
     let sent = gateway
         .chat_send_to(

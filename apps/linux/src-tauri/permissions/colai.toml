@@ -39,6 +39,7 @@ commands.allow = [
   "colai_libraries",
   "colai_pick_files",
   "colai_pick_folder",
+  "colai_search_files",
   "colai_release",
   "colai_open_settings",
 ]

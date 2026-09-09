@@ -1481,6 +1481,7 @@ fn main() {
         colai_library::colai_libraries,
         colai_files::colai_pick_files,
         colai_files::colai_pick_folder,
+        colai_files::colai_search_files,
         #[cfg(target_os = "linux")]
         colai_inspect::colai_showing,
         colai::colai_summon,

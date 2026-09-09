@@ -208,6 +208,40 @@ pub(crate) struct ToolbarProject {
 /// The conversations somebody has open somewhere other than the Gateway.
 ///
 /// A machine can have an empty Gateway session store and two dozen of these — which is
+/// The directories somebody actually works in, as the Gateway reports them.
+///
+/// This is the list that decides what `@` may reach and what may be read into a send,
+/// so it deliberately comes from the Gateway rather than from the page. A page that
+/// could name its own roots could name `/`, and then the gate in front of the file
+/// system would be a gate the thing being gated holds the key to.
+///
+/// Archived threads count: the folder is still somewhere they work, even if that
+/// conversation is finished.
+pub(crate) async fn work_roots(
+    gateway: &crate::gateway_ws::GatewayClient,
+) -> Vec<std::path::PathBuf> {
+    let Ok(listed) = gateway.sessions_catalog_list().await else {
+        // No answer is not permission. An empty list refuses everything, which is the
+        // safe direction for a question about what may be read.
+        return Vec::new();
+    };
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    for catalog in &listed.catalogs {
+        for host in &catalog.hosts {
+            for thread in &host.sessions {
+                let Some(root) = thread.cwd.as_deref().and_then(project_root) else {
+                    continue;
+                };
+                let root = std::path::PathBuf::from(root);
+                if !roots.contains(&root) {
+                    roots.push(root);
+                }
+            }
+        }
+    }
+    roots
+}
+
 /// what the toolbar looked wrong about: it reported nothing while the window behind it
 /// listed a day's work. Archived threads are left out; they are history rather than
 /// somewhere to send a region.

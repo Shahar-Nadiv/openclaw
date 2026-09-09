@@ -337,7 +337,10 @@ function modePick() {
 
   const hint = document.createElement("span");
   hint.className = "mode-pick-hint";
-  hint.textContent = "or type /";
+  // Both, because a keystroke nobody is told about is a keystroke nobody uses — and `@`
+  // has no control anywhere else to be discovered from.
+  hint.textContent = "/ mode · @ file";
+  hint.title = "Type / in the box to choose how the ask is taken, or @ to name a file";
   row.append(label, pick, hint);
   return row;
 }
@@ -362,21 +365,37 @@ function askField() {
   menu.className = "ask-menu";
   menu.hidden = true;
 
+  // Which mark is open, if either. `/` answers from a table and `@` answers from disk,
+  // but where the menu goes and how it is driven is the same question both times.
+  let mark = null;
   let showing = [];
   let picked = 0;
+  let asked = 0;
 
   const close = () => {
+    mark = null;
     showing = [];
     picked = 0;
     menu.hidden = true;
     menu.replaceChildren();
   };
 
-  const take = (id) => {
-    const token = tokenAt(text.value, text.selectionStart, "/");
+  const take = (chosen) => {
+    const token = tokenAt(text.value, text.selectionStart, mark);
     if (!token) return close();
     const left = withoutToken(text.value, token);
-    state.mode = id;
+    if (mark === "/") {
+      state.mode = chosen.id;
+    } else {
+      // Described rather than assumed. Whether a file travels with the message or is
+      // only named depends on how big it is, and a size invented here as zero would
+      // make everything look small enough to carry. `bringFiles` is the one door every
+      // file comes through, so a path chosen with `@` lands the same way a dropped one
+      // does.
+      void invoke("colai_describe_files", { paths: [chosen.path] })
+        .then((described) => bringFiles(described))
+        .catch(() => {});
+    }
     state.text = left.text;
     text.value = left.text;
     text.setSelectionRange(left.caret, left.caret);
@@ -385,37 +404,61 @@ function askField() {
     text.focus();
   };
 
-  const look = () => {
-    const token = tokenAt(text.value, text.selectionStart, "/");
-    if (!token) return close();
-    showing = modesMatching(token.word);
-    if (showing.length === 0) return close();
-    picked = Math.min(picked, showing.length - 1);
-    menu.hidden = false;
+  const draw = () => {
+    picked = Math.min(picked, Math.max(0, showing.length - 1));
+    menu.hidden = showing.length === 0;
     menu.replaceChildren(
-      ...showing.map((mode, at) => {
+      ...showing.map((row, at) => {
         const one = document.createElement("button");
         one.type = "button";
         one.className = "ask-menu-row";
         one.dataset.on = String(at === picked);
         const name = document.createElement("span");
         name.className = "ask-menu-name";
-        name.textContent = mode.label;
+        name.textContent = row.label ?? row.shown;
         const says = document.createElement("span");
         says.className = "ask-menu-says";
-        says.textContent = mode.says;
-        // Clipped to one line so four modes fit; the whole of it stays reachable.
-        one.title = mode.says;
+        says.textContent = row.says ?? row.path;
+        // Clipped to one line so several fit; the whole of it stays reachable.
+        one.title = row.says ?? row.path;
         one.append(name, says);
         // Pressed rather than clicked: a click would blur the field first and close the
         // menu out from under the press.
         one.addEventListener("mousedown", (event) => {
           event.preventDefault();
-          take(mode.id);
+          take(row);
         });
         return one;
       }),
     );
+  };
+
+  const look = () => {
+    const slash = tokenAt(text.value, text.selectionStart, "/");
+    const at = tokenAt(text.value, text.selectionStart, "@");
+    // Whichever was typed later is the one being typed now.
+    const token = !slash ? at : !at ? slash : slash.from > at.from ? slash : at;
+    if (!token) return close();
+    mark = token === slash ? "/" : "@";
+
+    if (mark === "/") {
+      showing = modesMatching(token.word);
+      if (showing.length === 0) return close();
+      return draw();
+    }
+    // Asked of the machine, so the answer arrives after the keystroke that wanted it.
+    // Each ask is numbered and a late one is dropped: without that, a slow search for
+    // `sr` lands after a fast one for `src` and replaces the right answer with a stale
+    // one — the menu flickering backwards as somebody types.
+    const mine = ++asked;
+    void invoke("colai_search_files", { query: token.word })
+      .then((rows) => {
+        if (mine !== asked || mark !== "@") return;
+        showing = rows || [];
+        if (showing.length === 0) return close();
+        draw();
+      })
+      .catch(() => close());
   };
 
   text.addEventListener("input", () => {
@@ -439,7 +482,7 @@ function askField() {
     // key is a menu half the people using it never get out of.
     if (event.key === "Enter" || event.key === "Tab") {
       event.preventDefault();
-      take(showing[picked].id);
+      take(showing[picked]);
     }
   });
 

@@ -3064,6 +3064,48 @@ describe("one light for every agent at once", () => {
     expect(withoutToken(middle, inner)).toEqual({ text: "make  it faster", caret: 5 });
   });
 
+  test("what may be read is decided in Rust, not by the page", () => {
+    /*
+     * The shape of the whole `@` feature. Everything reachable through it can be put in
+     * front of a model, so the roots come from the Gateway and the check happens where
+     * the bytes are actually read — a page that could name its own roots could name `/`,
+     * and a picker that only *offers* safe paths is not a gate at all.
+     */
+    const files = readFileSync(
+      new URL("../apps/linux/src-tauri/src/colai_files.rs", import.meta.url),
+      "utf8",
+    );
+    const send = readFileSync(
+      new URL("../apps/linux/src-tauri/src/colai_send.rs", import.meta.url),
+      "utf8",
+    );
+
+    // The read path is gated, at the point of reading.
+    const carry = files.slice(files.indexOf("pub(crate) fn carry("));
+    expect(carry.slice(0, 900)).toMatch(/if !may_read\(path, roots\)/);
+
+    // And the roots reaching it are the Gateway's, not an argument from the page.
+    expect(send).toContain("work_roots(&gateway)");
+    const search = files.slice(files.indexOf("pub(crate) async fn colai_search_files("));
+    expect(search.slice(0, 500)).toContain("work_roots(&gateway)");
+    expect(
+      search.slice(0, 500),
+      "the search command must not take roots from its caller",
+    ).not.toMatch(/roots:\s*Vec<String>/);
+  });
+
+  test("the composer says both keystrokes exist", () => {
+    // `/` has a dropdown beside it to be discovered from. `@` has nothing anywhere else,
+    // so if the hint does not name it, nobody finds it.
+    const compose = readFileSync(
+      new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+      "utf8",
+    );
+    const hint = compose.slice(compose.indexOf("mode-pick-hint"));
+    expect(hint.slice(0, 400)).toContain("/");
+    expect(hint.slice(0, 400)).toContain("@");
+  });
+
   test("the reply is sized on purpose, not left to inherit the page", () => {
     /*
      * Found by rendering the window and looking at it: `.answer-turn` set no font-size,

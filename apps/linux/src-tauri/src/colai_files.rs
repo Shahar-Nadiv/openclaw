@@ -278,17 +278,225 @@ fn weigh(_root: &std::path::Path) -> u64 {
     0
 }
 
+/// Directories never worth walking, because nothing in them is what somebody meant.
+///
+/// Not a security rule — `may_read` is that. This is about the walk finishing: a single
+/// `node_modules` holds more entries than the rest of a checkout put together, and a
+/// search that has to cross it before reaching `src` is a search nobody waits for.
+const NOT_WORTH_WALKING: &[&str] = &[
+    "node_modules",
+    ".git",
+    "target",
+    "dist",
+    "build",
+    ".next",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".cache",
+    "vendor",
+];
+
+/// How far a search goes before it stops looking.
+const SEARCH_DEEPEST: usize = 8;
+const SEARCH_ENTRIES: usize = 60_000;
+const SEARCH_MOST: usize = 40;
+
+/// A path `@` could mean.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Found {
+    pub path: String,
+    /// What to show: the path relative to the folder it was found in, because the whole
+    /// of an absolute path is mostly the part every result has in common.
+    pub shown: String,
+    pub folder: bool,
+}
+
+/// Files under the folders somebody works in, matching what they have typed so far.
+///
+/// The roots come from the Gateway, not from the caller. That is the whole shape of
+/// this: a page that could name its own roots could name `/`.
+///
+/// Matched on the shown path rather than the file name, so `src/ap` finds
+/// `src/app.tsx` — which is how somebody types a path they half remember.
+#[tauri::command]
+pub(crate) async fn colai_search_files(
+    gateway: tauri::State<'_, crate::gateway_ws::GatewayClient>,
+    query: String,
+) -> Result<Vec<Found>, String> {
+    let roots = crate::colai_receivers::work_roots(&gateway).await;
+    Ok(search_within(&roots, &query))
+}
+
+fn search_within(roots: &[std::path::PathBuf], query: &str) -> Vec<Found> {
+    let want = query.trim().to_ascii_lowercase();
+    let mut found: Vec<Found> = Vec::new();
+    let mut seen = 0usize;
+    for root in roots {
+        let Ok(root) = std::fs::canonicalize(root) else {
+            continue;
+        };
+        let mut walking = vec![(root.clone(), 0usize)];
+        while let Some((here, depth)) = walking.pop() {
+            if found.len() >= SEARCH_MOST || seen >= SEARCH_ENTRIES {
+                break;
+            }
+            let Ok(entries) = std::fs::read_dir(&here) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                if found.len() >= SEARCH_MOST || seen >= SEARCH_ENTRIES {
+                    break;
+                }
+                seen += 1;
+                let path = entry.path();
+                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                // `symlink_metadata`, so a link back into a parent is not walked into a
+                // loop — the same reason the folder walk above uses it.
+                let Ok(facts) = entry.metadata() else {
+                    continue;
+                };
+                let folder = facts.is_dir();
+                if folder && (NOT_WORTH_WALKING.contains(&name) || name.starts_with('.')) {
+                    continue;
+                }
+                if folder && depth < SEARCH_DEEPEST {
+                    walking.push((path.clone(), depth + 1));
+                }
+                // Offered only if it could actually be read. A picker that lists what the
+                // gate will refuse teaches somebody the toolbar is broken.
+                if !folder && !may_read(&path, roots) {
+                    continue;
+                }
+                let shown = path
+                    .strip_prefix(&root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .to_string();
+                if !want.is_empty() && !shown.to_ascii_lowercase().contains(&want) {
+                    continue;
+                }
+                if folder {
+                    continue;
+                }
+                found.push(Found {
+                    path: path.to_string_lossy().to_string(),
+                    shown,
+                    folder,
+                });
+            }
+        }
+    }
+    // Shortest first: the closest match to what was typed is usually the shallowest one.
+    found.sort_by(|a, b| {
+        a.shown
+            .len()
+            .cmp(&b.shown.len())
+            .then_with(|| a.shown.cmp(&b.shown))
+    });
+    found.truncate(SEARCH_MOST);
+    found
+}
+
+/*
+ * ── what may be read ─────────────────────────────────────────────────────────
+ *
+ * Everything reachable from here can be put in front of a model, so this is the widest
+ * thing the toolbar does and the part worth being narrow about.
+ *
+ * Two rules, and the order matters. A path must sit inside a root somebody actually
+ * works in, and it must not be one of the things that are never readable however far
+ * inside a root they sit. Deny wins: a `.env` in the middle of a project is still a
+ * `.env`.
+ *
+ * The check is on the *resolved* path. `..` and symlinks are how a path that looks like
+ * it is inside a project turns out to be `~/.ssh`, and comparing the string somebody
+ * typed would miss both.
+ */
+
+/// Never readable, wherever they are. Names, not globs — a glob language here would be
+/// one more thing to get subtly wrong on the one list that must not be wrong.
+const NEVER_READ: &[&str] = &[
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".azure",
+    ".kube",
+    ".docker",
+    ".netrc",
+    ".pgpass",
+    ".git-credentials",
+    ".npmrc",
+    ".pypirc",
+    "id_rsa",
+    "id_ed25519",
+    "credentials",
+    "shadow",
+];
+
+/// And these, by extension, because a key is a key whatever it is called.
+const NEVER_ENDS: &[&str] = &[".pem", ".key", ".p12", ".pfx", ".keystore", ".jks"];
+
+/// Whether one path component is one of the things that are never readable.
+///
+/// A `.env` matches, and so does `.env.local`, because the interesting part of the name
+/// is the front of it — but `.environment` does not, since a prefix match on a bare name
+/// would refuse half of somebody's project.
+fn never_named(part: &str) -> bool {
+    let lower = part.to_ascii_lowercase();
+    if lower == ".env" || lower.starts_with(".env.") {
+        return true;
+    }
+    if NEVER_READ.iter().any(|name| lower == *name) {
+        return true;
+    }
+    NEVER_ENDS.iter().any(|end| lower.ends_with(end))
+}
+
+/// Whether a path may be read into a prompt.
+///
+/// Resolved first, so `..` and symlinks are answered rather than trusted. A path that
+/// does not exist is refused: there is nothing to read, and saying yes to it would make
+/// the answer depend on what appears there later.
+pub(crate) fn may_read(path: &std::path::Path, roots: &[std::path::PathBuf]) -> bool {
+    let Ok(real) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    // Every component, not just the last: a file inside `.ssh` is inside `.ssh`.
+    if real
+        .components()
+        .filter_map(|part| part.as_os_str().to_str())
+        .any(never_named)
+    {
+        return false;
+    }
+    roots.iter().any(|root| {
+        std::fs::canonicalize(root)
+            .is_ok_and(|root| !root.as_os_str().is_empty() && real.starts_with(root))
+    })
+}
+
 /// Read the files that are travelling with a message.
 ///
 /// Only the ones the page decided could travel — the size rules live next to the
 /// composer that shows them, and are tested there. A path that has gone since it was
 /// dropped is skipped rather than failing the send: the message still names it, and
 /// losing a whole send because one of four files moved is the worse outcome.
-pub(crate) fn carry(paths: &[String]) -> Vec<ChatAttachment> {
+pub(crate) fn carry(paths: &[String], roots: &[std::path::PathBuf]) -> Vec<ChatAttachment> {
     paths
         .iter()
         .filter_map(|path| {
             let path = std::path::Path::new(path);
+            // The gate, at the only moment that counts. The picker offers what is inside
+            // a project, but a path can reach this list by drag and drop, by a dialog, or
+            // by anything else the page decides to put in it — so what may be read is
+            // decided here, once, rather than by whichever surface happened to add it.
+            if !may_read(path, roots) {
+                return None;
+            }
             let bytes = std::fs::read(path).ok()?;
             Some(ChatAttachment {
                 kind: "file".to_string(),
@@ -356,10 +564,165 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
     }
 
+    /// A project, a secret beside it, and somewhere private outside it.
+    ///
+    /// `canonicalize` on the temp root first: on some systems it is a symlink, and a
+    /// containment test written against the un-resolved path passes on Linux and fails
+    /// wherever `/tmp` is `/private/tmp`.
+    fn a_desk(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let root = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("colai-gate-{}-{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("project/src")).unwrap();
+        std::fs::create_dir_all(root.join("private/.ssh")).unwrap();
+        std::fs::write(root.join("project/src/main.rs"), b"fn main() {}").unwrap();
+        std::fs::write(root.join("project/.env"), b"TOKEN=hunter2").unwrap();
+        std::fs::write(root.join("private/.ssh/id_rsa"), b"-----BEGIN").unwrap();
+        // An innocent name inside a directory that is not: this is the case a check on
+        // the last component alone would wave straight through.
+        std::fs::write(root.join("private/.ssh/config"), b"Host *").unwrap();
+        std::fs::write(root.join("private/secrets.pem"), b"-----BEGIN").unwrap();
+        (root.clone(), root.join("project"))
+    }
+
+    #[test]
+    fn only_what_is_inside_a_folder_somebody_works_in_can_be_read() {
+        let (root, project) = a_desk("inside");
+        let roots = vec![project.clone()];
+
+        assert!(may_read(&project.join("src/main.rs"), &roots));
+        // Outside the project entirely.
+        assert!(!may_read(&root.join("private/secrets.pem"), &roots));
+        // Nothing to read is not permission to read it later.
+        assert!(!may_read(&project.join("src/nothing-here.rs"), &roots));
+        // And no roots at all refuses everything, which is what an unreachable Gateway
+        // leaves behind — no answer is not permission.
+        assert!(!may_read(&project.join("src/main.rs"), &[]));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_path_that_climbs_out_of_the_project_is_refused_however_it_is_written() {
+        /*
+         * The two ways a path that looks inside turns out not to be. Comparing the string
+         * somebody typed would let both of these through, which is why the check is on
+         * the resolved path.
+         */
+        let (root, project) = a_desk("escape");
+        let roots = vec![project.clone()];
+
+        // `..` back out and into somewhere private.
+        let climbed = project.join("src/../../private/secrets.pem");
+        assert!(
+            climbed.starts_with(&project),
+            "the written path looks inside"
+        );
+        assert!(!may_read(&climbed, &roots), "the resolved path is not");
+
+        // A symlink inside the project pointing out of it.
+        #[cfg(unix)]
+        {
+            let link = project.join("src/way-out");
+            std::os::unix::fs::symlink(root.join("private/secrets.pem"), &link).unwrap();
+            assert!(!may_read(&link, &roots), "a link out is a way out");
+        }
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn some_things_are_never_read_however_far_inside_a_project_they_sit() {
+        // Deny wins over allow. A `.env` in the middle of somebody's checkout is still a
+        // `.env`, and this is the list that must not be wrong.
+        let (root, project) = a_desk("never");
+        let roots = vec![project.clone()];
+
+        assert!(may_read(&project.join("src/main.rs"), &roots));
+        assert!(
+            !may_read(&project.join(".env"), &roots),
+            ".env is never read"
+        );
+
+        // Every component, not just the last: a file inside `.ssh` is inside `.ssh`.
+        let wide = vec![root.clone()];
+        assert!(!may_read(&root.join("private/.ssh/id_rsa"), &wide));
+        // The one that matters: `config` is a perfectly ordinary name, and it is inside
+        // `.ssh`. Checking only the last component would read it.
+        assert!(
+            !may_read(&root.join("private/.ssh/config"), &wide),
+            "a plain name inside a denied directory is still denied"
+        );
+        assert!(
+            !may_read(&root.join("private/secrets.pem"), &wide),
+            "a key by extension"
+        );
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_picker_never_offers_what_the_gate_would_refuse() {
+        // A picker that lists what the gate then refuses teaches somebody the toolbar is
+        // broken. The two answer the same question, so they answer it the same way.
+        let (root, project) = a_desk("search");
+        let roots = vec![project.clone()];
+
+        let all = search_within(&roots, "");
+        let shown: Vec<&str> = all.iter().map(|one| one.shown.as_str()).collect();
+        assert!(
+            shown.contains(&"src/main.rs"),
+            "found what is inside: {shown:?}"
+        );
+        assert!(
+            !shown.iter().any(|one| one.contains(".env")),
+            "never the secret"
+        );
+
+        // Matched on the path, not the file name, because that is how somebody types a
+        // path they half remember.
+        let some = search_within(&roots, "src/ma");
+        assert_eq!(
+            some.iter()
+                .map(|one| one.shown.as_str())
+                .collect::<Vec<_>>(),
+            ["src/main.rs"]
+        );
+
+        // Nothing outside a root is reachable, whatever is asked for.
+        assert!(search_within(&roots, "secrets").is_empty());
+        assert!(
+            search_within(&[], "main").is_empty(),
+            "no roots offers nothing"
+        );
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_name_is_refused_for_being_the_thing_and_not_for_starting_like_it() {
+        // The list refuses `.env` and `.env.local` and leaves `.environment` alone. A
+        // prefix match on a bare name would quietly refuse half of somebody's project.
+        assert!(never_named(".env"));
+        assert!(never_named(".env.local"));
+        assert!(never_named(".ENV"));
+        assert!(never_named("id_rsa"));
+        assert!(never_named("cluster.pem"));
+        assert!(!never_named(".environment"));
+        assert!(!never_named("environment.ts"));
+        assert!(!never_named("main.rs"));
+        assert!(!never_named("readme.md"));
+    }
+
     #[test]
     fn a_path_that_is_not_there_is_left_out_rather_than_described_as_empty() {
         assert!(describe(std::path::Path::new("/nowhere/at/all/really")).is_none());
-        assert!(carry(&["/nowhere/at/all/really".to_string()]).is_empty());
+        assert!(carry(
+            &["/nowhere/at/all/really".to_string()],
+            &[std::path::PathBuf::from("/")]
+        )
+        .is_empty());
     }
 
     #[test]
@@ -367,7 +730,10 @@ mod tests {
         let path = std::env::temp_dir().join(format!("colai-carry-{}.md", std::process::id()));
         std::fs::write(&path, b"# hello").unwrap();
 
-        let carried = carry(&[path.to_str().unwrap().to_string()]);
+        // The temp directory stands in for a project root here; what may be read is
+        // its own test below.
+        let roots = vec![std::fs::canonicalize(std::env::temp_dir()).unwrap()];
+        let carried = carry(&[path.to_str().unwrap().to_string()], &roots);
         assert_eq!(carried.len(), 1);
         assert_eq!(
             carried[0].file_name,
