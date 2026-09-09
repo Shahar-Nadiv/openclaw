@@ -2523,8 +2523,51 @@ describe("the work panel belongs to the toolbar", () => {
     // each other. `toggleWork` already closed any flyout; this is the other half.
     const work = readFileSync(new URL("../apps/linux/ui/toolbar-work.js", import.meta.url), "utf8");
     const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
-    expect(work).toContain("if (state.work.open) state.open = null;");
-    expect(rail).toContain("if (state.open) state.work.open = false;");
+    // Each opener shuts the other, whether it does it on one line or inside a block.
+    const opening = (source: string, after: string) => {
+      const at = source.indexOf(after);
+      expect(at, `${after} must exist`).toBeGreaterThan(-1);
+      return source.slice(at, source.indexOf("\n}", at));
+    };
+    expect(opening(work, "function toggleWork("), "opening Work shuts any flyout").toContain(
+      "state.open = null",
+    );
+    expect(opening(rail, "function flyout("), "opening a flyout shuts Work").toContain(
+      "state.work.open = false",
+    );
+  });
+
+  test("the toolbar asks for the keyboard whenever it opens something typed into", () => {
+    /*
+     * The overlay is hinted as a dock, so the window manager treats it as scenery and
+     * never hands it the keyboard. Only marking used to ask — which made marking a toll
+     * on writing: open the Work panel with nothing marked, click the composer, type a
+     * sentence, and every keystroke went to whatever was behind the overlay.
+     *
+     * The composer is the panel's main field and it is there whether anything is marked
+     * or not. So every door into a surface with a field in it asks.
+     */
+    const work = readFileSync(new URL("../apps/linux/ui/toolbar-work.js", import.meta.url), "utf8");
+    const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+    const mark = readFileSync(new URL("../apps/linux/ui/toolbar-mark.js", import.meta.url), "utf8");
+
+    expect(work, "one door, so it cannot be half-wired").toContain("function reachTheKeyboard(");
+    for (const [where, source, after] of [
+      ["opening Work", work, "function openWork("],
+      ["toggling Work", work, "function toggleWork("],
+      ["opening a flyout", rail, "function flyout("],
+    ] as const) {
+      const body = source.slice(
+        source.indexOf(after),
+        source.indexOf("\n}", source.indexOf(after)),
+      );
+      expect(body, `${where} must ask for the keyboard`).toContain("reachTheKeyboard()");
+    }
+    // Marking asks through the same door rather than keeping its own copy.
+    expect(mark, "marking uses the shared one").toContain("reachTheKeyboard()");
+    expect(mark, "and does not invoke it a second way").not.toContain(
+      'invoke("colai_take_keyboard")',
+    );
   });
 
   test("nothing is left over from when it floated", () => {

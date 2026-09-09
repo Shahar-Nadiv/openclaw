@@ -223,7 +223,7 @@ async function shoot(mark) {
   render();
   // The note is a text field and one way out is a key, and neither works while the
   // window manager treats this window as scenery.
-  void invoke("colai_take_keyboard").catch(() => {});
+  reachTheKeyboard();
 }
 
 /**

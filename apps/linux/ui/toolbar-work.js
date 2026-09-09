@@ -18,8 +18,29 @@
  */
 function toggleWork() {
   state.work.open = !state.work.open;
-  if (state.work.open) state.open = null;
+  if (state.work.open) {
+    state.open = null;
+    reachTheKeyboard();
+  }
   render();
+}
+
+/**
+ * Ask the window manager for the keyboard, because this window is scenery until it does.
+ *
+ * The overlay is hinted as a dock so the shell stacks it above everything and keeps it
+ * out of the switcher, and a dock is not something a window manager hands the keyboard
+ * to. Only marking used to ask — which made marking a toll on writing: open the panel
+ * with nothing marked, click the field, type a sentence, and every keystroke went to
+ * whatever was behind the overlay. The composer is the panel's main field and it is
+ * there whether anything is marked or not, so opening the panel is when to ask.
+ *
+ * Asked on opening rather than on every render: taking somebody's keyboard at any moment
+ * other than the one they asked for this window would be the overlay behaving like an
+ * application.
+ */
+function reachTheKeyboard() {
+  void invoke("colai_take_keyboard").catch(() => {});
 }
 
 function closeWork() {
@@ -30,6 +51,7 @@ function closeWork() {
 function openWork() {
   state.work.open = true;
   state.open = null;
+  reachTheKeyboard();
   render();
 }
 
