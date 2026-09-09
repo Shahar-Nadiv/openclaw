@@ -1052,29 +1052,51 @@ function stillRunning(runs, now) {
  * cannot be reached at all, where `work` is whatever was last known and may be stale.
  */
 /**
- * How long a run is believed without the Gateway agreeing.
+ * How long a run the Gateway has never heard of is believed.
  *
- * The Gateway counts every session it can see, which is not always every run this
- * toolbar started — an adopted conversation, or one that has not registered yet, is
- * simply missing from that count. Trusting a zero immediately made a run that had just
- * been dispatched read as finished.
+ * Not every run this toolbar starts appears in the Gateway's list — an adopted
+ * conversation, or one that has not registered yet, is simply missing from it. So a run
+ * the list does not mention is not evidence of anything, and killing it on that would
+ * make a just-dispatched run read as finished.
  *
- * Long enough for a session to appear in the Gateway's own list, short enough that a
- * run nobody is tracking still gets tidied up.
+ * Long enough for a session to appear in the Gateway's own list, short enough that a run
+ * nobody is tracking still gets tidied up. This is the net for the unknown case only —
+ * a session the Gateway *does* know about is answered outright, and does not wait.
  */
 const GATEWAY_LAGS = 45 * 1000;
 
+/**
+ * Which of these runs are still going.
+ *
+ * The Gateway names the sessions it considers working, so a run it knows about is
+ * answered outright: listed means running, listed-and-absent means finished, this
+ * second. That is the whole question the panel asks, and it used to be answered by
+ * arithmetic instead — the total reaching zero, with `GATEWAY_LAGS` underneath in case
+ * the total was about somebody else's agent. Both halves were wrong for the same
+ * reason: a count says how many, and the panel needs to know which. A finished agent
+ * kept its spinner and its stop key for the best part of a minute.
+ *
+ * The timeout stays for the one case a name cannot cover: a session the Gateway has
+ * never mentioned at all.
+ */
 function runsNow(runs, work, now) {
   const still = stillRunning(runs, now);
-  // The Gateway saying "nothing is running" is a hint, not a verdict, and it used to be
-  // taken as one — clearing every run the instant a count came back zero. That was
-  // harmless when it only decided whether to offer a stop key, and became a lie the
-  // moment the panel used the same list to say an agent was *done*.
-  //
-  // `session.ended` is what actually says a run finished. This is the net beneath it, so
-  // it only takes runs the Gateway has had a fair chance to notice.
-  if (!work || work.running !== 0) return still;
-  return still.filter((run) => now - run.heard < GATEWAY_LAGS);
+  // Nothing was heard from the Gateway at all — an unreachable one, or a build that does
+  // not name its sessions. The quiet timeout is all there is.
+  if (!work || !Array.isArray(work.known)) {
+    return still.filter((run) => !work || work.running !== 0 || now - run.heard < GATEWAY_LAGS);
+  }
+  const working = new Set(work.working || []);
+  const known = new Set(work.known);
+  return still.filter((run) => {
+    if (working.has(run.sessionKey)) return true;
+    // The Gateway lists this session and does not call it working. That is an answer,
+    // and it is "finished" — no waiting, no arithmetic about totals.
+    if (known.has(run.sessionKey)) return false;
+    // Never mentioned. Not evidence of anything: an adopted conversation, or one that
+    // has not registered yet, looks exactly like this a second after it is dispatched.
+    return now - run.heard < GATEWAY_LAGS;
+  });
 }
 
 /*

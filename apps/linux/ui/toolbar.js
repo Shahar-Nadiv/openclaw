@@ -640,24 +640,6 @@ async function start() {
     redrawMarksSoon();
   }).catch(() => {});
 
-  void listen("colai:ended", (event) => {
-    const key = event && event.payload && event.payload.sessionKey;
-    if (!key) return;
-    state.runs = state.runs.filter((run) => run.sessionKey !== key);
-    // Two frames arrive here and they do not mean the same thing. `session.error` is a
-    // run that fell over, and the panel has to be able to say so afterwards — the run is
-    // gone from `state.runs` either way, so without recording it a failure and a clean
-    // finish become indistinguishable the moment it ends.
-    if (event.payload.event === "session.error") {
-      const entry = state.history.find((one) => one.sessionKey === key);
-      if (entry) entry.failed = true;
-    }
-    render();
-    // The light is about every agent, not this one, but a run ending is the most likely
-    // moment for the answer to have changed — and five seconds late is five seconds of
-    // a green glow over nothing.
-    void watchEverything();
-  }).catch(() => {});
 
   void listen("colai:reply", (event) => {
     const payload = event && event.payload;

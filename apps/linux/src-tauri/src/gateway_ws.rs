@@ -37,7 +37,6 @@ const GATEWAY_STATE_EVENT: &str = "quickchat:gateway-state";
 const CHAT_EVENT: &str = "quickchat:chat-event";
 /// What the toolbar hears when a session it is watching says something.
 const REPLY_EVENT: &str = "colai:reply";
-const ENDED_EVENT: &str = "colai:ended";
 const GATEWAY_DEVICE_IDENTITY_FILE: &str = "quickchat-gateway-device.json";
 const AGENTS_CACHE_TTL: Duration = Duration::from_secs(60);
 /// How many conversations the toolbar's picker asks for.
@@ -258,6 +257,24 @@ pub(crate) struct AtWork {
     pub running: u32,
     pub waiting: u32,
     pub trouble: u32,
+    /// Which sessions those are, not just how many.
+    ///
+    /// The counts answer "is anything happening", which is all the rail's one light
+    /// needs. The Work panel asks a different question — has *this* run finished — and a
+    /// count cannot answer it: the toolbar was left inferring an ending from the total
+    /// reaching zero, with a timeout under it in case the total was about somebody
+    /// else's agent. That made a finished agent read as running for the best part of a
+    /// minute. The Gateway knows which session is which; this stops throwing it away.
+    pub working: Vec<String>,
+    /// The same, for sessions that recently fell over.
+    pub troubled: Vec<String>,
+    /// Every session the Gateway listed, whatever it is doing.
+    ///
+    /// This is what tells "finished" from "never heard of". Not every run the toolbar
+    /// starts reaches this list — an adopted conversation, or one that has not
+    /// registered yet, is missing from it — and those two have to be treated
+    /// differently: one is over, the other has not begun.
+    pub known: Vec<String>,
 }
 
 /// A conversation held by an agent the Gateway knows about but does not own — a Claude
@@ -442,14 +459,19 @@ const TROUBLE_RECENT: i64 = 10 * 60 * 1000;
 pub(crate) fn at_work_of(sessions: &[GatewaySessionSummary], now: i64) -> AtWork {
     let mut counted = AtWork::default();
     for row in sessions {
+        counted.known.push(row.key.clone());
         match row.status.as_deref() {
-            Some("running" | "queued") => counted.running += 1,
+            Some("running" | "queued") => {
+                counted.running += 1;
+                counted.working.push(row.key.clone());
+            }
             // Killed is not trouble. Somebody stopped it on purpose, and a red light
             // over a deliberate act is the toolbar arguing with the person using it.
             Some("failed" | "timeout") => {
                 let last = row.last_activity_at.or(row.updated_at).unwrap_or(0);
                 if now - last < TROUBLE_RECENT {
                     counted.trouble += 1;
+                    counted.troubled.push(row.key.clone());
                 }
             }
             _ => {}
@@ -1545,7 +1567,6 @@ impl GatewayClient {
         let dispatch = |frame: &Value| {
             dispatch_chat_event(app, frame);
             dispatch_session_message(app, frame);
-            dispatch_session_ended(app, frame);
             if frame.get("type").and_then(Value::as_str) == Some("event")
                 && frame.get("event").and_then(Value::as_str) == Some("config.changed")
             {
@@ -2688,28 +2709,6 @@ fn dispatch_session_message<R: tauri::Runtime>(app: &AppHandle<R>, frame: &Value
     }
 }
 
-/// A session saying it has finished, or fallen over.
-///
-/// The toolbar glows while a run is underway, and a glow that never goes out is worse
-/// than no glow at all — it is a claim about work that is not happening. These two
-/// frames are what turns it off; a quiet timeout in the page is the net beneath them.
-fn dispatch_session_ended<R: tauri::Runtime>(app: &AppHandle<R>, frame: &Value) {
-    if frame.get("type").and_then(Value::as_str) != Some("event") {
-        return;
-    }
-    let event = frame.get("event").and_then(Value::as_str);
-    if !matches!(event, Some("session.ended") | Some("session.error")) {
-        return;
-    }
-    if let Some(payload) = frame.get("payload") {
-        let mut said = payload.clone();
-        if let Some(map) = said.as_object_mut() {
-            map.insert("event".to_string(), Value::from(event.unwrap_or("")));
-        }
-        let _ = app.emit_to(crate::colai::OVERLAY_LABEL, ENDED_EVENT, said);
-    }
-}
-
 fn dispatch_chat_event<R: tauri::Runtime>(app: &AppHandle<R>, frame: &Value) {
     if frame.get("type").and_then(Value::as_str) != Some("event")
         || frame.get("event").and_then(Value::as_str) != Some("chat")
@@ -3110,8 +3109,12 @@ esac
     }
 
     fn a_session(status: &str, last: i64) -> GatewaySessionSummary {
+        named_session("main:1", status, last)
+    }
+
+    fn named_session(key: &str, status: &str, last: i64) -> GatewaySessionSummary {
         GatewaySessionSummary {
-            key: "main:1".to_string(),
+            key: key.to_string(),
             agent_id: None,
             label: None,
             display_name: None,
@@ -3140,6 +3143,51 @@ esac
             "queued work has not started but is work"
         );
         assert_eq!(counted.trouble, 0);
+    }
+
+    #[test]
+    fn which_session_is_working_is_kept_not_just_how_many() {
+        /*
+         * The counts answer "is anything happening", which is all the rail's one light
+         * needs. The Work panel asks whether *this* run has finished, and a count cannot
+         * answer it — so the toolbar inferred an ending from the total reaching zero,
+         * with a timeout under it for when the total was about somebody else's agent.
+         * A finished agent therefore read as running for the best part of a minute.
+         */
+        let now = 1_700_000_000_000;
+        let counted = at_work_of(
+            &[
+                named_session("agent:main:one", "running", now),
+                named_session("agent:main:two", "queued", now),
+                named_session("agent:main:three", "done", now),
+                named_session("agent:main:four", "failed", now),
+            ],
+            now,
+        );
+        assert_eq!(
+            counted.working,
+            vec!["agent:main:one".to_string(), "agent:main:two".to_string()],
+            "queued work has not started but is work, and both are named"
+        );
+        assert_eq!(counted.troubled, vec!["agent:main:four".to_string()]);
+        // A session the Gateway lists as finished is named by neither, which is how the
+        // page tells "done" from "never heard of it".
+        assert!(!counted.working.iter().any(|key| key == "agent:main:three"));
+        // But it is named as known, which is the difference between a run that is over
+        // and one the Gateway has never heard of.
+        assert!(counted.known.iter().any(|key| key == "agent:main:three"));
+        assert_eq!(counted.known.len(), 4, "every listed session, whatever it is doing");
+    }
+
+    #[test]
+    fn trouble_that_is_history_names_nobody() {
+        // The list and the count have to agree, or the panel marks a run failed on the
+        // strength of something the light has already stopped mentioning.
+        let now = 1_700_000_000_000;
+        let old = now - 60 * 60 * 1000;
+        let counted = at_work_of(&[named_session("agent:main:one", "failed", old)], now);
+        assert_eq!(counted.trouble, 0);
+        assert!(counted.troubled.is_empty());
     }
 
     #[test]

@@ -259,7 +259,23 @@ type Cron = {
 type Brought = { path: string; name: string; bytes: number; folder: boolean };
 
 /** What every agent on the Gateway adds up to, as the light reads it. */
-type Work = { running: number; waiting: number; trouble: number };
+/**
+ * What the Gateway says is happening.
+ *
+ * The counts are for the rail's one light. The three lists are for the Work panel, which
+ * asks about one run rather than about the total — `working` is what the Gateway calls
+ * underway, `troubled` what recently fell over, and `known` every session it listed at
+ * all, which is what tells a finished run from one it has never heard of. Absent on a
+ * Gateway that does not name them.
+ */
+type Work = {
+  running: number;
+  waiting: number;
+  trouble: number;
+  working?: string[];
+  troubled?: string[];
+  known?: string[];
+};
 
 /** A window's rectangle, and the sizes a mark is expressed against. */
 type Rect = { x: number; y: number; width: number; height: number };
@@ -1819,40 +1835,85 @@ describe("knowing an agent is working", () => {
     expect(render).not.toMatch(/dataset\.mood\s*=\s*\w+\s*\?[^;]*:\s*["'`]["'`]/);
   });
 
-  test("the Gateway saying nothing runs is a hint, not a verdict", () => {
+  test("a run the Gateway lists as finished is finished now, not in a minute", () => {
     /*
-     * This rule was written to stop the stop key outliving its run, and it cleared every
-     * run the instant a count came back zero. Harmless while it only decided whether to
-     * offer a button — and a lie the moment the work panel used the same list to say an
-     * agent was *done*, which is what it started reporting for runs that were still
-     * going.
+     * The whole complaint: the agent was done and the panel went on showing a spinner
+     * and a stop key for the best part of a minute.
      *
-     * The Gateway counts sessions it can see, which is not always every run this toolbar
-     * started. `session.ended` is what actually says a run finished; this is only the
-     * net beneath it.
+     * It was answering the wrong question. The Gateway was asked how many sessions are
+     * working, and a count cannot say whether *this* one is — so an ending was inferred
+     * from the total reaching zero, with a 45-second net underneath for when the total
+     * was about somebody else's agent. Both halves had to be wrong for the panel to be
+     * right on time, and they never were.
+     *
+     * The Gateway names its sessions. A listed session that is not working is finished,
+     * and that is an answer, not a hint.
      */
     const now = 1_000_000;
-    const quiet = { running: 0, waiting: 0, trouble: 0 };
+    const listed = (working: string[], known: string[], troubled: string[] = []) => ({
+      running: working.length,
+      waiting: 0,
+      trouble: troubled.length,
+      working,
+      known,
+      troubled,
+    });
 
-    // Just dispatched, and the Gateway has not noticed it yet. Still running.
-    expect(runsNow([run("a", now - 1000)], quiet, now)).toHaveLength(1);
+    // Dispatched a second ago and the Gateway already calls it done. Believe it.
+    expect(runsNow([run("a", now - 1000)], listed([], ["a"]), now)).toHaveLength(0);
 
-    // Old enough that the Gateway would have seen it, and it still says nothing runs.
-    // Now the zero is worth believing.
-    expect(runsNow([run("a", now - 60_000)], quiet, now)).toHaveLength(0);
+    // Still working, however long it has been going.
+    expect(runsNow([run("a", now - 1000)], listed(["a"], ["a"]), now)).toHaveLength(1);
+    expect(runsNow([run("a", now - 60_000)], listed(["a"], ["a"]), now)).toHaveLength(1);
+
+    // Somebody else's agent working says nothing about this one, in either direction.
+    expect(runsNow([run("a", now - 1000)], listed(["b"], ["a", "b"]), now)).toHaveLength(0);
+    expect(runsNow([run("a", now - 1000)], listed(["a", "b"], ["a", "b"]), now)).toHaveLength(1);
+
+    // Listed as fallen over is also an answer, and it is not "running".
+    expect(runsNow([run("a", now - 1000)], listed([], ["a"], ["a"]), now)).toHaveLength(0);
   });
 
-  test("somebody else's agent working is not this one still working", () => {
-    // Only zero is taken as the answer. The light counts every agent on the Gateway, so
-    // a busy count says nothing about this run — and clearing on it would put the stop
-    // key out while work was genuinely underway.
+  test("a run the Gateway has never heard of keeps the net under it", () => {
+    /*
+     * Not every run reaches that list. An adopted conversation, or one that has not
+     * registered yet, is simply missing — and a second after dispatch that looks exactly
+     * like a run that is over. Absence is not evidence, so the timeout still covers it.
+     */
     const now = 1_000_000;
-    const just = [run("a", now - 1000)];
-    expect(runsNow(just, { running: 3, waiting: 0, trouble: 0 }, now)).toHaveLength(1);
-    // Busy, but this one has gone quiet: the net underneath still catches it.
+    const others = {
+      running: 1,
+      waiting: 0,
+      trouble: 0,
+      working: ["b"],
+      known: ["b"],
+      troubled: [],
+    };
+
+    // Never mentioned, and dispatched a moment ago: still running.
+    expect(runsNow([run("a", now - 1000)], others, now)).toHaveLength(1);
+    // Never mentioned, and long enough that it would have appeared by now.
+    expect(runsNow([run("a", now - 60_000)], others, now)).toHaveLength(0);
+    // And the quiet timeout is still underneath all of it.
     expect(
-      runsNow([run("a", now - RUN_QUIET - 1)], { running: 3, waiting: 0, trouble: 0 }, now),
+      runsNow(
+        [run("a", now - RUN_QUIET - 1)],
+        { ...others, working: ["a", "b"], known: ["a", "b"] },
+        now,
+      ),
     ).toHaveLength(0);
+  });
+
+  test("a Gateway that does not name its sessions still gets the old arithmetic", () => {
+    // Nothing names anything — an older Gateway, or a reply that arrived without the
+    // list. The count plus the net is all there is, and it has to keep working.
+    const now = 1_000_000;
+    const quiet = { running: 0, waiting: 0, trouble: 0 };
+    expect(runsNow([run("a", now - 1000)], quiet, now)).toHaveLength(1);
+    expect(runsNow([run("a", now - 60_000)], quiet, now)).toHaveLength(0);
+    expect(
+      runsNow([run("a", now - 1000)], { running: 3, waiting: 0, trouble: 0 }, now),
+    ).toHaveLength(1);
   });
 
   test("a Gateway that has not answered yet decides nothing", () => {

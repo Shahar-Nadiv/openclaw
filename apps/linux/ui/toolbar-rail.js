@@ -517,15 +517,30 @@ async function watchEverything() {
   try {
     const work = await invoke("colai_at_work");
     const before = state.atWork;
+    // Which, as well as how many. Two runs where one ends as another begins leaves every
+    // count where it was, and the panel would go on showing a spinner over the one that
+    // finished.
+    const same = (was, now) => (was || []).join("\u0000") === (now || []).join("\u0000");
     if (
       before &&
       before.running === work.running &&
       before.waiting === work.waiting &&
-      before.trouble === work.trouble
+      before.trouble === work.trouble &&
+      same(before.working, work.working) &&
+      same(before.troubled, work.troubled)
     ) {
       return;
     }
     state.atWork = work;
+    // A run the Gateway calls failed. Recorded on the exchange, because the run leaves
+    // `state.runs` either way and without this a failure and a clean finish become the
+    // same thing the moment it ends. This used to arrive as a `session.error` frame;
+    // the Gateway does not broadcast one, so it is read from the same list that says
+    // what is working.
+    for (const key of work.troubled || []) {
+      const entry = state.history.find((one) => one.sessionKey === key);
+      if (entry) entry.failed = true;
+    }
     render();
   } catch {
     // A Gateway that cannot be asked is not news about agents. The light holds what it
