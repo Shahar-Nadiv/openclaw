@@ -812,6 +812,99 @@ function pointSaid(point, now) {
   };
 }
 
+/**
+ * A colour for an agent, the same one every time.
+ *
+ * Two agents in a log are told apart by their face and their name, and a colour that
+ * changed between two looks would be worse than none. Derived from the name rather than
+ * handed out in order, so an agent keeps its colour across restarts and two are never
+ * given the same one by an index that happened to reset.
+ *
+ * Hues only, spread around the wheel and clear of the accent's red — an agent's face
+ * must never be mistaken for the mark that says something wants you.
+ */
+const HAND_HUES = [140, 200, 265, 40, 175, 310, 95, 230];
+
+function handHue(who) {
+  let sum = 0;
+  for (const letter of String(who)) sum = (sum * 31 + letter.codePointAt(0)) % 100_003;
+  return HAND_HUES[sum % HAND_HUES.length];
+}
+
+/**
+ * One turn of what the agent has said, or null while it is still thinking.
+ *
+ * Lives here rather than beside the answer panel because it is a decision about a
+ * conversation and nothing about a browser — and `stateOf` needs it to tell a question
+ * from a report.
+ */
+function lastTurn(answer) {
+  const turns = answer.turns || [];
+  const theirs = turns.filter((turn) => !turn.mine);
+  return theirs.length ? theirs[theirs.length - 1].said : null;
+}
+
+/**
+ * What an exchange is doing, in one word.
+ *
+ * The panel is read to answer one question — is anything waiting on me — and the answer
+ * has to be somewhere the eye lands rather than in a grey sentence halfway down a card.
+ * So every exchange carries a state, and the rest of the row follows from it: which pill,
+ * which colour, and which actions are worth offering.
+ *
+ * Ordered by what matters most to say. A run that fell over is that, whatever it said
+ * first; a question waiting on somebody outranks the run still being technically alive,
+ * because nothing is going anywhere until they answer.
+ */
+const STATES = {
+  blocked: { label: "Blocked", tone: "muted" },
+  failed: { label: "Failed", tone: "danger" },
+  asking: { label: "Asking you", tone: "accent" },
+  working: { label: "Working", tone: "warn" },
+  done: { label: "Done", tone: "ok" },
+};
+
+function stateOf(entry, runs) {
+  // Refused before anything was dispatched: nothing ran, so nothing changed.
+  if (entry.blocked) return "blocked";
+  // `session.error` came back for this one.
+  if (entry.failed) return "failed";
+  const turns = (entry.answer && entry.answer.turns) || [];
+  if (turns.length > 0 && asksSomething(lastTurn(entry.answer) || "")) return "asking";
+  if ((runs || []).some((run) => run.sessionKey === entry.sessionKey)) return "working";
+  // No answer object at all means nobody is watching this one, which is not "still
+  // working" — it is "nothing more is coming here". Saying otherwise would be a glow
+  // over nothing, the same lie the rail's light was fixed for.
+  return "done";
+}
+
+/**
+ * What the head says there is, in the fewest words that are still true.
+ *
+ * Counted rather than described: "3 exchanges · 1 running" is a glance, and it is the
+ * reason to open the panel or leave it shut. Running is named separately because it is
+ * the half that changes on its own.
+ */
+function workCountSaid(history, runs) {
+  const many = (history || []).length;
+  if (many === 0) return "no exchanges";
+  const said = `${many} exchange${many === 1 ? "" : "s"}`;
+  const live = (history || []).filter((entry) => stateOf(entry, runs) === "working").length;
+  return live > 0 ? `${said} · ${live} running` : said;
+}
+
+/**
+ * Which exchanges are waiting on a person, for the header count and the filter.
+ *
+ * Asking only. A run that failed wants attention too, but it is not *waiting*: nothing
+ * is held up until somebody types. Counting the two together would turn the number from
+ * "things that have stopped until I speak" into "things to look at sometime", which is
+ * a number nobody acts on.
+ */
+function needingYou(history, runs) {
+  return (history || []).filter((entry) => stateOf(entry, runs) === "asking");
+}
+
 /** How long ago something was, in the roundest true words. */
 function agoSaid(at, now) {
   // Milliseconds or seconds, whichever the Gateway happened to send.

@@ -21,13 +21,6 @@ function spokenBy(message) {
   return words || null;
 }
 
-/** One turn of what the agent has said, or null while it is still thinking. */
-function lastTurn(answer) {
-  const turns = answer.turns || [];
-  const theirs = turns.filter((turn) => !turn.mine);
-  return theirs.length ? theirs[theirs.length - 1].said : null;
-}
-
 /**
  * Say something back.
  *

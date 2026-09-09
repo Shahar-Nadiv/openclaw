@@ -165,6 +165,11 @@ type ToolbarHelpers = {
   moodOf: (work: Work | null) => { mood: string; many: number } | null;
   moodSaid: (work: Work | null) => string;
   moodMark: (work: Work | null) => string | null;
+  STATES: Record<string, { label: string; tone: string }>;
+  stateOf: (entry: Entry, runs: Run[]) => string;
+  needingYou: (history: Entry[], runs: Run[]) => Entry[];
+  workCountSaid: (history: Entry[], runs: Run[]) => string;
+  handHue: (who: string) => number;
   SOURCES: Record<string, { label: string; says: string }>;
   TAKES_SOURCE: string[];
   sourceOf: (mark: { design?: string; source?: string; fromLibrary?: Chosen | null }) => string;
@@ -199,6 +204,18 @@ type ToolbarHelpers = {
 
 /** A run the toolbar believes is underway. */
 type Run = { sessionKey: string; who?: string; heard: number };
+
+/** One exchange in the work panel, as the toolbar records it. */
+type Entry = {
+  at: number;
+  who: string;
+  sessionKey: string | null;
+  said?: string;
+  shots?: unknown[];
+  answer?: { turns?: { said: string; mine?: boolean }[] } | null;
+  blocked?: string;
+  failed?: boolean;
+};
 
 /** Where a mark was made, as the toolbar gathers it. */
 type Front = {
@@ -270,7 +287,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
   context,
 );
 const {
@@ -338,6 +355,11 @@ const {
   moodOf,
   moodSaid,
   moodMark,
+  STATES,
+  stateOf,
+  needingYou,
+  workCountSaid,
+  handHue,
   SOURCES,
   TAKES_SOURCE,
   sourceOf,
@@ -2914,6 +2936,71 @@ describe("one light for every agent at once", () => {
     expect(style).not.toMatch(/color:\s*#ff[0-9a-f]{4};/i);
   });
 
+  test("an exchange says what it is doing, worst news first", () => {
+    /*
+     * The panel is opened to answer one question — is anything waiting on me — and the
+     * answer used to be a grey sentence halfway down a card. Every row now carries a
+     * state, and the pill, the node colour and the actions all follow from it.
+     */
+    const ran: Run[] = [{ sessionKey: "s1", who: "main", heard: 0 }];
+    const asked = { turns: [{ said: "Do you want all three, or just signup?" }] };
+    const told = { turns: [{ said: "Fixed by making the parent a grid row." }] };
+    const one = (over: Partial<Entry>): Entry =>
+      ({ at: 1, who: "main", sessionKey: "s1", ...over }) as Entry;
+
+    // Refused before dispatch: nothing ran, so nothing else about it matters.
+    expect(stateOf(one({ blocked: "Notes has no connector.", answer: asked }), ran)).toBe(
+      "blocked",
+    );
+    // A run that fell over is that, whatever it managed to say first.
+    expect(stateOf(one({ failed: true, answer: told }), ran)).toBe("failed");
+    // A question outranks the run still being alive: nothing moves until someone answers.
+    expect(stateOf(one({ answer: asked }), ran)).toBe("asking");
+    expect(stateOf(one({ answer: told }), ran)).toBe("working");
+    expect(stateOf(one({ answer: told }), [])).toBe("done");
+    // No answer object at all means nobody is watching it — which is "nothing more is
+    // coming", not "still working". A glow over nothing is the lie the rail was fixed for.
+    expect(stateOf(one({ answer: null, sessionKey: "gone" }), ran)).toBe("done");
+    // Every state the code can produce has a label and a tone to draw it with.
+    for (const state of ["blocked", "failed", "asking", "working", "done"]) {
+      expect(STATES[state], state).toBeDefined();
+    }
+  });
+
+  test("the count and the filter agree about what is waiting on you", () => {
+    // The number in the head and the rows behind the tab must be the same set, or the
+    // tab is a control that shows something other than what it promised.
+    const ran: Run[] = [{ sessionKey: "s2", who: "deploy", heard: 0 }];
+    const history: Entry[] = [
+      {
+        at: 3,
+        who: "design",
+        sessionKey: "s1",
+        answer: { turns: [{ said: "All three, or just signup?" }] },
+      },
+      { at: 2, who: "deploy", sessionKey: "s2", answer: { turns: [{ said: "Building." }] } },
+      { at: 1, who: "copy", sessionKey: null, blocked: "Notes has no connector." },
+    ];
+    expect(needingYou(history, ran).map((one) => one.who)).toEqual(["design"]);
+    expect(workCountSaid(history, ran)).toBe("3 exchanges · 1 running");
+    // Failed and blocked want attention but are not *waiting*: nothing is held up until
+    // somebody types, and counting them together makes the number unactionable.
+    expect(needingYou([history[2]!], ran)).toHaveLength(0);
+    expect(workCountSaid([], [])).toBe("no exchanges");
+    expect(workCountSaid([history[2]!], [])).toBe("1 exchange");
+  });
+
+  test("an agent keeps the same face colour every time", () => {
+    // Two agents in one log are told apart by face and name before either is read. A
+    // colour handed out by position would move the moment another agent finished.
+    expect(handHue("Claude Code")).toBe(handHue("Claude Code"));
+    expect(handHue("Design")).not.toBe(handHue("Deploy"));
+    for (const who of ["", "a", "Design", "deploy-worker-3", "🙂"]) {
+      expect(handHue(who)).toBeGreaterThanOrEqual(0);
+      expect(handHue(who)).toBeLessThan(360);
+    }
+  });
+
   test("the reply is sized on purpose, not left to inherit the page", () => {
     /*
      * Found by rendering the window and looking at it: `.answer-turn` set no font-size,
@@ -2922,11 +3009,11 @@ describe("one light for every agent at once", () => {
      * opened the window to read was the one thing nobody had sized.
      */
     const style = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
-    const turns = style.slice(
-      style.indexOf(".work-turns .answer-turn {"),
-      style.indexOf("}", style.indexOf(".work-turns .answer-turn {")),
+    const said = style.slice(
+      style.indexOf(".work-said {"),
+      style.indexOf("}", style.indexOf(".work-said {")),
     );
-    expect(turns, "the agent's reply must carry its own size").toMatch(/font-size:/);
+    expect(said, "the agent's reply must carry its own size").toMatch(/font-size:/);
   });
 
   test("the work window's history scrolls instead of being clipped away", () => {
@@ -2938,12 +3025,12 @@ describe("one light for every agent at once", () => {
      * leave out and impossible to see in the rules.
      */
     const style = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
-    const history = style.slice(
-      style.indexOf(".work-history {"),
-      style.indexOf("}", style.indexOf(".work-history {")),
+    const log = style.slice(
+      style.indexOf(".work-log {"),
+      style.indexOf("}", style.indexOf(".work-log {")),
     );
-    expect(history).toMatch(/overflow-y:\s*auto/);
-    expect(history, "a flex child cannot scroll until it is allowed to shrink").toMatch(
+    expect(log).toMatch(/overflow-y:\s*auto/);
+    expect(log, "a flex child cannot scroll until it is allowed to shrink").toMatch(
       /min-height:\s*0/,
     );
   });

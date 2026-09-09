@@ -136,6 +136,23 @@ async function sendMarks(ids) {
   const refused = going.map((mark) => gateFor(mark.tool, state.surface)).find((said) => said.blocked);
   if (refused) {
     state.trouble = refused.says;
+    // Kept, rather than only announced and forgotten. Nothing ran and nothing changed,
+    // but the marks and the words are still the work somebody did — and the way out is
+    // to connect the surface, which they can do and then send again. The panel shows it
+    // as blocked with the marks still attached; a toast that vanishes would take the
+    // whole ask with it.
+    state.history = [
+      {
+        at: Date.now(),
+        who: state.receiving.name || who.id,
+        sessionKey: null,
+        said: state.text,
+        shots: going.map((mark) => mark.thumb || null),
+        answer: null,
+        blocked: refused.says,
+      },
+      ...state.history,
+    ];
     render();
     return;
   }
