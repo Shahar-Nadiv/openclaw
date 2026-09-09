@@ -1101,7 +1101,11 @@ body {
  * came out at sixteen pixels while the prompt sat at twelve and truncated mid-sentence.
  */
 .work {
-  position: fixed;
+  /* Absolute inside the rail, like every other menu here, so it travels with the toolbar
+     and is placed by `placeFlyout` off the key that opens it. It used to be a window
+     loose on the desktop, which meant working out for itself which screen it belonged on
+     — and getting it wrong. */
+  position: absolute;
   z-index: 78;
   display: flex;
   flex-direction: column;
@@ -1120,6 +1124,8 @@ body {
 
 /* The bar with the window's name on it is the handle, which is where every other window
    on this desktop is picked up from. */
+/* A title, not a handle. The panel is part of the toolbar now, so the thing you pick up
+   to move it is the toolbar's own grip. */
 .work-head {
   display: flex;
   align-items: center;
@@ -1127,11 +1133,6 @@ body {
   gap: 8px;
   padding: 12px 14px;
   border-bottom: 1px solid rgb(255 255 255 / 8%);
-  cursor: grab;
-  touch-action: none;
-}
-.work-head:active {
-  cursor: grabbing;
 }
 .work-title {
   margin: 0;

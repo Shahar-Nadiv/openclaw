@@ -466,6 +466,9 @@ function emojiFor(session) {
 
 function flyout(which) {
   state.open = state.open === which ? null : which;
+  // The other half of the rule `toggleWork` already keeps. Both hang off the rail now,
+  // and two of them opening from the same key would sit on top of each other.
+  if (state.open) state.work.open = false;
   render();
   // Asked when the menu opens rather than polled: the answer only matters when somebody
   // is looking at it, and a conversation's title and status move while it runs, so a

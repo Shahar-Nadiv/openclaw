@@ -177,19 +177,6 @@ type ToolbarHelpers = {
     room: { left: number; top: number; right: number; bottom: number },
     box: { width: number; height: number },
   ) => { x: number; y: number };
-  besideTheRail: (
-    rail: { left: number; top: number; right: number; bottom: number },
-    size: { width: number; height: number },
-    room: { left: number; top: number; right: number; bottom: number },
-    vertical: boolean,
-  ) => { x: number; y: number };
-  workSpot: (
-    rail: { left: number; top: number; right: number; bottom: number },
-    box: { width: number; height: number },
-    screens: Screen[],
-    dock: string | null,
-    dragged: Point | null,
-  ) => { x: number; y: number };
   FOLLOWS_WINDOW: string[];
   anchorOf: (where: Front | null) => Anchor | null;
   intoWindow: (box: Placed, at: Rect, screen: Size) => Placed;
@@ -283,7 +270,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, besideTheRail, workSpot, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
   context,
 );
 const {
@@ -357,8 +344,6 @@ const {
   broughtIn,
   unchosen,
   centredIn,
-  besideTheRail,
-  workSpot,
   FOLLOWS_WINDOW,
   anchorOf,
   intoWindow,
@@ -2435,30 +2420,58 @@ describe("nothing the toolbar says about itself outstays it", () => {
   });
 });
 
-describe("the Work window can be moved", () => {
-  const work = readFileSync(new URL("../apps/linux/ui/toolbar-work.js", import.meta.url), "utf8");
+describe("the work panel belongs to the toolbar", () => {
+  const page = readFileSync(new URL("../apps/linux/ui/toolbar.html", import.meta.url), "utf8");
+  const render = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
+  const style = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
 
-  test("picked up by the bar with its name on it", () => {
-    // Where every other window on this desktop is picked up from. A window meant to stay
-    // open all day that cannot be moved is a window in the way for the whole day.
-    expect(work).toContain('head.addEventListener("pointerdown", startWorkDrag)');
-    // Not by its close button, which is on that bar and means the opposite.
-    expect(work).toContain('event.target.closest(".popup-shut")');
+  test("it lives inside the rail, so it travels with it", () => {
+    /*
+     * It used to be a window loose on the desktop, which meant working out for itself
+     * which screen it belonged on — and getting it wrong: with the rail on the second
+     * monitor, pressing send opened the panel on the first. A child of the rail cannot
+     * have that bug, because it has no position of its own to get wrong.
+     */
+    const rail = page.slice(page.indexOf('<div id="rail-wrap"'), page.indexOf('id="trouble"'));
+    expect(rail, "the panel must sit inside the rail's wrapper").toContain('id="work"');
   });
 
-  test("held inside the screen it is being carried over", () => {
-    // The desktop spans several. A window dragged off the edge of one has to stop at the
-    // edge of *that* one, not at the edge of all of them.
-    const drag = work.slice(work.indexOf("function startWorkDrag"));
-    expect(drag.slice(0, 900)).toContain("usable(screenAt(state.screens,");
+  test("it is hung off the key that opens it, by the same rule as every other menu", () => {
+    // One table, measured from the buttons themselves. Four hand-tuned offsets used to
+    // stand there and they were four chances to drift.
+    expect(render).toContain("[el.work, buttons.send],");
+    expect(render).toContain(
+      "placeFlyout(node, vertical, vertical ? anchor.offsetTop : anchor.offsetLeft)",
+    );
   });
 
-  test("and stays where it was put", () => {
-    // Letting go records the spot, and the placement takes it as given. Where it used to
-    // be checked for inline, that is now `workSpot`'s `dragged` argument — pinned by the
-    // behaviour tests above rather than by the shape of a line here.
-    expect(work).toMatch(/const up = \(\) => \{[\s\S]*?remember\(\);/);
-    expect(work).toContain("state.work.at,");
+  test("it is positioned by the rail rather than by the screen", () => {
+    const work = style.slice(
+      style.indexOf(".work {"),
+      style.indexOf("}", style.indexOf(".work {")),
+    );
+    expect(work).toContain("position: absolute");
+    expect(work, "a fixed panel would be placing itself again").not.toContain("position: fixed");
+  });
+
+  test("only one panel hangs off the rail at a time", () => {
+    // They are anchored to the same keys now, so two open at once would sit on top of
+    // each other. `toggleWork` already closed any flyout; this is the other half.
+    const work = readFileSync(new URL("../apps/linux/ui/toolbar-work.js", import.meta.url), "utf8");
+    const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+    expect(work).toContain("if (state.work.open) state.open = null;");
+    expect(rail).toContain("if (state.open) state.work.open = false;");
+  });
+
+  test("nothing is left over from when it floated", () => {
+    // One canonical way for it to be placed. A leftover drag handle or remembered corner
+    // would be a second one, quietly disagreeing with the first.
+    const all = ["toolbar-work.js", "toolbar-tools.js", "toolbar-dock.js", "toolbar.js"]
+      .map((file) => readFileSync(new URL(`../apps/linux/ui/${file}`, import.meta.url), "utf8"))
+      .join("\n");
+    for (const gone of ["startWorkDrag", "placeWork", "workSpot", "besideTheRail", "work.at"]) {
+      expect(all, `${gone} should be gone`).not.toContain(gone);
+    }
   });
 });
 
@@ -2860,101 +2873,6 @@ describe("one light for every agent at once", () => {
       }
     }
     expect(clashes).toEqual([]);
-  });
-
-  test("a window opened from the rail arrives beside the rail", () => {
-    /*
-     * The bug: it opened against the far edge of the screen, vertically centred,
-     * whatever the rail was doing. With the rail docked left, pressing a key on it put
-     * the window a thousand pixels away on the other side of the display.
-     */
-    const room = { left: 0, top: 0, right: 1920, bottom: 1080 };
-    const size = { width: 540, height: 700 };
-
-    // Rail on the left: the window opens to its right, level with it.
-    const onTheLeft = { left: 14, top: 200, right: 62, bottom: 620 };
-    expect(besideTheRail(onTheLeft, size, room, true)).toEqual({ x: 72, y: 200 });
-
-    // Rail on the right: there is no room after it, so it opens before it instead.
-    const onTheRight = { left: 1858, top: 200, right: 1906, bottom: 620 };
-    expect(besideTheRail(onTheRight, size, room, true)).toEqual({ x: 1308, y: 200 });
-
-    // A horizontal rail has room below it, not beside it.
-    const acrossTheTop = { left: 700, top: 14, right: 1120, bottom: 62 };
-    expect(besideTheRail(acrossTheTop, size, room, false)).toEqual({ x: 700, y: 72 });
-
-    // And one along the bottom opens above itself.
-    const acrossTheBottom = { left: 700, top: 1018, right: 1120, bottom: 1066 };
-    expect(besideTheRail(acrossTheBottom, size, room, false)).toEqual({ x: 700, y: 308 });
-  });
-
-  test("a window that fits on neither side of the rail still lands on the screen", () => {
-    // Overlapping the rail is worse than nothing; being off the edge of the display is
-    // worse than that. So when neither side has room the roomier one wins and the window
-    // sits against that edge.
-    const narrow = { left: 0, top: 0, right: 700, bottom: 1080 };
-    const size = { width: 540, height: 700 };
-
-    // Rail past the middle, so the room before it is the larger of two too-small gaps.
-    const rightish = { left: 400, top: 100, right: 448, bottom: 520 };
-    expect(besideTheRail(rightish, size, narrow, true).x).toBe(0);
-
-    // Rail near the left, so the larger gap is after it and the window takes that edge.
-    const leftish = { left: 120, top: 100, right: 168, bottom: 520 };
-    expect(besideTheRail(leftish, size, narrow, true).x).toBe(160);
-
-    // The same rule vertically, on a screen too short for the window either way.
-    const short = { left: 0, top: 0, right: 1920, bottom: 760 };
-    const acrossTheMiddle = { left: 700, top: 360, right: 1120, bottom: 408 };
-    expect(besideTheRail(acrossTheMiddle, size, short, false).y).toBe(0);
-  });
-
-  test("the window opens on the screen the rail is on, not the one it was last on", () => {
-    /*
-     * The bug: pressing send with the rail on the second monitor opened the window on
-     * the first. The side to open on was worked out from the rail's real box, but the
-     * screen it was then clamped into came from a separately remembered point — and when
-     * that was stale, or unset and fell back to the origin, the clamp hauled the window
-     * onto the wrong display.
-     *
-     * Two sources of truth for one question. There is one now: the rail.
-     */
-    const twoScreens: Screen[] = [
-      { x: 0, y: 0, width: 1920, height: 1080 },
-      { x: 1920, y: 0, width: 1920, height: 1080 },
-    ];
-    const box = { width: 540, height: 700 };
-
-    // Rail docked left on the *second* monitor: the window opens beside it, over there.
-    const onTheSecond = { left: 1934, top: 300, right: 1982, bottom: 720 };
-    const spot = workSpot(onTheSecond, box, twoScreens, "left", null);
-    expect(spot.x).toBeGreaterThanOrEqual(1920);
-    expect(spot).toEqual({ x: 1992, y: 300 });
-
-    // And the same rail on the first monitor stays on the first.
-    const onTheFirst = { left: 14, top: 300, right: 62, bottom: 720 };
-    expect(workSpot(onTheFirst, box, twoScreens, "left", null)).toEqual({ x: 72, y: 300 });
-  });
-
-  test("a window somebody dragged stays where they put it, on the screen they put it on", () => {
-    // Dragging is a statement about where the window belongs, including which display.
-    // The rail's screen must not pull it back.
-    const twoScreens: Screen[] = [
-      { x: 0, y: 0, width: 1920, height: 1080 },
-      { x: 1920, y: 0, width: 1920, height: 1080 },
-    ];
-    const box = { width: 540, height: 700 };
-    const railOnTheFirst = { left: 14, top: 300, right: 62, bottom: 720 };
-
-    const put = { x: 2400, y: 200 };
-    expect(workSpot(railOnTheFirst, box, twoScreens, "left", put)).toEqual(put);
-
-    // Still held inside whichever screen that is, so a spot remembered from a desktop
-    // that had another monitor does not open off the edge of this one.
-    const offTheEdge = { x: 3700, y: 900 };
-    const held = workSpot(railOnTheFirst, box, twoScreens, "left", offTheEdge);
-    expect(held.x).toBe(3840 - 540);
-    expect(held.y).toBe(1080 - 700);
   });
 
   test("the reply is sized on purpose, not left to inherit the page", () => {

@@ -104,7 +104,7 @@ const state = {
   // The library window, while it is open, and which mark it will answer.
   library: null,
   // The Work window: what is waiting, what has been sent, and whether marks are drawn.
-  work: { open: false, showing: false, at: null },
+  work: { open: false, showing: false },
   // What has been sent, newest first. Kept for the session — surviving a restart is a
   // store, and a store is decided on purpose rather than in passing.
   history: [],
@@ -310,6 +310,8 @@ function render() {
     [el.flyAutomate, buttons.send],
 
     [el.flyAgents, buttons.agents],
+    // The work panel hangs off send, the key that opens it.
+    [el.work, buttons.send],
   ]) {
     placeFlyout(node, vertical, vertical ? anchor.offsetTop : anchor.offsetLeft);
   }

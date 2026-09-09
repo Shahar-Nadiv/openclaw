@@ -40,9 +40,6 @@ function drawWork() {
 
   const head = document.createElement("div");
   head.className = "work-head";
-  // The head is the handle. A window meant to stay open all day has to be movable, and
-  // the bar with its name on it is where everything else on this desktop is picked up.
-  head.addEventListener("pointerdown", startWorkDrag);
   const title = document.createElement("p");
   title.className = "work-title";
   title.textContent = "Work";
@@ -90,7 +87,6 @@ function drawWork() {
   foot.append(tick, said);
 
   el.work.replaceChildren(head, waiting, past, foot);
-  placeWork();
 }
 
 /** One thing that was sent, and whatever has come back about it. */
@@ -293,58 +289,5 @@ function flyToWork(marks) {
   }
 }
 
-/**
- * Pick the window up and put it somewhere else.
- *
- * The same shape as the rail's own drag: hold the pointer, follow it, and hold the
- * window inside the room of whichever screen it is being carried over — the desktop
- * spans several, and a window dragged off the edge of one has to stop at the edge of
- * that one rather than at the edge of all of them.
- */
-function startWorkDrag(event) {
-  // Not the close button, and not a right click on the bar.
-  if (event.button !== 0 || event.target.closest(".popup-shut")) return;
-  event.preventDefault();
-  const box = el.work.getBoundingClientRect();
-  const grabX = event.clientX - box.left;
-  const grabY = event.clientY - box.top;
 
-  const move = (moved) => {
-    const size = el.work.getBoundingClientRect();
-    const room = usable(screenAt(state.screens, { x: moved.clientX, y: moved.clientY }));
-    state.work.at = {
-      x: Math.max(room.left, Math.min(room.right - size.width, moved.clientX - grabX)),
-      y: Math.max(room.top, Math.min(room.bottom - size.height, moved.clientY - grabY)),
-    };
-    placeWork();
-  };
-  const up = () => {
-    window.removeEventListener("pointermove", move);
-    window.removeEventListener("pointerup", up);
-    // Where somebody put it is how they set this up, and it is kept with the rest of it.
-    remember();
-  };
-  window.addEventListener("pointermove", move);
-  window.addEventListener("pointerup", up);
-}
-
-/**
- * Where it sits: where it was put, or against the side of the screen the rail is on.
- *
- * The library window is centred because it is opened, used and closed. This one is meant
- * to stay open while somebody works, and a window in the middle of the screen for an
- * hour is a window in the way — so it starts out of the way and then goes wherever it is
- * carried.
- */
-function placeWork() {
-  const spot = workSpot(
-    el.wrap.getBoundingClientRect(),
-    el.work.getBoundingClientRect(),
-    state.screens,
-    state.dock,
-    state.work.at,
-  );
-  el.work.style.left = `${spot.x}px`;
-  el.work.style.top = `${spot.y}px`;
-}
 
