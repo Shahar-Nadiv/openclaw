@@ -3243,6 +3243,102 @@ describe("one light for every agent at once", () => {
     expect(compose).toMatch(/key\.textContent = "Ctrl ↵"/);
   });
 
+  test("typing keeps the words, and wakes the button beside them", () => {
+    /*
+     * Two halves of one bug, in opposite directions, in the two fields somebody types
+     * into.
+     *
+     * The composer never redrew as you typed, so the send key stayed disabled after the
+     * first word. With nothing marked that key is the only way out of the composer, and
+     * a whole sentence could be typed with nothing to press.
+     *
+     * The reply box did the reverse and called `render()` on every keystroke. This panel
+     * redraws whole, so each character rebuilt the field being typed into and took the
+     * focus with it: sixteen characters typed, one kept.
+     *
+     * Both fields must now update the one thing that has to follow the words — the
+     * button — and nothing else.
+     */
+    const bodyOf = (source: string, after: string) => {
+      const at = source.indexOf(after);
+      expect(at, `${after} must exist`).toBeGreaterThan(-1);
+      const opens = source.indexOf('addEventListener("input"', at);
+      expect(opens, `a field after ${after} must handle input`).toBeGreaterThan(-1);
+      return source.slice(opens, source.indexOf("\n  });", opens));
+    };
+
+    const compose = readFileSync(
+      new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+      "utf8",
+    );
+    const work = readFileSync(new URL("../apps/linux/ui/toolbar-work.js", import.meta.url), "utf8");
+
+    // The ask field: keeps the state, wakes the key, and never redraws itself.
+    const ask = bodyOf(compose, "function askField(");
+    expect(ask, "the ask field must record what was typed").toContain("state.text = text.value");
+    expect(ask, "and wake the send key").toMatch(/go\.disabled = !canSend\(/);
+    expect(ask, "a redraw here takes the caret with it").not.toContain("render()");
+
+    // The reply field, the same way.
+    const say = bodyOf(work, "function answerBox(");
+    expect(say, "the reply field must record what was typed").toContain(
+      "answer.saying_text = field.value",
+    );
+    expect(say, "and wake Reply").toMatch(/go\.disabled =/);
+    expect(say, "a redraw here is what ate fifteen of sixteen characters").not.toContain(
+      "render()",
+    );
+
+    // And the send key is built before the field that has to keep it in step, or the
+    // field is handed nothing to wake.
+    expect(compose.indexOf("const go = sendButton();")).toBeGreaterThan(-1);
+    expect(compose.indexOf("const go = sendButton();")).toBeLessThan(
+      compose.indexOf("rows.push(askField(go))"),
+    );
+  });
+
+  test("a redraw does not take the cursor out of what somebody is typing", () => {
+    /*
+     * The panel redraws whole — `replaceChildren` — which swaps out every field in it.
+     * The words survive, because they are held in state and written back; the focus and
+     * the caret do not. So an agent answering while somebody was mid-sentence dropped
+     * them out of the box and put their cursor at the end of what they had written.
+     *
+     * The clock was doing it to them twice a minute all by itself, to move one word.
+     */
+    const work = readFileSync(new URL("../apps/linux/ui/toolbar-work.js", import.meta.url), "utf8");
+    const compose = readFileSync(
+      new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+      "utf8",
+    );
+
+    // The redraw takes a note of where the cursor was and puts it back.
+    const draw = work.slice(
+      work.indexOf("function drawWork("),
+      work.indexOf("function whatIsBeingTyped"),
+    );
+    expect(draw, "note the cursor before replacing the panel").toContain("whatIsBeingTyped()");
+    expect(draw, "and give it back after").toContain("giveItBack(");
+    expect(draw.indexOf("whatIsBeingTyped()")).toBeLessThan(draw.indexOf("replaceChildren"));
+    expect(draw.indexOf("replaceChildren")).toBeLessThan(draw.indexOf("giveItBack("));
+    expect(work, "the caret, not only the field").toContain("setSelectionRange(");
+
+    // Every field somebody types into says which one it is, or it cannot be found again.
+    expect(compose, "the ask field").toContain('text.dataset.field = "ask"');
+    expect(compose, "a mark's note").toMatch(/note\.dataset\.field = `note:/);
+    expect(work, "the reply field").toMatch(/field\.dataset\.field = `say:/);
+
+    // And the clock moves itself rather than redrawing the panel around it.
+    const tick = work.slice(
+      work.indexOf("function keepTime("),
+      work.indexOf("function moveTheClock"),
+    );
+    expect(tick, "a tick that redraws steals the caret twice a minute").not.toContain("drawWork()");
+    expect(work, "it relabels the times in place").toContain(
+      'querySelectorAll(".work-when[data-at]")',
+    );
+  });
+
   test("placing the rail measures the rail, not everything hanging off it", () => {
     /*
      * The work panel now lives inside the rail's wrapper so it travels with the toolbar.

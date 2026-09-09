@@ -171,7 +171,7 @@ function buildRail() {
   const send = document.createElement("button");
   send.type = "button";
   send.className = "key send-key";
-  send.title = "Send what you marked";
+  send.title = "Work — say what you want done";
   send.innerHTML =
     icon("send") + '<span class="send-many"></span><span class="caret">▾</span>';
   // The Work window rather than a flyout of its own: one place where work is assembled,

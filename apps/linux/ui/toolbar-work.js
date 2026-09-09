@@ -56,11 +56,26 @@ function keepTime() {
     ticking = null;
     return;
   }
-  ticking = setInterval(() => {
-    // Only the panel: a whole render several times a minute to move one word is a cost
-    // the rest of the toolbar has no reason to pay.
-    if (state.work.open) drawWork();
-  }, WORK_TICK);
+  ticking = setInterval(moveTheClock, WORK_TICK);
+}
+
+/**
+ * Move every elapsed time on, and touch nothing else.
+ *
+ * This used to redraw the panel. Redrawing replaces its children, which includes the
+ * field somebody may be typing into — so twice a minute, mid-sentence, the caret jumped
+ * to the end of what they had written. Two words on the right-hand side of a header are
+ * not worth that, and they do not need it: each carries the instant it is counting from.
+ */
+function moveTheClock() {
+  if (!state.work.open) return;
+  const now = Date.now();
+  for (const when of el.work.querySelectorAll(".work-when[data-at]")) {
+    const at = Number(when.dataset.at);
+    if (!Number.isFinite(at)) continue;
+    when.textContent = briefly(at, now);
+    when.title = agoSaid(at, now);
+  }
 }
 
 function drawWork() {
@@ -77,12 +92,42 @@ function drawWork() {
   const shown =
     state.work.filter === "needs" ? waiting : state.history;
 
+  const held = whatIsBeingTyped();
   el.work.replaceChildren(
     workHead(waiting.length),
     ...(waiting.length && state.work.filter !== "needs" ? [waitingBanner(waiting[0])] : []),
     workLog(shown, now),
     workWrite(),
   );
+  giveItBack(held);
+}
+
+/**
+ * The field somebody has their cursor in, and where in it.
+ *
+ * The panel redraws whole, which replaces every field in it with a new one. The words
+ * survive — they are held in state and written back — but the focus and the caret do
+ * not, so an agent answering while somebody was mid-sentence dropped them out of the
+ * box and put their cursor at the end of it. Each field says which one it is, so the
+ * one that had the cursor can be found again afterwards.
+ */
+function whatIsBeingTyped() {
+  const had = document.activeElement;
+  if (!had || !el.work.contains(had) || !had.dataset || !had.dataset.field) return null;
+  return { field: had.dataset.field, from: had.selectionStart, to: had.selectionEnd };
+}
+
+/** Put the cursor back where it was, if what it was in is still there. */
+function giveItBack(held) {
+  if (!held) return;
+  const now = el.work.querySelector(`[data-field="${held.field}"]`);
+  if (!now) return;
+  now.focus();
+  // Only where it will take: a field that has lost the text around it would throw, and
+  // the cursor being in the right box matters more than being at the right character.
+  try {
+    now.setSelectionRange(held.from, held.to);
+  } catch {}
 }
 
 /**
@@ -187,10 +232,17 @@ function nothingYet() {
   title.textContent = "Nothing sent yet";
   const said = document.createElement("p");
   said.className = "work-empty-said";
-  said.textContent = "Mark something on screen with the toolbar, then say what you want done with it.";
+  // Marking led, and led wrongly: it made pointing at the screen a step you had to take
+  // before you were allowed to ask for anything. It is the toolbar's own trick, not its
+  // toll — the field below sends words on their own.
+  said.textContent = "Say what you want done and send it. Mark something on screen first when the words need a picture.";
   const steps = document.createElement("ol");
   steps.className = "work-steps";
-  for (const step of ["Point at, draw or box a region", "Write the ask below", "Pick who receives it"]) {
+  for (const step of [
+    "Write the ask below",
+    "Pick who receives it",
+    "Point at, draw or box a region — only if it helps",
+  ]) {
     const one = document.createElement("li");
     one.textContent = step;
     steps.append(one);
@@ -230,6 +282,9 @@ function entryRow(entry, now) {
   pill.textContent = STATES[state_].label;
   const when = document.createElement("span");
   when.className = "work-when";
+  // Carried on the element so the clock can be moved on without redrawing the panel
+  // around it. See `keepTime`.
+  when.dataset.at = String(entry.at);
   when.textContent = briefly(entry.at, now);
   when.title = agoSaid(entry.at, now);
   meta.append(face, who, pill, when);
@@ -409,13 +464,10 @@ function answerBox(answer, acts) {
   box.className = "work-answer";
   const field = document.createElement("textarea");
   field.className = "popup-note answer-say";
+  field.dataset.field = `say:${answer.sessionKey}`;
   field.rows = 2;
   field.placeholder = "Answer them…";
   field.value = answer.saying_text || "";
-  field.addEventListener("input", () => {
-    answer.saying_text = field.value;
-    render();
-  });
   // The row's own actions, with the quick replies put in front of them.
   const foot = acts;
   const first = [];
@@ -442,6 +494,15 @@ function answerBox(answer, acts) {
   go.textContent = answer.saying ? "Sending…" : "Reply";
   go.addEventListener("click", () => void verdict(answer, answer.saying_text || ""));
   first.push(go);
+
+  // Not a render. This panel redraws whole, so a render on every keystroke rebuilt the
+  // field somebody was typing into and took the focus with it — sixteen characters
+  // typed, one kept. The only thing that has to follow the words is the button beside
+  // them, so the button is the only thing that moves.
+  field.addEventListener("input", () => {
+    answer.saying_text = field.value;
+    go.disabled = Boolean(answer.saying) || !field.value.trim();
+  });
   // No, Yes, Reply, then whatever the row already offered — the order somebody reads
   // them in, and built in one go so the loop above cannot reverse it.
   foot.prepend(...first);

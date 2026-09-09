@@ -1955,8 +1955,8 @@ body {
 .popup-foot {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding-top: 9px;
+  gap: 6px;
+  padding-top: 7px;
 }
 /*
  * Who this is going to. A dot, the name, a chevron — it used to be the name on its own,
@@ -1967,9 +1967,9 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  /* Takes the room the fixed controls beside it leave, and shortens the name rather
-     than pushing Send past the card's edge. */
-  flex: 1 1 auto;
+  /* Shrinks before it pushes Send past the card's edge, but does not grow — growing
+     dragged the mode picker away from the name it belongs beside. */
+  flex: 0 1 auto;
   min-width: 0;
   padding: 3px 5px;
   border-radius: 7px;
@@ -2004,6 +2004,21 @@ body {
 .popup-to-more {
   flex-shrink: 0;
   color: var(--muted-dim);
+}
+
+/* Files and Schedule: what else could happen to this message, kept away from the row
+   that sends it. Left-aligned and quiet — they are not the reason anybody is here. */
+.compose-more {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: -8px;
+}
+
+/* Who and how on the left, what happens to it on the right. */
+.compose-gap {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* The keystroke, next to the key it works. */

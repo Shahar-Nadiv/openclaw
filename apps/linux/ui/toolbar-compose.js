@@ -332,6 +332,37 @@ function modePick() {
   return pick;
 }
 
+/**
+ * Send.
+ *
+ * Its own function because the field has to be handed it before the foot is built, and
+ * because what it says depends on what is going — which is a decision, not a label.
+ */
+function sendButton() {
+  const going = chosenMarks();
+  const says = state.sending
+    ? "Sending…"
+    : needsAgreeing()
+      ? "Send and adopt"
+      : going.length
+        ? `Send ${counted(going.length, "mark")}`
+        : "Send";
+
+  const go = document.createElement("button");
+  go.type = "button";
+  // Adopting keeps its words. It takes a conversation over from wherever it is running,
+  // which is a decision somebody should read before making, and an arrow cannot say it.
+  // Everything else is the arrow: what is going is already listed directly above it.
+  const spelled = needsAgreeing();
+  go.className = spelled ? "popup-do popup-go" : "popup-do popup-go compose-send";
+  go.textContent = spelled ? says : state.sending ? "…" : "↑";
+  go.title = says;
+  go.setAttribute("aria-label", says);
+  go.disabled = !canSend(going);
+  go.addEventListener("click", () => void sendMarks(chosenMarks().map((mark) => mark.id)));
+  return go;
+}
+
 /** Whether there is anything to send, asked in one place so the key and the arrow agree. */
 function canSend(going) {
   if (state.sending) return false;
@@ -344,12 +375,14 @@ function canSend(going) {
  * `/` at the start of a word offers the modes. Picking one sets it and takes the word
  * back out, because the mode is how the ask should be read and not part of the ask.
  */
-function askField() {
+function askField(go) {
   const box = document.createElement("div");
   box.className = "ask-box";
 
   const text = document.createElement("textarea");
   text.className = "popup-note";
+  // Named so a redraw can find it again and put the cursor back. See `whatIsBeingTyped`.
+  text.dataset.field = "ask";
   text.rows = 2;
   // The two keystrokes live here now rather than in a labelled row above the field.
   // `/` has a control beside it to be found from; `@` has nothing anywhere else, so if
@@ -463,6 +496,12 @@ function askField() {
 
   text.addEventListener("input", () => {
     state.text = text.value;
+    // Typing does not redraw the composer — a render on every keystroke would rebuild
+    // the field and take the caret with it — so the button draw produced would still be
+    // refusing after the first word. With nothing marked, that button is the only way
+    // out of the composer, and it was dead: a whole sentence typed, and nothing to
+    // press. The words are the composer's own subject; marks are extra.
+    go.disabled = !canSend(chosenMarks());
     look();
   });
   text.addEventListener("click", look);
@@ -537,11 +576,13 @@ function fileRows() {
 }
 
 /**
- * Adding a file, folded into the send row.
+ * Adding a file.
  *
- * Two chips and a sentence used to own a line of a composer that has only a few. Files
- * still arrive by dropping them anywhere on the panel and by typing `@`; this is the
- * third way, and the rarest, so it is the smallest.
+ * Two chips and a sentence used to own a line of a composer that has only a few, so this
+ * was folded into the send row — where, with the receiver and the mode beside it, there
+ * was no longer room for a name: "Claude Code" came out as "Claude …". It shares a quiet
+ * line with Schedule now. Files still arrive by dropping them anywhere on the panel and
+ * by typing `@`; this is the third way, and the rarest, so it is the smallest.
  */
 function fileAdd() {
   const add = document.createElement("button");
@@ -960,6 +1001,9 @@ async function createAutomation() {
  */
 function drawComposer(into) {
   const rows = [];
+  // Made first, though it is drawn last: the field below has to keep it in step, and a
+  // button that does not exist yet cannot be kept in step with anything.
+  const go = sendButton();
   // No section heading and no "nothing marked yet": the panel is already called Work,
   // and the field's own placeholder says what to do with an empty composer. Two labels
   // for one thing is how a compose box grows to eight rows of chrome.
@@ -1009,6 +1053,7 @@ function drawComposer(into) {
     const note = document.createElement("input");
     note.type = "text";
     note.className = "mark-note";
+    note.dataset.field = `note:${mark.id}`;
     note.value = mark.note || "";
     note.placeholder = "What about it?";
     note.setAttribute("aria-label", `What about ${said.textContent}`);
@@ -1020,7 +1065,7 @@ function drawComposer(into) {
     rows.push(row);
   }
 
-  rows.push(askField());
+  rows.push(askField(go));
 
   rows.push(...fileRows());
 
@@ -1105,28 +1150,6 @@ function drawComposer(into) {
     flyout("automate");
   });
 
-  const going = chosenMarks();
-  const says = state.sending
-    ? "Sending…"
-    : needsAgreeing()
-      ? "Send and adopt"
-      : going.length
-        ? `Send ${counted(going.length, "mark")}`
-        : "Send";
-
-  const go = document.createElement("button");
-  go.type = "button";
-  // Adopting keeps its words. It takes a conversation over from wherever it is running,
-  // which is a decision somebody should read before making, and an arrow cannot say it.
-  // Everything else is the arrow: what is going is already listed directly above it.
-  const spelled = needsAgreeing();
-  go.className = spelled ? "popup-do popup-go" : "popup-do popup-go compose-send";
-  go.textContent = spelled ? says : state.sending ? "…" : "↑";
-  go.title = says;
-  go.setAttribute("aria-label", says);
-  go.disabled = !canSend(going);
-  go.addEventListener("click", () => void sendMarks(going.map((mark) => mark.id)));
-
   // The keystroke, said once beside the key it belongs to. A send key nobody is told
   // about is a send key nobody uses.
   const key = document.createElement("span");
@@ -1134,9 +1157,19 @@ function drawComposer(into) {
   key.textContent = "Ctrl ↵";
   key.title = "Ctrl+Enter sends";
 
+  // The two rarest things this message can do, on a line of their own. In the send row
+  // they cost the receiver's name its last four characters, and a name shortened to make
+  // room for "Schedule…" is the wrong thing to have shortened.
+  const extras = document.createElement("div");
+  extras.className = "compose-more";
+  extras.append(fileAdd(), later);
+  rows.push(extras);
+
   // Who and how on the left, what happens to it on the right. `to` takes whatever room
-  // the rest leaves, so a long agent name shortens rather than pushing Send off the end.
-  foot.append(to, modePick(), fileAdd(), later, key, go);
+  // the rest leaves, so only a genuinely long agent name shortens.
+  const gap = document.createElement("span");
+  gap.className = "compose-gap";
+  foot.append(to, modePick(), gap, key, go);
   rows.push(foot);
 
   into.replaceChildren(...rows);
