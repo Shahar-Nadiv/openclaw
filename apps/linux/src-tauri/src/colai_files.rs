@@ -549,6 +549,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn nothing_to_carry_needs_no_permission_to_carry_it() {
+        /*
+         * `colai_send` used to ask the Gateway for every catalog, host and session it
+         * knows before every message, to work out which folders may be read — including
+         * when the message carried no files at all. That is a Gateway round trip in
+         * front of every send, for a question about an empty list.
+         *
+         * It is skipped now when there is nothing attached, which is only safe because
+         * the gate has nothing to let through either way. This is that equivalence: with
+         * no paths, the roots cannot change the answer.
+         */
+        assert!(carry(&[], &[]).is_empty());
+        assert!(carry(&[], &[std::path::PathBuf::from("/")]).is_empty());
+        assert!(carry(&[], &[std::env::temp_dir()]).is_empty());
+    }
+
+    #[test]
     fn a_folder_weighs_what_is_in_it_not_what_the_directory_entry_says() {
         let root = std::env::temp_dir().join(format!("colai-weigh-{}", std::process::id()));
         let inner = root.join("deeper");

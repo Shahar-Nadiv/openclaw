@@ -90,11 +90,17 @@ pub(crate) async fn colai_send(
     // list is one that travels.
     // What may be read is decided against the folders the Gateway says are worked in,
     // never against a list the page supplied.
-    let roots = crate::colai_receivers::work_roots(&gateway).await;
-    attachments.extend(crate::colai_files::carry(
-        &files.unwrap_or_default(),
-        &roots,
-    ));
+    //
+    // Asked only when there is something to ask about. `work_roots` enumerates every
+    // catalog, host and session the Gateway knows, and it was doing that on every send —
+    // a Gateway round trip in front of every message, to decide what may be read out of
+    // an empty list of files. The gate is unchanged: with nothing to carry there is
+    // nothing for it to let through.
+    let files = files.unwrap_or_default();
+    if !files.is_empty() {
+        let roots = crate::colai_receivers::work_roots(&gateway).await;
+        attachments.extend(crate::colai_files::carry(&files, &roots));
+    }
     let carried = attachments.len() - pictures;
     let sent = gateway
         .chat_send_to(
