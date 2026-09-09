@@ -1031,9 +1031,30 @@ function stillRunning(runs, now) {
  * The quiet timeout stays underneath, for the case this cannot cover: a Gateway that
  * cannot be reached at all, where `work` is whatever was last known and may be stale.
  */
+/**
+ * How long a run is believed without the Gateway agreeing.
+ *
+ * The Gateway counts every session it can see, which is not always every run this
+ * toolbar started — an adopted conversation, or one that has not registered yet, is
+ * simply missing from that count. Trusting a zero immediately made a run that had just
+ * been dispatched read as finished.
+ *
+ * Long enough for a session to appear in the Gateway's own list, short enough that a
+ * run nobody is tracking still gets tidied up.
+ */
+const GATEWAY_LAGS = 45 * 1000;
+
 function runsNow(runs, work, now) {
-  if (work && work.running === 0) return [];
-  return stillRunning(runs, now);
+  const still = stillRunning(runs, now);
+  // The Gateway saying "nothing is running" is a hint, not a verdict, and it used to be
+  // taken as one — clearing every run the instant a count came back zero. That was
+  // harmless when it only decided whether to offer a stop key, and became a lie the
+  // moment the panel used the same list to say an agent was *done*.
+  //
+  // `session.ended` is what actually says a run finished. This is the net beneath it, so
+  // it only takes runs the Gateway has had a fair chance to notice.
+  if (!work || work.running !== 0) return still;
+  return still.filter((run) => now - run.heard < GATEWAY_LAGS);
 }
 
 /*

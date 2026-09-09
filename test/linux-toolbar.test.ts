@@ -1817,20 +1817,27 @@ describe("knowing an agent is working", () => {
     expect(render).not.toMatch(/dataset\.mood\s*=\s*\w+\s*\?[^;]*:\s*["'`]["'`]/);
   });
 
-  test("when the Gateway says nothing is running, nothing is running", () => {
+  test("the Gateway saying nothing runs is a hint, not a verdict", () => {
     /*
-     * The bug this is about: an agent finishes, and the stop key stays over a run there
-     * is nothing left to stop while the crab keeps walking green. Every ingredient of
-     * `stillRunning` is still true — this toolbar started it, was never told it ended,
-     * and it spoke a moment ago — because all three are inferences, and the terminal
-     * frame that would have settled it never arrived.
+     * This rule was written to stop the stop key outliving its run, and it cleared every
+     * run the instant a count came back zero. Harmless while it only decided whether to
+     * offer a button — and a lie the moment the work panel used the same list to say an
+     * agent was *done*, which is what it started reporting for runs that were still
+     * going.
      *
-     * The Gateway knows, and is already asked every few seconds for the light.
+     * The Gateway counts sessions it can see, which is not always every run this toolbar
+     * started. `session.ended` is what actually says a run finished; this is only the
+     * net beneath it.
      */
     const now = 1_000_000;
-    const just = [run("a", now - 1000)];
-    expect(stillRunning(just, now)).toHaveLength(1);
-    expect(runsNow(just, { running: 0, waiting: 0, trouble: 0 }, now)).toHaveLength(0);
+    const quiet = { running: 0, waiting: 0, trouble: 0 };
+
+    // Just dispatched, and the Gateway has not noticed it yet. Still running.
+    expect(runsNow([run("a", now - 1000)], quiet, now)).toHaveLength(1);
+
+    // Old enough that the Gateway would have seen it, and it still says nothing runs.
+    // Now the zero is worth believing.
+    expect(runsNow([run("a", now - 60_000)], quiet, now)).toHaveLength(0);
   });
 
   test("somebody else's agent working is not this one still working", () => {
@@ -3104,6 +3111,43 @@ describe("one light for every agent at once", () => {
     const hint = compose.slice(compose.indexOf("mode-pick-hint"));
     expect(hint.slice(0, 400)).toContain("/");
     expect(hint.slice(0, 400)).toContain("@");
+  });
+
+  test("placing the rail measures the rail, not everything hanging off it", () => {
+    /*
+     * The work panel now lives inside the rail's wrapper so it travels with the toolbar.
+     * That made the wrapper four hundred pixels wide and eight hundred tall, and every
+     * rule that keeps the rail on screen was still measuring the wrapper — so opening
+     * the panel shoved the rail across the display and folding it shoved it back.
+     *
+     * Placement asks how big the rail is. What may be clicked is a different question,
+     * and the wrapper is still the right answer to that one.
+     */
+    const dock = readFileSync(new URL("../apps/linux/ui/toolbar-dock.js", import.meta.url), "utf8");
+    expect(dock, "nothing that places the rail may measure the wrapper").not.toContain(
+      "el.wrap.getBoundingClientRect()",
+    );
+    expect(dock).toContain("function railBox()");
+    expect(dock).toContain("el.rail.getBoundingClientRect()");
+
+    // And the clickable region still takes the whole wrapper, panel included.
+    const page = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
+    expect(page).toContain("boxAround(el.wrap)");
+  });
+
+  test("the panel keeps its own clock while it is open", () => {
+    /*
+     * Every elapsed time is worked out when a row is drawn, and nothing else redraws the
+     * panel — so an exchange said "just now" for as long as somebody left it open, and a
+     * run going ten minutes still claimed to have started a moment ago. A panel meant to
+     * stay open is exactly where a frozen clock does the most damage.
+     */
+    const work = readFileSync(new URL("../apps/linux/ui/toolbar-work.js", import.meta.url), "utf8");
+    expect(work).toContain("function keepTime()");
+    // Ticking only while it is open, and stopped when it is not: a timer left running
+    // behind a closed panel is a redraw nobody can see.
+    expect(work).toMatch(/clearInterval\(ticking\)/);
+    expect(work).toMatch(/state\.work\.open && state\.history\.length > 0/);
   });
 
   test("the reply is sized on purpose, not left to inherit the page", () => {

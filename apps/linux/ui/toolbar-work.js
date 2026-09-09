@@ -33,11 +33,45 @@ function openWork() {
   render();
 }
 
+/**
+ * Keep the clock in the panel honest while somebody watches it.
+ *
+ * Every elapsed time is worked out when the row is drawn, and nothing redraws on its
+ * own — so an exchange sent a moment ago said "just now" for as long as the panel stayed
+ * open, and a run going for ten minutes still claimed to have started a moment ago. The
+ * panel is a thing people leave open, which is exactly when a frozen clock is worst.
+ *
+ * Ticking only while it is open, and only while something might change: once every
+ * exchange is old enough to be counted in minutes, a redraw a second is redrawing the
+ * same words. Half a minute is finer than the smallest thing `agoSaid` says.
+ */
+const WORK_TICK = 30 * 1000;
+let ticking = null;
+
+function keepTime() {
+  const wanted = state.work.open && state.history.length > 0;
+  if (wanted === (ticking !== null)) return;
+  if (!wanted) {
+    clearInterval(ticking);
+    ticking = null;
+    return;
+  }
+  ticking = setInterval(() => {
+    // Only the panel: a whole render several times a minute to move one word is a cost
+    // the rest of the toolbar has no reason to pay.
+    if (state.work.open) drawWork();
+  }, WORK_TICK);
+}
+
 function drawWork() {
   const open = state.work.open;
   el.work.hidden = !open;
-  if (!open) return;
+  if (!open) {
+    keepTime();
+    return;
+  }
 
+  keepTime();
   const now = Date.now();
   const waiting = needingYou(state.history, state.runs);
   const shown =

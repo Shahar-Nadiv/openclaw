@@ -15,14 +15,14 @@
 function listenForDrag() {
     el.grip.addEventListener("pointerdown", (event) => {
     event.preventDefault();
-    const box = el.wrap.getBoundingClientRect();
+    const box = railBox();
     let grabX = event.clientX - box.left;
     let grabY = event.clientY - box.top;
     let edge = state.dock;
     let last = { x: box.left, y: box.top };
 
     const move = (moved) => {
-      const size = el.wrap.getBoundingClientRect();
+      const size = railBox();
       const hand = { x: moved.clientX, y: moved.clientY };
       // The screen under the hand, which changes mid-drag the moment the rail is carried
       // across the seam between two of them. Everything below is about that screen, so it
@@ -53,7 +53,7 @@ function listenForDrag() {
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      const size = el.wrap.getBoundingClientRect();
+      const size = railBox();
       const rest = { x: last.x, y: last.y };
       // The screen it was let go over, not the one it was picked up from.
       const room = usable(screenAt(state.screens, last));
@@ -145,7 +145,7 @@ function turn(change) {
 function ghostOf(rail) {
   const ghost = rail.cloneNode(true);
   const box = rail.getBoundingClientRect();
-  const wrap = el.wrap.getBoundingClientRect();
+  const wrap = railBox();
   ghost.removeAttribute("id");
   for (const named of ghost.querySelectorAll("[id]")) named.removeAttribute("id");
   ghost.setAttribute("aria-hidden", "true");
@@ -215,9 +215,25 @@ function recall() {
  * monitor, a dock that moved, a panel that was not there before. Without this it comes
  * back underneath the new chrome and looks broken on first sight.
  */
+/**
+ * How big the rail is — the bar itself, not everything hanging off it.
+ *
+ * The wrapper used to be the same thing, and every measurement here took it. Then the
+ * work panel moved inside the wrapper to travel with the toolbar, and the wrapper became
+ * four hundred pixels wide and eight hundred tall. Every rule that holds the rail on
+ * screen was suddenly holding a panel-sized object: opening the panel shoved the rail
+ * across the display, and folding it away shoved it back.
+ *
+ * Placement asks about the rail. What may be clicked is a different question, and
+ * `boxAround(el.wrap)` is still the right answer to that one — the panel is clickable.
+ */
+function railBox() {
+  return el.rail.getBoundingClientRect();
+}
+
 function clamp() {
   if (!state.at) return;
-  const size = el.wrap.getBoundingClientRect();
+  const size = railBox();
   if (!size.width) return;
   const room = usable(screenAt(state.screens, state.at));
   state.at = {
