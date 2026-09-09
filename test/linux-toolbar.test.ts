@@ -183,6 +183,13 @@ type ToolbarHelpers = {
     room: { left: number; top: number; right: number; bottom: number },
     vertical: boolean,
   ) => { x: number; y: number };
+  workSpot: (
+    rail: { left: number; top: number; right: number; bottom: number },
+    box: { width: number; height: number },
+    screens: Screen[],
+    dock: string | null,
+    dragged: Point | null,
+  ) => { x: number; y: number };
   FOLLOWS_WINDOW: string[];
   anchorOf: (where: Front | null) => Anchor | null;
   intoWindow: (box: Placed, at: Rect, screen: Size) => Placed;
@@ -276,7 +283,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, besideTheRail, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, besideTheRail, workSpot, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
   context,
 );
 const {
@@ -351,6 +358,7 @@ const {
   unchosen,
   centredIn,
   besideTheRail,
+  workSpot,
   FOLLOWS_WINDOW,
   anchorOf,
   intoWindow,
@@ -2446,8 +2454,11 @@ describe("the Work window can be moved", () => {
   });
 
   test("and stays where it was put", () => {
+    // Letting go records the spot, and the placement takes it as given. Where it used to
+    // be checked for inline, that is now `workSpot`'s `dragged` argument — pinned by the
+    // behaviour tests above rather than by the shape of a line here.
     expect(work).toMatch(/const up = \(\) => \{[\s\S]*?remember\(\);/);
-    expect(work).toContain("state.work.at ||");
+    expect(work).toContain("state.work.at,");
   });
 });
 
@@ -2896,6 +2907,54 @@ describe("one light for every agent at once", () => {
     const short = { left: 0, top: 0, right: 1920, bottom: 760 };
     const acrossTheMiddle = { left: 700, top: 360, right: 1120, bottom: 408 };
     expect(besideTheRail(acrossTheMiddle, size, short, false).y).toBe(0);
+  });
+
+  test("the window opens on the screen the rail is on, not the one it was last on", () => {
+    /*
+     * The bug: pressing send with the rail on the second monitor opened the window on
+     * the first. The side to open on was worked out from the rail's real box, but the
+     * screen it was then clamped into came from a separately remembered point — and when
+     * that was stale, or unset and fell back to the origin, the clamp hauled the window
+     * onto the wrong display.
+     *
+     * Two sources of truth for one question. There is one now: the rail.
+     */
+    const twoScreens: Screen[] = [
+      { x: 0, y: 0, width: 1920, height: 1080 },
+      { x: 1920, y: 0, width: 1920, height: 1080 },
+    ];
+    const box = { width: 540, height: 700 };
+
+    // Rail docked left on the *second* monitor: the window opens beside it, over there.
+    const onTheSecond = { left: 1934, top: 300, right: 1982, bottom: 720 };
+    const spot = workSpot(onTheSecond, box, twoScreens, "left", null);
+    expect(spot.x).toBeGreaterThanOrEqual(1920);
+    expect(spot).toEqual({ x: 1992, y: 300 });
+
+    // And the same rail on the first monitor stays on the first.
+    const onTheFirst = { left: 14, top: 300, right: 62, bottom: 720 };
+    expect(workSpot(onTheFirst, box, twoScreens, "left", null)).toEqual({ x: 72, y: 300 });
+  });
+
+  test("a window somebody dragged stays where they put it, on the screen they put it on", () => {
+    // Dragging is a statement about where the window belongs, including which display.
+    // The rail's screen must not pull it back.
+    const twoScreens: Screen[] = [
+      { x: 0, y: 0, width: 1920, height: 1080 },
+      { x: 1920, y: 0, width: 1920, height: 1080 },
+    ];
+    const box = { width: 540, height: 700 };
+    const railOnTheFirst = { left: 14, top: 300, right: 62, bottom: 720 };
+
+    const put = { x: 2400, y: 200 };
+    expect(workSpot(railOnTheFirst, box, twoScreens, "left", put)).toEqual(put);
+
+    // Still held inside whichever screen that is, so a spot remembered from a desktop
+    // that had another monitor does not open off the edge of this one.
+    const offTheEdge = { x: 3700, y: 900 };
+    const held = workSpot(railOnTheFirst, box, twoScreens, "left", offTheEdge);
+    expect(held.x).toBe(3840 - 540);
+    expect(held.y).toBe(1080 - 700);
   });
 
   test("the reply is sized on purpose, not left to inherit the page", () => {

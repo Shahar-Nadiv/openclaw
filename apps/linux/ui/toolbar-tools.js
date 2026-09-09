@@ -1351,6 +1351,31 @@ function besideTheRail(rail, size, room, vertical) {
 }
 
 /**
+ * Where the work window goes, start to finish.
+ *
+ * The whole decision in one place because it used to be two, and they disagreed. The
+ * window was placed beside the rail's real box while the screen it was then clamped into
+ * came from a separately remembered point — so when that point was stale, or unset and
+ * fell back to the origin, the clamp dragged the window onto a different monitor from
+ * the rail it was supposed to open next to.
+ *
+ * There is one source of truth for where the rail is now: the rail. The screen is the
+ * one the rail's middle falls on, and the same rectangle decides both the side to open
+ * on and the edges to stay inside.
+ */
+function workSpot(rail, box, screens, dock, dragged) {
+  const middle = { x: rail.left + (rail.right - rail.left) / 2, y: rail.top + (rail.bottom - rail.top) / 2 };
+  // Somebody who has dragged the window has said where it belongs, including which
+  // screen; otherwise it belongs beside the rail.
+  const room = usable(screenAt(screens, dragged || middle));
+  const put = dragged || besideTheRail(rail, box, room, isVertical(dock));
+  return {
+    x: Math.round(Math.max(room.left, Math.min(room.right - box.width, put.x))),
+    y: Math.round(Math.max(room.top, Math.min(room.bottom - box.height, put.y))),
+  };
+}
+
+/**
  * The part of a screen the toolbar may use.
  *
  * Not the whole screen. A desktop's own panels — GNOME's top bar, Ubuntu's dock — are

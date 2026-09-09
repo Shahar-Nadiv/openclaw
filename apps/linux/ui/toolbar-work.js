@@ -337,15 +337,14 @@ function startWorkDrag(event) {
  * carried.
  */
 function placeWork() {
-  const room = usable(screenAt(state.screens, state.work.at || state.at || { x: 0, y: 0 }));
-  const box = el.work.getBoundingClientRect();
-  // Where it was put, or — the first time — beside the rail that opened it. It used to
-  // arrive against the far edge of the screen however far that was from your hand.
-  const put =
-    state.work.at ||
-    besideTheRail(el.wrap.getBoundingClientRect(), box, room, isVertical(state.dock));
-  // Held inside the room whatever it was last told, so a window remembered from a
-  // desktop with another monitor on it does not open off the side of this one.
-  el.work.style.left = `${Math.round(Math.max(room.left, Math.min(room.right - box.width, put.x)))}px`;
-  el.work.style.top = `${Math.round(Math.max(room.top, Math.min(room.bottom - box.height, put.y)))}px`;
+  const spot = workSpot(
+    el.wrap.getBoundingClientRect(),
+    el.work.getBoundingClientRect(),
+    state.screens,
+    state.dock,
+    state.work.at,
+  );
+  el.work.style.left = `${spot.x}px`;
+  el.work.style.top = `${spot.y}px`;
 }
+
