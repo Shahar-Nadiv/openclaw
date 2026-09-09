@@ -2844,6 +2844,40 @@ describe("one light for every agent at once", () => {
     expect(clashes).toEqual([]);
   });
 
+  test("the reply is sized on purpose, not left to inherit the page", () => {
+    /*
+     * Found by rendering the window and looking at it: `.answer-turn` set no font-size,
+     * so in the Work window it inherited the page default and came out at sixteen pixels
+     * while the prompt above it sat at twelve and truncated mid-sentence. The thing you
+     * opened the window to read was the one thing nobody had sized.
+     */
+    const style = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+    const turns = style.slice(
+      style.indexOf(".work-turns .answer-turn {"),
+      style.indexOf("}", style.indexOf(".work-turns .answer-turn {")),
+    );
+    expect(turns, "the agent's reply must carry its own size").toMatch(/font-size:/);
+  });
+
+  test("the work window's history scrolls instead of being clipped away", () => {
+    /*
+     * Also found by looking, and introduced while fixing the above: giving the window
+     * `overflow: hidden` without giving history its own scroll silently cut off every
+     * entry past the first. A flex child additionally needs `min-height: 0` before it is
+     * allowed to shrink far enough to scroll at all, which is the part that is easy to
+     * leave out and impossible to see in the rules.
+     */
+    const style = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+    const history = style.slice(
+      style.indexOf(".work-history {"),
+      style.indexOf("}", style.indexOf(".work-history {")),
+    );
+    expect(history).toMatch(/overflow-y:\s*auto/);
+    expect(history, "a flex child cannot scroll until it is allowed to shrink").toMatch(
+      /min-height:\s*0/,
+    );
+  });
+
   test("the overlay is inert before the page has run a line", () => {
     /*
      * This is the one that turned a broken script into a lost desktop.

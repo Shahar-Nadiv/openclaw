@@ -39,12 +39,12 @@ function drawWork() {
   if (!open) return;
 
   const head = document.createElement("div");
-  head.className = "library-head work-head";
+  head.className = "work-head";
   // The head is the handle. A window meant to stay open all day has to be movable, and
   // the bar with its name on it is where everything else on this desktop is picked up.
   head.addEventListener("pointerdown", startWorkDrag);
   const title = document.createElement("p");
-  title.className = "agents-title";
+  title.className = "work-title";
   title.textContent = "Work";
   const shut = document.createElement("button");
   shut.type = "button";
@@ -111,7 +111,9 @@ function entryRow(entry, now) {
 
   // The pictures of what went, which is what somebody recognises the send by — the words
   // beside them are often a note about a thing rather than a description of it.
-  if (entry.shots.length) {
+  // Only when there are pictures. A row of empty grey squares reads as images that
+  // failed to load, which is a worse thing to say than nothing.
+  if (entry.shots.some(Boolean)) {
     const shots = document.createElement("div");
     shots.className = "work-shots";
     for (const shot of entry.shots) {
@@ -131,6 +133,8 @@ function entryRow(entry, now) {
   const said = document.createElement("p");
   said.className = "work-said";
   said.textContent = entrySaid(entry);
+  // Clamped for shape, so the whole of a long prompt has to stay reachable somehow.
+  said.title = said.textContent;
   row.append(said);
 
   const answer = entry.answer;

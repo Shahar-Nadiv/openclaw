@@ -1087,20 +1087,59 @@ body {
  * is meant to stay open while somebody works — a window in the middle of the screen for
  * an hour is a window in the way.
  */
+/*
+ * ── the work window ──────────────────────────────────────────────────────────
+ *
+ * A window somebody keeps open while they work, so it is built like a reading surface
+ * rather than a panel: one card, not cards inside cards, and a type scale with an
+ * argument behind it.
+ *
+ * What is read most is largest. An agent's reply is the thing somebody opened this to
+ * see, so it is the biggest and brightest text here; the prompt above it is context, so
+ * it is smaller and quieter; the name and the time are labels, so they are smaller
+ * again. That order was previously inverted — the reply inherited the page default and
+ * came out at sixteen pixels while the prompt sat at twelve and truncated mid-sentence.
+ */
 .work {
   position: fixed;
   z-index: 78;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  width: 340px;
-  max-height: 82vh;
-  padding: 12px;
-  border-radius: 14px;
-  background: rgb(20 20 22 / 98%);
-  border: 1px solid rgb(255 255 255 / 12%);
-  box-shadow: 0 30px 80px rgb(0 0 0 / 68%);
+  /* Room to read in, and room that follows the display. A fixed 340 was a phone-width
+     column on a desktop three thousand pixels wide. */
+  width: clamp(360px, 27vw, 540px);
+  max-height: 84vh;
+  padding: 0;
+  border-radius: 12px;
+  background: #17171a;
+  border: 1px solid rgb(255 255 255 / 10%);
+  /* Enough to lift it off the desktop, not so much that it looks like it is falling. */
+  box-shadow: 0 16px 40px rgb(0 0 0 / 55%);
+  overflow: hidden;
 }
+
+/* The bar with the window's name on it is the handle, which is where every other window
+   on this desktop is picked up from. */
+.work-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+  cursor: grab;
+  touch-action: none;
+}
+.work-head:active {
+  cursor: grabbing;
+}
+.work-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f2f2f5;
+}
+
 /*
  * Two sections that both want the room, so both are told how much they may have.
  *
@@ -1112,8 +1151,9 @@ body {
 .work-waiting {
   flex: 0 1 auto;
   min-height: 0;
-  max-height: 46vh;
+  max-height: 40vh;
   overflow-y: auto;
+  padding: 12px 14px;
 }
 /* The composer, now a section rather than a panel of its own. It brought its own
    margins, which were for sitting inside a flyout. */
@@ -1128,32 +1168,36 @@ body {
   margin-right: 0;
   width: 100%;
 }
-/* The bar with the window's name on it is the handle, which is where every other window
-   on this desktop is picked up from. */
-.work-head {
-  cursor: grab;
-  touch-action: none;
-}
-.work-head:active {
-  cursor: grabbing;
-}
+
 .work-history {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   flex: 1 1 auto;
-  min-height: 96px;
-  max-height: none;
-  padding-top: 8px;
+  /* Both, and both matter: `min-height: 0` lets a flex child shrink enough to scroll at
+     all, and the floor keeps history from being squeezed to nothing by a full composer.
+     Without the scroll the window simply clipped everything past the first entry. */
+  min-height: 0;
+  padding: 0 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border-top: 1px solid rgb(255 255 255 / 8%);
 }
+
+/*
+ * One entry is a passage of text, not a card.
+ *
+ * Nesting a rounded translucent box inside a rounded translucent box inside another is
+ * what made this read as decoration rather than as writing. Entries are separated by a
+ * rule, the way a list of messages has always been.
+ */
 .work-entry {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 9px 10px;
-  border-radius: 10px;
-  background: rgb(255 255 255 / 4%);
+  gap: 6px;
+  padding: 14px 0;
+}
+.work-entry + .work-entry {
+  border-top: 1px solid rgb(255 255 255 / 7%);
 }
 .work-entry-head {
   display: flex;
@@ -1163,66 +1207,95 @@ body {
 }
 .work-who {
   font-size: 12px;
-  font-weight: 500;
-  color: #f7f7f8;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #e8e8ec;
 }
 /* The pictures of what went, small and in a row: they are how somebody recognises which
-   send this was, not something to study. */
+   send this was, not something to study. Hidden entirely when there is nothing in them,
+   because an empty grey square reads as a picture that failed to load. */
 .work-shots {
   display: flex;
-  gap: 4px;
+  gap: 5px;
   flex-wrap: wrap;
 }
+.work-shots:empty {
+  display: none;
+}
+
+/* What was asked. Context for the reply below it, so quieter — but large enough to
+   actually read, and given six lines before it gives up rather than three. */
 .work-said {
   margin: 0;
-  font-size: 12px;
-  line-height: 1.4;
-  color: #c9c9ce;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #9a9aa2;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 6;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-/* What came back, set apart from what was asked so the two are not read as one. */
-.work-back {
-  margin: 2px 0 0;
-  padding-left: 8px;
-  border-left: 2px solid var(--accent, #ff6b6b);
-  font-size: 12px;
-  line-height: 1.45;
-  color: #f7f7f8;
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.work-waiting-on {
-  margin: 2px 0 0;
-  font-size: 11.5px;
-  color: #8e8e93;
-}
-.work-rewind {
-  margin-top: 2px;
-}
-/* The conversation so far, inside the entry it belongs to. Scrolled rather than grown:
-   a run that talks six times must not push everything else out of the window. */
+
+/*
+ * What came back. The reason the window is open, so it is the most readable thing in it.
+ *
+ * One accent rule down the side of the whole exchange rather than one per paragraph:
+ * the mark says "this is the agent talking", and saying it four times in a row is
+ * decoration.
+ */
 .work-turns {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 180px;
+  gap: 8px;
+  max-height: 240px;
   overflow-y: auto;
   overscroll-behavior: contain;
   margin: 2px 0;
+  padding-left: 10px;
+  border-left: 2px solid color-mix(in srgb, var(--accent, #ff6b6b) 55%, transparent);
+}
+.work-turns .answer-turn {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #eeeef2;
+}
+/* Something the person said back, inside the agent's column: dimmer, and marked as
+   theirs rather than given a second accent. */
+.work-turns .answer-turn[data-mine="true"] {
   padding-left: 8px;
-  border-left: 2px solid var(--accent, #ff6b6b);
+  border-left: 2px solid rgb(255 255 255 / 16%);
+  color: #8e8e93;
+}
+
+.work-waiting-on {
+  margin: 0;
+  font-size: 12px;
+  color: #8e8e93;
+}
+
+/* A real control, on the left where a button belongs. It was centred grey text, which
+   read as a disabled caption rather than as the way back to an earlier prompt. */
+.work-rewind {
+  align-self: flex-start;
+  width: auto;
+  margin-top: 2px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  border-radius: 7px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  color: #c9c9ce;
+}
+.work-rewind:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / 24%);
+  color: #f2f2f5;
 }
 
 .work-foot {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-top: 8px;
+  padding: 10px 14px;
   border-top: 1px solid rgb(255 255 255 / 8%);
   font-size: 12px;
   color: #c9c9ce;
