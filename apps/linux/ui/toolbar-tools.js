@@ -832,6 +832,57 @@ function handHue(who) {
 }
 
 /**
+ * The token being typed at the caret, if there is one.
+ *
+ * The rule every editor with a `/` menu uses, and it is the rule that keeps the menu out
+ * of the way: a mark only opens one at the start of a word. So `and/or` is a word,
+ * `http://x` is an address, and a lone `/` after a space is somebody asking for the
+ * menu. Without that, typing a path or a fraction would open a command palette.
+ *
+ * One function for both marks. `/` picks a mode and `@` picks a file, and the question
+ * "what is being typed right now" has exactly one answer either way — two copies of this
+ * would be two chances to disagree about where a word starts.
+ */
+function tokenAt(text, caret, mark) {
+  const upto = String(text ?? "").slice(0, Math.max(0, caret));
+  const at = upto.lastIndexOf(mark);
+  if (at === -1) return null;
+  // Only at the start of a word: the character before it must be space or nothing.
+  if (at > 0 && !/\s/.test(upto[at - 1])) return null;
+  const word = upto.slice(at + 1);
+  // A space ends it. The menu closes rather than following the caret across a sentence.
+  if (/\s/.test(word)) return null;
+  return { from: at, to: caret, word };
+}
+
+/**
+ * Which modes a half-typed word could still mean.
+ *
+ * Prefix rather than fuzzy, on both the id and the label, because there are four of them
+ * and a fuzzy match over four short words matches everything.
+ */
+function modesMatching(word) {
+  const want = String(word ?? "").trim().toLowerCase();
+  return Object.entries(MODES)
+    .filter(
+      ([id, mode]) => !want || id.startsWith(want) || mode.label.toLowerCase().startsWith(want),
+    )
+    .map(([id, mode]) => ({ id, label: mode.label, says: mode.says }));
+}
+
+/**
+ * The text with a token taken out of it, and where the caret lands afterwards.
+ *
+ * The token goes entirely: `/plan` sets the mode and leaves nothing behind, because the
+ * mode is not part of what you are asking for. Leaving the word in would send the agent
+ * the string "/plan" as though it were part of the request.
+ */
+function withoutToken(text, token) {
+  const said = String(text ?? "");
+  return { text: said.slice(0, token.from) + said.slice(token.to), caret: token.from };
+}
+
+/**
  * One turn of what the agent has said, or null while it is still thinking.
  *
  * Lives here rather than beside the answer panel because it is a decision about a

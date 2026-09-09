@@ -305,6 +305,148 @@ function placePopup(mark) {
  * the difference between an agent that can see the thing and one that has to go and
  * open it, and finding that out after sending is finding it out too late.
  */
+/**
+ * How the ask should be taken, as one control rather than four chips.
+ *
+ * Four chips spent a row of the composer saying three things nobody had chosen. The
+ * mode is one decision with one answer, which is a dropdown — and the same decision is
+ * reachable with `/` in the field, for anyone who would rather not leave the keyboard.
+ */
+function modePick() {
+  const row = document.createElement("div");
+  row.className = "mode-pick";
+  const label = document.createElement("span");
+  label.className = "mode-pick-label";
+  label.textContent = "Mode";
+
+  const pick = document.createElement("select");
+  pick.className = "mode-pick-select";
+  pick.setAttribute("aria-label", "How the ask should be taken");
+  for (const [id, mode] of Object.entries(MODES)) {
+    const one = document.createElement("option");
+    one.value = id;
+    one.textContent = mode.label;
+    one.selected = state.mode === id;
+    pick.append(one);
+  }
+  pick.title = (MODES[state.mode] || MODES.plan).says;
+  pick.addEventListener("change", () => {
+    state.mode = pick.value;
+    render();
+  });
+
+  const hint = document.createElement("span");
+  hint.className = "mode-pick-hint";
+  hint.textContent = "or type /";
+  row.append(label, pick, hint);
+  return row;
+}
+
+/**
+ * The ask, and the menu that opens inside it.
+ *
+ * `/` at the start of a word offers the modes. Picking one sets it and takes the word
+ * back out, because the mode is how the ask should be read and not part of the ask.
+ */
+function askField() {
+  const box = document.createElement("div");
+  box.className = "ask-box";
+
+  const text = document.createElement("textarea");
+  text.className = "popup-note";
+  text.rows = 3;
+  text.placeholder = "Anything else to say?";
+  text.value = state.text;
+
+  const menu = document.createElement("div");
+  menu.className = "ask-menu";
+  menu.hidden = true;
+
+  let showing = [];
+  let picked = 0;
+
+  const close = () => {
+    showing = [];
+    picked = 0;
+    menu.hidden = true;
+    menu.replaceChildren();
+  };
+
+  const take = (id) => {
+    const token = tokenAt(text.value, text.selectionStart, "/");
+    if (!token) return close();
+    const left = withoutToken(text.value, token);
+    state.mode = id;
+    state.text = left.text;
+    text.value = left.text;
+    text.setSelectionRange(left.caret, left.caret);
+    close();
+    render();
+    text.focus();
+  };
+
+  const look = () => {
+    const token = tokenAt(text.value, text.selectionStart, "/");
+    if (!token) return close();
+    showing = modesMatching(token.word);
+    if (showing.length === 0) return close();
+    picked = Math.min(picked, showing.length - 1);
+    menu.hidden = false;
+    menu.replaceChildren(
+      ...showing.map((mode, at) => {
+        const one = document.createElement("button");
+        one.type = "button";
+        one.className = "ask-menu-row";
+        one.dataset.on = String(at === picked);
+        const name = document.createElement("span");
+        name.className = "ask-menu-name";
+        name.textContent = mode.label;
+        const says = document.createElement("span");
+        says.className = "ask-menu-says";
+        says.textContent = mode.says;
+        // Clipped to one line so four modes fit; the whole of it stays reachable.
+        one.title = mode.says;
+        one.append(name, says);
+        // Pressed rather than clicked: a click would blur the field first and close the
+        // menu out from under the press.
+        one.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          take(mode.id);
+        });
+        return one;
+      }),
+    );
+  };
+
+  text.addEventListener("input", () => {
+    state.text = text.value;
+    look();
+  });
+  text.addEventListener("click", look);
+  text.addEventListener("blur", close);
+  text.addEventListener("keydown", (event) => {
+    if (menu.hidden) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      return close();
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      picked = (picked + (event.key === "ArrowDown" ? 1 : showing.length - 1)) % showing.length;
+      return look();
+    }
+    // Enter takes the highlighted one. Tab too, because a menu that only answers to one
+    // key is a menu half the people using it never get out of.
+    if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      take(showing[picked].id);
+    }
+  });
+
+  box.append(text, menu);
+  return box;
+}
+
 function fileRows() {
   const rows = [];
   for (const file of carrying(state.files)) {
@@ -837,32 +979,8 @@ function drawComposer(into) {
     rows.push(row);
   }
 
-  const modes = document.createElement("div");
-  modes.className = "mode-row";
-  for (const [id, mode] of Object.entries(MODES)) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chip";
-    chip.setAttribute("aria-pressed", String(state.mode === id));
-    chip.textContent = mode.label;
-    chip.title = mode.says;
-    chip.addEventListener("click", () => {
-      state.mode = id;
-      render();
-    });
-    modes.append(chip);
-  }
-  rows.push(modes);
-
-  const text = document.createElement("textarea");
-  text.className = "popup-note";
-  text.rows = 3;
-  text.placeholder = "Anything else to say?";
-  text.value = state.text;
-  text.addEventListener("input", () => {
-    state.text = text.value;
-  });
-  rows.push(text);
+  rows.push(modePick());
+  rows.push(askField());
 
   rows.push(...fileRows());
 

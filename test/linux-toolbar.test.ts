@@ -170,6 +170,16 @@ type ToolbarHelpers = {
   needingYou: (history: Entry[], runs: Run[]) => Entry[];
   workCountSaid: (history: Entry[], runs: Run[]) => string;
   handHue: (who: string) => number;
+  tokenAt: (
+    text: string,
+    caret: number,
+    mark: string,
+  ) => { from: number; to: number; word: string } | null;
+  modesMatching: (word: string) => { id: string; label: string; says: string }[];
+  withoutToken: (
+    text: string,
+    token: { from: number; to: number },
+  ) => { text: string; caret: number };
   SOURCES: Record<string, { label: string; says: string }>;
   TAKES_SOURCE: string[];
   sourceOf: (mark: { design?: string; source?: string; fromLibrary?: Chosen | null }) => string;
@@ -287,7 +297,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
   context,
 );
 const {
@@ -360,6 +370,9 @@ const {
   needingYou,
   workCountSaid,
   handHue,
+  tokenAt,
+  modesMatching,
+  withoutToken,
   SOURCES,
   TAKES_SOURCE,
   sourceOf,
@@ -2999,6 +3012,56 @@ describe("one light for every agent at once", () => {
       expect(handHue(who)).toBeGreaterThanOrEqual(0);
       expect(handHue(who)).toBeLessThan(360);
     }
+  });
+
+  test("a mark only opens a menu at the start of a word", () => {
+    /*
+     * The rule that keeps the menu out of the way. Without it, every path and every
+     * fraction somebody types opens a command palette in the middle of their sentence.
+     */
+    // Asking for it: at the start, or after a space.
+    expect(tokenAt("/", 1, "/")).toEqual({ from: 0, to: 1, word: "" });
+    expect(tokenAt("fix this /pl", 12, "/")).toEqual({ from: 9, to: 12, word: "pl" });
+
+    // Not asking for it.
+    expect(tokenAt("and/or", 6, "/"), "inside a word").toBe(null);
+    expect(tokenAt("see http://x", 12, "/"), "an address").toBe(null);
+    expect(tokenAt("a/b c", 5, "/"), "the word ended").toBe(null);
+    expect(tokenAt("/plan then this", 15, "/"), "a space closed it").toBe(null);
+    expect(tokenAt("nothing here", 12, "/")).toBe(null);
+    expect(tokenAt("", 0, "/")).toBe(null);
+
+    // Only what is left of the caret: the menu follows what is being typed, not what
+    // happens to be further along the line.
+    expect(tokenAt("/plan and more", 5, "/")).toEqual({ from: 0, to: 5, word: "plan" });
+
+    // The same rule serves `@`, which is the whole reason it takes the mark.
+    expect(tokenAt("look at @src/ap", 15, "@")).toEqual({ from: 8, to: 15, word: "src/ap" });
+    expect(tokenAt("me@example.com", 14, "@"), "an address is not a reference").toBe(null);
+  });
+
+  test("a half-typed mode narrows to the ones it could still be", () => {
+    expect(modesMatching("").map((one) => one.id)).toEqual(["ask", "plan", "debug", "build"]);
+    expect(modesMatching("b").map((one) => one.id)).toEqual(["build"]);
+    expect(modesMatching("de").map((one) => one.id)).toEqual(["debug"]);
+    // The label as well as the id, because the label is what is on screen to copy.
+    expect(modesMatching("Plan").map((one) => one.id)).toEqual(["plan"]);
+    expect(modesMatching("zzz")).toEqual([]);
+    // Every match carries what the mode does, which is the part worth reading in a menu.
+    expect(modesMatching("ask")[0]!.says).toContain("Do not change anything");
+  });
+
+  test("choosing a mode takes the word back out of the ask", () => {
+    // `/plan` is how the ask should be read, not part of it. Left in, the agent receives
+    // the literal string "/plan" as though it were the request.
+    const said = "tighten this /pl";
+    const token = tokenAt(said, said.length, "/")!;
+    expect(withoutToken(said, token)).toEqual({ text: "tighten this ", caret: 13 });
+
+    // And from the middle of a line, the rest of the line survives.
+    const middle = "make /bu it faster";
+    const inner = tokenAt(middle, 8, "/")!;
+    expect(withoutToken(middle, inner)).toEqual({ text: "make  it faster", caret: 5 });
   });
 
   test("the reply is sized on purpose, not left to inherit the page", () => {
