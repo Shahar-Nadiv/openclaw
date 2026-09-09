@@ -177,6 +177,12 @@ type ToolbarHelpers = {
     room: { left: number; top: number; right: number; bottom: number },
     box: { width: number; height: number },
   ) => { x: number; y: number };
+  besideTheRail: (
+    rail: { left: number; top: number; right: number; bottom: number },
+    size: { width: number; height: number },
+    room: { left: number; top: number; right: number; bottom: number },
+    vertical: boolean,
+  ) => { x: number; y: number };
   FOLLOWS_WINDOW: string[];
   anchorOf: (where: Front | null) => Anchor | null;
   intoWindow: (box: Placed, at: Rect, screen: Size) => Placed;
@@ -270,7 +276,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, besideTheRail, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
   context,
 );
 const {
@@ -344,6 +350,7 @@ const {
   broughtIn,
   unchosen,
   centredIn,
+  besideTheRail,
   FOLLOWS_WINDOW,
   anchorOf,
   intoWindow,
@@ -2842,6 +2849,53 @@ describe("one light for every agent at once", () => {
       }
     }
     expect(clashes).toEqual([]);
+  });
+
+  test("a window opened from the rail arrives beside the rail", () => {
+    /*
+     * The bug: it opened against the far edge of the screen, vertically centred,
+     * whatever the rail was doing. With the rail docked left, pressing a key on it put
+     * the window a thousand pixels away on the other side of the display.
+     */
+    const room = { left: 0, top: 0, right: 1920, bottom: 1080 };
+    const size = { width: 540, height: 700 };
+
+    // Rail on the left: the window opens to its right, level with it.
+    const onTheLeft = { left: 14, top: 200, right: 62, bottom: 620 };
+    expect(besideTheRail(onTheLeft, size, room, true)).toEqual({ x: 72, y: 200 });
+
+    // Rail on the right: there is no room after it, so it opens before it instead.
+    const onTheRight = { left: 1858, top: 200, right: 1906, bottom: 620 };
+    expect(besideTheRail(onTheRight, size, room, true)).toEqual({ x: 1308, y: 200 });
+
+    // A horizontal rail has room below it, not beside it.
+    const acrossTheTop = { left: 700, top: 14, right: 1120, bottom: 62 };
+    expect(besideTheRail(acrossTheTop, size, room, false)).toEqual({ x: 700, y: 72 });
+
+    // And one along the bottom opens above itself.
+    const acrossTheBottom = { left: 700, top: 1018, right: 1120, bottom: 1066 };
+    expect(besideTheRail(acrossTheBottom, size, room, false)).toEqual({ x: 700, y: 308 });
+  });
+
+  test("a window that fits on neither side of the rail still lands on the screen", () => {
+    // Overlapping the rail is worse than nothing; being off the edge of the display is
+    // worse than that. So when neither side has room the roomier one wins and the window
+    // sits against that edge.
+    const narrow = { left: 0, top: 0, right: 700, bottom: 1080 };
+    const size = { width: 540, height: 700 };
+
+    // Rail past the middle, so the room before it is the larger of two too-small gaps.
+    const rightish = { left: 400, top: 100, right: 448, bottom: 520 };
+    expect(besideTheRail(rightish, size, narrow, true).x).toBe(0);
+
+    // Rail near the left, so the larger gap is after it and the window takes that edge.
+    const leftish = { left: 120, top: 100, right: 168, bottom: 520 };
+    expect(besideTheRail(leftish, size, narrow, true).x).toBe(160);
+
+    // The same rule vertically, on a screen too short for the window either way.
+    const short = { left: 0, top: 0, right: 1920, bottom: 760 };
+    const acrossTheMiddle = { left: 700, top: 360, right: 1120, bottom: 408 };
+    expect(besideTheRail(acrossTheMiddle, size, short, false).y).toBe(0);
   });
 
   test("the reply is sized on purpose, not left to inherit the page", () => {

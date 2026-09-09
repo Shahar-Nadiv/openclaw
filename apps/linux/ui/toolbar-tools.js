@@ -1299,6 +1299,58 @@ function isVertical(dock) {
 }
 
 /**
+ * Where a window opened from the rail should sit: next to the rail.
+ *
+ * It used to open against the far edge of the screen, vertically centred, whatever the
+ * rail was doing — so with the rail docked left, pressing a key on it put the window a
+ * thousand pixels away on the other side of the display. A window you summoned should
+ * arrive where you are looking, which is where your hand already is.
+ *
+ * Beside a vertical rail and below a horizontal one, because that is the direction each
+ * of them has room in. Preferring the near side but taking the far one when the window
+ * does not fit, and falling back to the roomier side when neither does — off the edge of
+ * the screen is worse than overlapping the rail.
+ *
+ * Returns an unclamped corner; the caller holds it inside the screen. Kept pure so the
+ * awkward cases — a rail at the bottom of a short screen, a window wider than the room
+ * beside it — are tests rather than something found by dragging.
+ */
+function besideTheRail(rail, size, room, vertical) {
+  const gap = 10;
+  if (vertical) {
+    const after = rail.right + gap;
+    const before = rail.left - gap - size.width;
+    const roomier = rail.left - room.left > room.right - rail.right;
+    return {
+      x:
+        after + size.width <= room.right
+          ? after
+          : before >= room.left
+            ? before
+            : roomier
+              ? room.left
+              : room.right - size.width,
+      // Level with the rail, so the window and the key that opened it read as one thing.
+      y: rail.top,
+    };
+  }
+  const under = rail.bottom + gap;
+  const over = rail.top - gap - size.height;
+  const roomier = rail.top - room.top > room.bottom - rail.bottom;
+  return {
+    x: rail.left,
+    y:
+      under + size.height <= room.bottom
+        ? under
+        : over >= room.top
+          ? over
+          : roomier
+            ? room.top
+            : room.bottom - size.height,
+  };
+}
+
+/**
  * The part of a screen the toolbar may use.
  *
  * Not the whole screen. A desktop's own panels — GNOME's top bar, Ubuntu's dock — are
