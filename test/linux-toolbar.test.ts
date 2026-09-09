@@ -2875,6 +2875,45 @@ describe("one light for every agent at once", () => {
     expect(clashes).toEqual([]);
   });
 
+  test("the toolbar takes its colours from the app, not from its own opinion", () => {
+    /*
+     * The toolbar used to carry about forty unrelated hexes beside the Control UI's own
+     * palette — including three separate hand-written copies of the accent, one of them
+     * in Rust. Nothing could see them drift, because nothing named them.
+     *
+     * The tokens now come from `ui/src/styles/base.css` under the same names. This pins
+     * the retired literals so they cannot quietly come back one rule at a time.
+     */
+    const style = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+    const scripts = ["toolbar.js", "toolbar-mark.js", "toolbar-rail.js", "toolbar-work.js"]
+      .map((file) => readFileSync(new URL(`../apps/linux/ui/${file}`, import.meta.url), "utf8"))
+      .join("\n");
+    const rust = readFileSync(
+      new URL("../apps/linux/src-tauri/src/colai_capture.rs", import.meta.url),
+      "utf8",
+    );
+
+    // The old accent, in all three places it used to be written out by hand.
+    for (const [where, source] of [
+      ["the stylesheet", style],
+      ["the page scripts", scripts],
+      ["the capture code", rust],
+    ] as const) {
+      expect(source.toLowerCase(), `the retired accent is back in ${where}`).not.toContain(
+        "#ff6b6b",
+      );
+    }
+
+    // And the tokens it was replaced by are actually declared, so a `var()` cannot
+    // resolve to nothing.
+    for (const token of ["--accent:", "--text-strong:", "--text:", "--muted:", "--ok:"]) {
+      expect(style, `${token} must be declared`).toContain(token);
+    }
+    // `--accent` stays overridable at runtime: Quick Chat sets it from the app's accent,
+    // so it must be a token rather than a literal wherever it is used.
+    expect(style).not.toMatch(/color:\s*#ff[0-9a-f]{4};/i);
+  });
+
   test("the reply is sized on purpose, not left to inherit the page", () => {
     /*
      * Found by rendering the window and looking at it: `.answer-turn` set no font-size,

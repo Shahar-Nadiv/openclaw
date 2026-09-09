@@ -149,7 +149,7 @@ function drawLive() {
   let previous = "";
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
   path.id = "live";
-  path.setAttribute("stroke", "var(--accent, #ff6b6b)");
+  path.setAttribute("stroke", "var(--accent)");
   path.setAttribute("stroke-width", "2");
   path.setAttribute("stroke-dasharray", "6 4");
   path.setAttribute("vector-effect", "non-scaling-stroke");
@@ -175,7 +175,7 @@ function drawLive() {
       "fill",
       PATHS.includes(gesture.kind)
         ? "none"
-        : "color-mix(in srgb, var(--accent, #ff6b6b) 13%, transparent)",
+        : "color-mix(in srgb, var(--accent) 13%, transparent)",
     );
     // A highlighter shows its real width while it is being drawn, or somebody finds out
     // how much it covered only after letting go.
@@ -346,9 +346,9 @@ function drawMarks() {
       "fill",
       PATHS.includes(kind)
         ? "none"
-        : "color-mix(in srgb, var(--accent, #ff6b6b) 13%, transparent)",
+        : "color-mix(in srgb, var(--accent) 13%, transparent)",
     );
-    path.setAttribute("stroke", "var(--accent, #ff6b6b)");
+    path.setAttribute("stroke", "var(--accent)");
     // A highlighter is a wide translucent stripe rather than a line: it is meant to sit
     // over words and leave them readable, which a solid stroke does not.
     path.setAttribute("stroke-width", kind === "highlight" ? String(HIGHLIGHT_WIDE) : "2");

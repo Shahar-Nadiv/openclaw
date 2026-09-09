@@ -202,7 +202,10 @@ pub(crate) async fn colai_capture_mark(
         .ok_or_else(|| "There is nothing inside that mark to photograph.".to_string())?;
     let within = points_within(&mark, crop, width, height);
     let drawn = drawn_as(&mark).map(str::to_string);
-    let accent = accent.unwrap_or_else(|| "#ff6b6b".to_string());
+    // The Control UI's own accent, and the third place this colour used to be written
+    // out by hand. The page always sends one now, so this is the answer for a caller
+    // that does not — not a second opinion about what colai looks like.
+    let accent = accent.unwrap_or_else(|| "#ff5c5c".to_string());
 
     // GDK belongs to the main thread. The page has already made itself invisible and is
     // waiting on this, so the hop is the only thing between the two.
