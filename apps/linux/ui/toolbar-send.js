@@ -245,6 +245,9 @@ async function sendMarks(ids) {
         sessionKey: sent.sessionKey,
         said,
         shots,
+        // Named, so the panel can say `region` `arrow` rather than showing two grey
+        // squares. Taken here because this is the last moment the marks still exist.
+        marks: going.map((mark) => labelOf(mark)).filter(Boolean),
         answer,
       },
       ...state.history,

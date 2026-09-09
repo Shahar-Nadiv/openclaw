@@ -1,7 +1,7 @@
 // Exercises the pure decisions extracted from the Linux toolbar webview script.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import vm from "node:vm";
 import { describe, expect, it as test } from "vitest";
 
@@ -159,6 +159,7 @@ type ToolbarHelpers = {
     now: number,
   ) => { words: string; when: string | null };
   agoSaid: (at: number, now: number) => string;
+  briefly: (at: number, now: number) => string;
   REWIND_SAYS: string;
   KEEPS_MARKING: string[];
   MOODS: Record<string, { colour: string; says: (many: number) => string }>;
@@ -297,7 +298,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
   context,
 );
 const {
@@ -358,6 +359,7 @@ const {
   rewindRefused,
   pointSaid,
   agoSaid,
+  briefly,
   REWIND_SAYS,
   KEEPS_MARKING,
   numberOf,
@@ -2041,6 +2043,26 @@ describe("taking a conversation back", () => {
     expect(agoSaid(now - 100_000, now)).toBe("2 minutes ago");
     expect(agoSaid(now - 86_400_000, now)).toBe("1 day ago");
   });
+
+  test("the panel's column of times is numbers, not a column of the word 'ago'", () => {
+    /*
+     * `agoSaid` writes a sentence, which is right in a list read one line at a time. In
+     * the Work panel every exchange carries one, and "4 minutes ago" repeated down the
+     * page buries the only part that differs. The panel gets the number; the sentence
+     * stays in the `title`, so hovering still spells it out.
+     */
+    const now = 1_000_000_000_000;
+    expect(briefly(now - 40_000, now)).toBe("40s");
+    expect(briefly(now - 240_000, now)).toBe("4m");
+    expect(briefly(now - 7_200_000, now)).toBe("2h");
+    expect(briefly(now - 172_800_000, now)).toBe("2d");
+    // Seconds or milliseconds, as with the sentence — same instant, same answer.
+    expect(briefly((now - 240_000) / 1000, now)).toBe("4m");
+    // Never longer than the sentence it replaces, at any age.
+    for (const apart of [0, 1_000, 59_000, 61_000, 3_599_000, 90_000_000]) {
+      expect(briefly(now - apart, now).length).toBeLessThanOrEqual(3);
+    }
+  });
 });
 
 describe("a mark belongs to what it was marked on", () => {
@@ -2956,6 +2978,73 @@ describe("one light for every agent at once", () => {
     expect(style).not.toMatch(/color:\s*#ff[0-9a-f]{4};/i);
   });
 
+  test("every button in the panel is the same button", () => {
+    /*
+     * The Work window and the composer under it drew two different buttons: one a
+     * bordered slab, the other a translucent wash, because they were written months
+     * apart. And `.compose-later` — Files… and Schedule… — had no rule at all, so the
+     * browser drew its own grey chrome: the loudest thing in the panel, on its two
+     * rarest actions.
+     *
+     * One spec, from the design: radius 10, a fill inside a border, and the primary
+     * darker than the accent that outlines it.
+     */
+    const style = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+    const ruleFor = (selector: string) => {
+      const at = style.indexOf(`\n${selector} {`);
+      expect(at, `${selector} must have a rule of its own`).toBeGreaterThan(-1);
+      return style.slice(at, style.indexOf("}", at));
+    };
+
+    // The two buttons agree on their shape.
+    for (const selector of [".work-act", ".popup-do"]) {
+      const rule = ruleFor(selector);
+      expect(rule, `${selector} radius`).toContain("border-radius: 10px");
+      expect(rule, `${selector} fill`).toContain("background: var(--bg-elevated)");
+      expect(rule, `${selector} edge`).toContain("border: 1px solid var(--border)");
+    }
+
+    // And on which of them is the one to press: a fill inside a brighter border, never
+    // a flat accent, which is what read as wrong beside the design.
+    for (const selector of ['.work-act[data-lead="true"]', ".popup-go"]) {
+      const rule = ruleFor(selector);
+      expect(rule, `${selector} fill`).toContain("var(--accent-fill)");
+      expect(rule, `${selector} edge`).toContain("border-color: var(--accent)");
+    }
+    expect(style, "--accent-fill must be declared").toContain("--accent-fill:");
+
+    // Files… and Schedule… are text beside Send, not slabs competing with it.
+    const later = ruleFor(".compose-later");
+    expect(later).toContain("color: var(--muted-dim)");
+    expect(later, "a quiet link does not carry a border").not.toContain("border:");
+  });
+
+  test("the panel draws in the faces the rest of the app draws in", () => {
+    /*
+     * Every other surface uses Instrument Sans and JetBrains Mono; this one used
+     * `system-ui`, and no amount of spacing work closes that gap. The faces are bundled
+     * beside the page — a missing `@font-face` falls back silently and looks like the
+     * change did nothing, so pin the files as well as the rules.
+     */
+    const ui = new URL("../apps/linux/ui/", import.meta.url);
+    const faces = readFileSync(new URL("fonts/fonts.css", ui), "utf8");
+    for (const family of ["Instrument Sans", "JetBrains Mono"]) {
+      expect(faces, `${family} needs an @font-face`).toContain(family);
+    }
+    for (const file of ["instrument-sans-latin.woff2", "jetbrains-mono-latin.woff2"]) {
+      expect(existsSync(new URL(`fonts/${file}`, ui)), `${file} must ship`).toBe(true);
+    }
+
+    // Linked before the stylesheet that uses the tokens, or the first paint is wrong.
+    const page = readFileSync(new URL("toolbar.html", ui), "utf8");
+    expect(page.indexOf("fonts/fonts.css")).toBeGreaterThan(-1);
+    expect(page.indexOf("fonts/fonts.css")).toBeLessThan(page.indexOf("toolbar.css"));
+
+    const style = readFileSync(new URL("toolbar.css", ui), "utf8");
+    expect(style).toContain("--font-body:");
+    expect(style).toContain("--font-mono:");
+  });
+
   test("an exchange says what it is doing, worst news first", () => {
     /*
      * The panel is opened to answer one question — is anything waiting on me — and the
@@ -3101,16 +3190,57 @@ describe("one light for every agent at once", () => {
     ).not.toMatch(/roots:\s*Vec<String>/);
   });
 
-  test("the composer says both keystrokes exist", () => {
-    // `/` has a dropdown beside it to be discovered from. `@` has nothing anywhere else,
-    // so if the hint does not name it, nobody finds it.
+  test("the composer says both keystrokes exist, where somebody is about to type", () => {
+    /*
+     * `/` has a control beside it to be discovered from. `@` has nothing anywhere else,
+     * so if nothing names it, nobody finds it.
+     *
+     * It used to be a line of hint text in a row of its own above the field. That row is
+     * gone — it gave the rarest choice in the composer the most room — so the field's own
+     * placeholder carries both, which is the larger space and the one being read.
+     */
     const compose = readFileSync(
       new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
       "utf8",
     );
-    const hint = compose.slice(compose.indexOf("mode-pick-hint"));
-    expect(hint.slice(0, 400)).toContain("/");
-    expect(hint.slice(0, 400)).toContain("@");
+    const said = compose.matchAll(/text\.placeholder = ([\s\S]{0,240}?);\n/g);
+    const shown = [...said].map((found) => found[1]!).join("\n");
+    expect(shown, "the ask field must have a placeholder").not.toBe("");
+    expect(shown, "`/` chooses the mode").toContain("/ for mode");
+    expect(shown, "`@` names a file and is reachable no other way").toContain("@ for a file");
+  });
+
+  test("the send key exists, and does not steal Enter from the menu", () => {
+    /*
+     * The composer showed no keystroke and had none: Enter made a newline and the only
+     * way to send was to reach for the mouse. The hint beside the button now says
+     * Ctrl+Enter, so Ctrl+Enter has to actually send.
+     *
+     * And it must not fire while `/` or `@` is open — Enter is answering that menu, and
+     * taking it would send whatever half-typed word the menu was offering to complete.
+     */
+    const compose = readFileSync(
+      new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+      "utf8",
+    );
+    const at = compose.indexOf('text.addEventListener("keydown"');
+    expect(at, "the ask field must handle keys").toBeGreaterThan(-1);
+    const handler = compose.slice(at, at + 700);
+
+    // The send arm comes first, and is guarded by the menu being shut.
+    const sends = handler.indexOf("sendMarks");
+    const guard = handler.indexOf('menu.hidden && event.key === "Enter"');
+    expect(guard, "Ctrl+Enter must be guarded by a shut menu").toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(sends);
+    expect(handler.slice(guard, sends)).toMatch(/ctrlKey|metaKey/);
+
+    // And it asks the same question the button asks, rather than a second copy of it.
+    expect(compose).toContain("function canSend(");
+    expect(handler.slice(guard, sends + 80)).toContain("canSend(");
+    expect(compose, "the button must ask it too").toContain("go.disabled = !canSend(");
+
+    // The hint names the key it works, so the two cannot drift apart.
+    expect(compose).toMatch(/key\.textContent = "Ctrl ↵"/);
   });
 
   test("placing the rail measures the rail, not everything hanging off it", () => {

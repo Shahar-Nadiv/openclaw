@@ -956,6 +956,24 @@ function needingYou(history, runs) {
   return (history || []).filter((entry) => stateOf(entry, runs) === "asking");
 }
 
+/**
+ * How long ago, in as few characters as the number allows.
+ *
+ * `agoSaid` writes a sentence, which is right in a list somebody reads a line at a time
+ * and wrong in a column of a dense panel — "4 minutes ago" beside every name is the same
+ * three words repeated down the page, drowning the number that differs. The panel wants
+ * the number.
+ */
+function briefly(at, now) {
+  // Milliseconds or seconds, whichever the Gateway happened to send.
+  const then = at > 1e11 ? at : at * 1000;
+  const apart = Math.max(0, (now - then) / 1000);
+  if (apart < 60) return `${Math.round(apart)}s`;
+  if (apart < 3600) return `${Math.round(apart / 60)}m`;
+  if (apart < 86_400) return `${Math.round(apart / 3600)}h`;
+  return `${Math.round(apart / 86_400)}d`;
+}
+
 /** How long ago something was, in the roundest true words. */
 function agoSaid(at, now) {
   // Milliseconds or seconds, whichever the Gateway happened to send.

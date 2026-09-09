@@ -313,12 +313,6 @@ function placePopup(mark) {
  * reachable with `/` in the field, for anyone who would rather not leave the keyboard.
  */
 function modePick() {
-  const row = document.createElement("div");
-  row.className = "mode-pick";
-  const label = document.createElement("span");
-  label.className = "mode-pick-label";
-  label.textContent = "Mode";
-
   const pick = document.createElement("select");
   pick.className = "mode-pick-select";
   pick.setAttribute("aria-label", "How the ask should be taken");
@@ -335,14 +329,13 @@ function modePick() {
     render();
   });
 
-  const hint = document.createElement("span");
-  hint.className = "mode-pick-hint";
-  // Both, because a keystroke nobody is told about is a keystroke nobody uses — and `@`
-  // has no control anywhere else to be discovered from.
-  hint.textContent = "/ mode · @ file";
-  hint.title = "Type / in the box to choose how the ask is taken, or @ to name a file";
-  row.append(label, pick, hint);
-  return row;
+  return pick;
+}
+
+/** Whether there is anything to send, asked in one place so the key and the arrow agree. */
+function canSend(going) {
+  if (state.sending) return false;
+  return going.length > 0 || state.files.length > 0 || Boolean(state.text.trim());
 }
 
 /**
@@ -357,8 +350,15 @@ function askField() {
 
   const text = document.createElement("textarea");
   text.className = "popup-note";
-  text.rows = 3;
-  text.placeholder = "Anything else to say?";
+  text.rows = 2;
+  // The two keystrokes live here now rather than in a labelled row above the field.
+  // `/` has a control beside it to be found from; `@` has nothing anywhere else, so if
+  // this line does not name it nobody ever finds it. It is the largest empty space in
+  // the composer and it is exactly where somebody is about to type.
+  const marked = chosenMarks().length;
+  text.placeholder = marked
+    ? `Say what you want done with ${counted(marked, "mark")}… / for mode, @ for a file`
+    : "Say what you want done… / for mode, @ for a file";
   text.value = state.text;
 
   const menu = document.createElement("div");
@@ -468,6 +468,15 @@ function askField() {
   text.addEventListener("click", look);
   text.addEventListener("blur", close);
   text.addEventListener("keydown", (event) => {
+    // Send from the keyboard, unless the `/` or `@` menu is open — there Enter is
+    // already answering a question, and stealing it would send whatever half-typed
+    // word the menu was offering to complete.
+    if (menu.hidden && event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      const going = chosenMarks();
+      if (canSend(going)) void sendMarks(going.map((mark) => mark.id));
+      return;
+    }
     if (menu.hidden) return;
     if (event.key === "Escape") {
       event.preventDefault();
@@ -1011,7 +1020,6 @@ function drawComposer(into) {
     rows.push(row);
   }
 
-  rows.push(modePick());
   rows.push(askField());
 
   rows.push(...fileRows());
@@ -1028,7 +1036,19 @@ function drawComposer(into) {
   const to = document.createElement("button");
   to.type = "button";
   to.className = "popup-to";
-  to.textContent = state.receiving.name || "Choose who receives";
+  // A dot, a name and a chevron: who this is going to, whether they are up, and that
+  // the name can be changed. The name alone read as a caption nobody could click.
+  const lit = document.createElement("span");
+  lit.className = "popup-to-lit";
+  lit.dataset.up = String(Boolean(state.receiving.name));
+  const named = document.createElement("span");
+  named.className = "popup-to-name";
+  named.textContent = state.receiving.name || "Choose who receives";
+  const more = document.createElement("span");
+  more.className = "popup-to-more";
+  more.textContent = "⌄";
+  to.append(lit, named, more);
+  to.title = "Choose who receives this";
   to.addEventListener("click", () => flyout("agents"));
   // What the toolbar can see, offered rather than done.
   //
@@ -1085,21 +1105,38 @@ function drawComposer(into) {
     flyout("automate");
   });
 
-  const go = document.createElement("button");
-  go.type = "button";
-  go.className = "popup-do popup-go";
   const going = chosenMarks();
-  go.disabled =
-    state.sending || (going.length === 0 && state.files.length === 0 && !state.text.trim());
-  go.textContent = state.sending
+  const says = state.sending
     ? "Sending…"
     : needsAgreeing()
       ? "Send and adopt"
       : going.length
         ? `Send ${counted(going.length, "mark")}`
         : "Send";
+
+  const go = document.createElement("button");
+  go.type = "button";
+  // Adopting keeps its words. It takes a conversation over from wherever it is running,
+  // which is a decision somebody should read before making, and an arrow cannot say it.
+  // Everything else is the arrow: what is going is already listed directly above it.
+  const spelled = needsAgreeing();
+  go.className = spelled ? "popup-do popup-go" : "popup-do popup-go compose-send";
+  go.textContent = spelled ? says : state.sending ? "…" : "↑";
+  go.title = says;
+  go.setAttribute("aria-label", says);
+  go.disabled = !canSend(going);
   go.addEventListener("click", () => void sendMarks(going.map((mark) => mark.id)));
-  foot.append(to, fileAdd(), later, go);
+
+  // The keystroke, said once beside the key it belongs to. A send key nobody is told
+  // about is a send key nobody uses.
+  const key = document.createElement("span");
+  key.className = "compose-key";
+  key.textContent = "Ctrl ↵";
+  key.title = "Ctrl+Enter sends";
+
+  // Who and how on the left, what happens to it on the right. `to` takes whatever room
+  // the rest leaves, so a long agent name shortens rather than pushing Send off the end.
+  foot.append(to, modePick(), fileAdd(), later, key, go);
   rows.push(foot);
 
   into.replaceChildren(...rows);

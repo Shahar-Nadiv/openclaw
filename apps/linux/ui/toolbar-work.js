@@ -230,23 +230,23 @@ function entryRow(entry, now) {
   pill.textContent = STATES[state_].label;
   const when = document.createElement("span");
   when.className = "work-when";
-  when.textContent = agoSaid(entry.at, now);
+  when.textContent = briefly(entry.at, now);
+  when.title = agoSaid(entry.at, now);
   meta.append(face, who, pill, when);
   row.append(node, meta);
 
-  if (entry.shots.some(Boolean)) {
-    const shots = document.createElement("div");
-    shots.className = "work-shots";
-    for (const shot of entry.shots.filter(Boolean)) {
+  // What was marked, named rather than pictured. A thumbnail says which screenshot; the
+  // word says which tool, and the tool is what somebody remembers about a mark.
+  if (entry.marks && entry.marks.length) {
+    const marks = document.createElement("div");
+    marks.className = "work-marks";
+    for (const named of entry.marks) {
       const one = document.createElement("span");
-      one.className = "mark-shot";
-      const picture = document.createElement("img");
-      picture.src = shot;
-      picture.alt = "";
-      one.append(picture);
-      shots.append(one);
+      one.className = "work-mark";
+      one.textContent = named;
+      marks.append(one);
     }
-    row.append(shots);
+    row.append(marks);
   }
 
   // What was asked, folded away. It is context for the reply below it and you wrote it,
@@ -328,6 +328,22 @@ function receiptRow(entry, state_) {
   const said = document.createElement("span");
   said.textContent = through ? `${through} · ${entry.who}` : entry.who;
   line.append(tick, said);
+  // The design puts `+6 −2` at the end of this row, and only a connector that reports
+  // what it wrote can fill it in. Drawn when there is a number and left out when there
+  // is not, rather than shown as zeros nothing measured.
+  const wrote = entry.answer && entry.answer.wrote;
+  if (wrote && (wrote.more || wrote.less)) {
+    const count = document.createElement("span");
+    count.className = "work-receipt-count";
+    const more = document.createElement("span");
+    more.className = "work-receipt-more";
+    more.textContent = `+${wrote.more || 0}`;
+    const less = document.createElement("span");
+    less.className = "work-receipt-less";
+    less.textContent = `−${wrote.less || 0}`;
+    count.append(more, less);
+    line.append(count);
+  }
   return line;
 }
 
@@ -473,6 +489,11 @@ function resend(entry) {
  * which put the newest thing furthest from the words about it.
  */
 function workWrite() {
+  // The composer is a card; the setting under it is not part of it. They were one
+  // element, so "Show marks on screen" sat inside the box you type a message into,
+  // reading as something the message does rather than something the panel does.
+  const tail = document.createElement("div");
+  tail.className = "work-tail";
   const write = document.createElement("div");
   write.className = "work-write";
   drawComposer(write);
@@ -493,8 +514,8 @@ function workWrite() {
   const said = document.createElement("span");
   said.textContent = "Show marks on screen";
   foot.append(tick, said);
-  write.append(foot);
-  return write;
+  tail.append(write, foot);
+  return tail;
 }
 
 /**
