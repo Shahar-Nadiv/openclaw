@@ -524,25 +524,24 @@ function fileRows() {
     rows.push(row);
   }
 
-  const add = document.createElement("div");
-  add.className = "mode-row file-add";
-  for (const [label, folders] of [
-    ["Add files", false],
-    ["Add a folder", true],
-  ]) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chip";
-    chip.textContent = label;
-    chip.addEventListener("click", () => void pickFiles(folders));
-    add.append(chip);
-  }
-  const hint = document.createElement("span");
-  hint.className = "file-hint";
-  hint.textContent = "or drop them here";
-  add.append(hint);
-  rows.push(add);
   return rows;
+}
+
+/**
+ * Adding a file, folded into the send row.
+ *
+ * Two chips and a sentence used to own a line of a composer that has only a few. Files
+ * still arrive by dropping them anywhere on the panel and by typing `@`; this is the
+ * third way, and the rarest, so it is the smallest.
+ */
+function fileAdd() {
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "compose-later";
+  add.textContent = "Files…";
+  add.title = "Choose files, or drop them anywhere on this panel";
+  add.addEventListener("click", (event) => void pickFiles(event.altKey));
+  return add;
 }
 
 /** Ask the desktop for files, and keep whatever comes back that is not already here. */
@@ -952,19 +951,9 @@ async function createAutomation() {
  */
 function drawComposer(into) {
   const rows = [];
-  const title = document.createElement("p");
-  title.className = "agents-title";
-  // It is a section of the Work window now, and the window is already called Work. What
-  // this part says is which of it has not gone yet.
-  title.textContent = "Waiting to send";
-  rows.push(title);
-
-  if (state.marks.length === 0) {
-    const none = document.createElement("p");
-    none.className = "agent-empty";
-    none.textContent = "Nothing marked yet. Point at something, or just write below.";
-    rows.push(none);
-  }
+  // No section heading and no "nothing marked yet": the panel is already called Work,
+  // and the field's own placeholder says what to do with an empty composer. Two labels
+  // for one thing is how a compose box grows to eight rows of chrome.
   for (const mark of state.marks) {
     const row = document.createElement("div");
     row.className = "row mark-row";
@@ -1088,13 +1077,13 @@ function drawComposer(into) {
   // has to be findable from.
   const later = document.createElement("button");
   later.type = "button";
-  later.className = "row row-quiet";
-  later.textContent = "Run this on a schedule…";
+  later.className = "compose-later";
+  later.textContent = "Schedule…";
+  later.title = "Run this on a schedule instead of now";
   later.addEventListener("click", () => {
     state.cron = { ...AUTOMATION_FIRST };
     flyout("automate");
   });
-  rows.push(later);
 
   const go = document.createElement("button");
   go.type = "button";
@@ -1110,7 +1099,7 @@ function drawComposer(into) {
         ? `Send ${counted(going.length, "mark")}`
         : "Send";
   go.addEventListener("click", () => void sendMarks(going.map((mark) => mark.id)));
-  foot.append(to, go);
+  foot.append(to, fileAdd(), later, go);
   rows.push(foot);
 
   into.replaceChildren(...rows);

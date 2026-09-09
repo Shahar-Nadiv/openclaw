@@ -238,8 +238,16 @@ function entryRow(entry, now) {
   const receipt = receiptRow(entry, state_);
   if (receipt) row.append(receipt);
 
-  if (state_ === "asking" && entry.answer) row.append(answerBox(entry.answer));
-  row.append(actionsFor(entry, state_));
+  // One row of buttons, not two. The reply controls and the row's own actions are the
+  // same question — what do I do about this — and splitting them put Rewind on a line of
+  // its own underneath No/Yes/Reply.
+  const acts = actionsFor(entry, state_);
+  if (state_ === "asking" && entry.answer) {
+    const box = answerBox(entry.answer, acts);
+    row.append(box);
+  } else {
+    row.append(acts);
+  }
   return row;
 }
 
@@ -346,7 +354,7 @@ function actionsFor(entry, state_) {
  * or refuse. It asks which of two things you meant, or what a value should be — and
  * neither has an answer that fits in two fixed buttons.
  */
-function answerBox(answer) {
+function answerBox(answer, acts) {
   const box = document.createElement("div");
   box.className = "work-answer";
   const field = document.createElement("textarea");
@@ -358,8 +366,9 @@ function answerBox(answer) {
     answer.saying_text = field.value;
     render();
   });
-  const foot = document.createElement("div");
-  foot.className = "work-acts";
+  // The row's own actions, with the quick replies put in front of them.
+  const foot = acts;
+  const first = [];
   // Still here, because "yes, go on" is the commonest answer in the world — but they
   // fill the box rather than being the only two things sayable.
   for (const [label, words, why] of [
@@ -373,7 +382,7 @@ function answerBox(answer) {
     quick.textContent = label;
     quick.title = why;
     quick.addEventListener("click", () => void verdict(answer, words));
-    foot.append(quick);
+    first.push(quick);
   }
   const go = document.createElement("button");
   go.type = "button";
@@ -382,7 +391,10 @@ function answerBox(answer) {
   go.disabled = Boolean(answer.saying) || !(answer.saying_text || "").trim();
   go.textContent = answer.saying ? "Sending…" : "Reply";
   go.addEventListener("click", () => void verdict(answer, answer.saying_text || ""));
-  foot.append(go);
+  first.push(go);
+  // No, Yes, Reply, then whatever the row already offered — the order somebody reads
+  // them in, and built in one go so the loop above cannot reverse it.
+  foot.prepend(...first);
   box.append(field, foot);
   return box;
 }

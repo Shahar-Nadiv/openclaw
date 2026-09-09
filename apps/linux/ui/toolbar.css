@@ -1595,6 +1595,24 @@ body {
   width: 100%;
 }
 
+/* Scheduling shares the send row rather than owning one. It is a rare thing, and a
+   compact composer cannot spend a whole line on each rare thing. */
+.compose-later {
+  all: unset;
+  padding: 4px 9px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.compose-later:hover {
+  color: var(--text-strong);
+  background: rgb(255 255 255 / 8%);
+}
+.compose-later:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
 .work-foot {
   display: flex;
   align-items: center;
