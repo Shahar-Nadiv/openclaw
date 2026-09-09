@@ -572,32 +572,14 @@ function resend(entry) {
  * which put the newest thing furthest from the words about it.
  */
 function workWrite() {
-  // The composer is a card; the setting under it is not part of it. They were one
-  // element, so "Show marks on screen" sat inside the box you type a message into,
-  // reading as something the message does rather than something the panel does.
+  // A band across the foot of the panel, so the card inside it floats rather than
+  // butting up against the log above.
   const tail = document.createElement("div");
   tail.className = "work-tail";
   const write = document.createElement("div");
   write.className = "work-write";
   drawComposer(write);
-
-  const foot = document.createElement("label");
-  foot.className = "work-foot";
-  const tick = document.createElement("input");
-  tick.type = "checkbox";
-  tick.className = "mark-tick";
-  tick.checked = Boolean(state.work.showing);
-  tick.addEventListener("change", () => {
-    state.work.showing = tick.checked;
-    // Kept with where the rail sits: both are how somebody set this up, not what they
-    // are doing with it.
-    remember();
-    render();
-  });
-  const said = document.createElement("span");
-  said.textContent = "Show marks on screen";
-  foot.append(tick, said);
-  tail.append(write, foot);
+  tail.append(write);
   return tail;
 }
 

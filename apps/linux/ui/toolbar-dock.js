@@ -177,7 +177,6 @@ function remember() {
         ...state.at,
         dock: state.dock,
         tucked: state.tucked,
-        showing: state.work.showing,
       }),
     );
   } catch {
@@ -197,9 +196,6 @@ function recall() {
       // Only an explicit `true` folds them. A toolbar remembered from before this
       // existed has no opinion, and open is what somebody who has not said should get.
       state.tucked = put.tucked === true;
-      // Off unless somebody turned it on. A screen with marks on it is the thing this
-      // was built to stop being the default.
-      state.work.showing = put.showing === true;
       return;
     }
   } catch {

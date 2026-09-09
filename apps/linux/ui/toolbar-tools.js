@@ -309,12 +309,14 @@ function showingNow(mark, front, look) {
    *
    * Making four of them needs them visible; everything after that does not, and a screen
    * with yesterday's annotations on it is a screen somebody works around. So they are
-   * drawn while a marking tool is out, and otherwise only when asked for.
+   * drawn while a marking tool is out, and not otherwise. There was a switch in the Work
+   * panel to keep them up; it was one more thing to read in a panel about work, and the
+   * marks in the composer already say what is waiting to go.
    *
    * `look` rather than reading the state directly, so which marks are drawn stays a
    * decision that can be shown to be right rather than one buried in a renderer.
    */
-  if (look && !look.showing && (!look.tool || look.tool === "pointer")) return false;
+  if (look && (!look.tool || look.tool === "pointer")) return false;
   const on = mark.on;
   if (!on || front === undefined || front === null) return true;
   // The toolbar is not something else. Opening a popup makes the overlay the active

@@ -313,23 +313,67 @@ function placePopup(mark) {
  * reachable with `/` in the field, for anyone who would rather not leave the keyboard.
  */
 function modePick() {
-  const pick = document.createElement("select");
-  pick.className = "mode-pick-select";
-  pick.setAttribute("aria-label", "How the ask should be taken");
+  const box = document.createElement("div");
+  box.className = "mode-pick";
+
+  const now = MODES[state.mode] || MODES.plan;
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "mode-key";
+  open.setAttribute("aria-haspopup", "true");
+  open.setAttribute("aria-expanded", "false");
+  open.title = now.says;
+  const named = document.createElement("span");
+  named.textContent = now.label;
+  const mark = document.createElement("span");
+  mark.className = "caret";
+  mark.textContent = "▾";
+  open.append(named, mark);
+
+  // The same menu `/` opens in the field, because it is the same choice — one look for
+  // it, whichever way somebody reaches it. It was the platform's own `<select>`: a grey
+  // slab that ignored every token on the page and could not show what a mode does.
+  const menu = document.createElement("div");
+  menu.className = "ask-menu mode-menu";
+  menu.hidden = true;
   for (const [id, mode] of Object.entries(MODES)) {
-    const one = document.createElement("option");
-    one.value = id;
-    one.textContent = mode.label;
-    one.selected = state.mode === id;
-    pick.append(one);
+    const one = document.createElement("button");
+    one.type = "button";
+    one.className = "ask-menu-row";
+    one.dataset.on = String(id === state.mode);
+    const name = document.createElement("span");
+    name.className = "ask-menu-name";
+    name.textContent = mode.label;
+    const says = document.createElement("span");
+    says.className = "ask-menu-says";
+    says.textContent = mode.says;
+    one.title = mode.says;
+    one.append(name, says);
+    one.addEventListener("click", () => {
+      state.mode = id;
+      render();
+    });
+    menu.append(one);
   }
-  pick.title = (MODES[state.mode] || MODES.plan).says;
-  pick.addEventListener("change", () => {
-    state.mode = pick.value;
-    render();
+
+  const shut = () => {
+    menu.hidden = true;
+    open.setAttribute("aria-expanded", "false");
+  };
+  open.addEventListener("click", () => {
+    menu.hidden = !menu.hidden;
+    open.setAttribute("aria-expanded", String(!menu.hidden));
+  });
+  // A menu that only closes by choosing something is a menu somebody is stuck in.
+  menu.addEventListener("focusout", (event) => {
+    if (!box.contains(event.relatedTarget)) shut();
+  });
+  open.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") shut();
   });
 
-  return pick;
+  box.append(open, menu);
+  return box;
 }
 
 /**
@@ -1089,10 +1133,10 @@ function drawComposer(into) {
   const named = document.createElement("span");
   named.className = "popup-to-name";
   named.textContent = state.receiving.name || "Choose who receives";
-  const more = document.createElement("span");
-  more.className = "popup-to-more";
-  more.textContent = "⌄";
-  to.append(lit, named, more);
+  const mark = document.createElement("span");
+  mark.className = "caret";
+  mark.textContent = "▾";
+  to.append(lit, named, mark);
   to.title = "Choose who receives this";
   to.addEventListener("click", () => flyout("agents"));
   // What the toolbar can see, offered rather than done.

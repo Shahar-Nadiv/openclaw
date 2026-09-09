@@ -1148,32 +1148,40 @@ body {
  * `appearance: none` because the platform's own select is a grey slab that ignores every
  * token on this page.
  */
-.mode-pick-select {
+.mode-pick {
+  position: relative;
   flex-shrink: 0;
-  max-width: 92px;
-  padding: 3px 4px;
-  border: 0;
+}
+/*
+ * How the ask is taken, as a control the page draws rather than one the platform does.
+ * A `<select>` here was a grey slab that ignored every token on this page and could say
+ * nothing about what a mode means; the menu it opens is the same one `/` opens in the
+ * field, because it is the same choice.
+ */
+.mode-key {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
   border-radius: 7px;
-  background: none;
-  color: var(--text);
-  font-family: inherit;
   font-size: 11.5px;
-  appearance: none;
+  color: var(--text);
   cursor: pointer;
 }
-.mode-pick-select:hover {
+.mode-key:hover {
   color: var(--text-strong);
   background: var(--bg-hover);
 }
-.mode-pick-select:focus-visible {
+.mode-key:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
-/* The platform draws its option list, which is its own dark menu — but the closed
-   control is ours, so the text inside it has to be readable on our ground too. */
-.mode-pick-select option {
-  background: var(--popover);
-  color: var(--text-strong);
+/* Anchored to the key rather than stretched across the composer, and wide enough for the
+   sentence under each name. */
+.mode-menu {
+  left: 0;
+  right: auto;
+  width: 246px;
 }
 
 /* The field, and the menu that opens inside it. Anchored to the field rather than the
@@ -2000,10 +2008,6 @@ body {
    error, so it stays grey rather than going red. */
 .popup-to-lit[data-up="true"] {
   background: var(--ok);
-}
-.popup-to-more {
-  flex-shrink: 0;
-  color: var(--muted-dim);
 }
 
 /* Files and Schedule: what else could happen to this message, kept away from the row

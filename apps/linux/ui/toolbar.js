@@ -104,7 +104,7 @@ const state = {
   // The library window, while it is open, and which mark it will answer.
   library: null,
   // The Work window: what is waiting, what has been sent, and whether marks are drawn.
-  work: { open: false, showing: false, filter: "all" },
+  work: { open: false, filter: "all" },
   // What has been sent, newest first. Kept for the session — surviving a restart is a
   // store, and a store is decided on purpose rather than in passing.
   history: [],
@@ -295,6 +295,11 @@ function render() {
   // the same code, run again a moment later, put it back.
 
   if (state.open === "agents") drawWho();
+  // The Work panel is a menu like the others and obeys the same rule. It did not: it was
+  // placed here and filled below, so `within` measured whatever it held last time. A
+  // panel opened with six exchanges in it was fitted to the screen as though it still
+  // held none, and hung two hundred pixels off the bottom of the display.
+  drawWork();
   // Under the key that opened it, measured rather than guessed. Four hand-tuned
   // offsets used to stand here, and they were four chances to drift: adding the record
   // key pushed everything to its right along and left the design menu opening under a
@@ -319,7 +324,6 @@ function render() {
   drawMarks();
   drawPopup();
   drawLibrary();
-  drawWork();
   drawToasts();
   drawTrouble();
   // Left mounted while a popup is open, which is how a click off the popup is heard at

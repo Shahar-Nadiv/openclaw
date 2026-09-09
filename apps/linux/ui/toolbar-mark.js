@@ -322,9 +322,8 @@ function drawMarks() {
   // what it is pointing at.
   const front = state.front;
   const screen = screenSize();
-  // Whether marks are on the screen at all: while a tool is out, or when the Work window
-  // has been asked to show them.
-  const look = { tool: state.tool, showing: state.work.showing };
+  // Whether marks are on the screen at all: only while a tool is out.
+  const look = { tool: state.tool };
   for (const held of state.marks) {
     if (!showingNow(held, front, look)) continue;
     const mark = asDrawn(held, front, screen);

@@ -200,7 +200,7 @@ type ToolbarHelpers = {
   showingNow: (
     mark: { tool: string; on?: Anchor | null },
     front: InFront | null,
-    look?: { tool?: string; showing?: boolean },
+    look?: { tool?: string },
   ) => boolean;
   entrySaid: (entry: { said?: string; shots?: unknown[] }) => string;
   asDrawn: (mark: Held, front: InFront | null, screen: Size) => Held;
@@ -2320,13 +2320,17 @@ describe("the work leaves the screen", () => {
      * does not, and a screen carrying yesterday's annotations is a screen somebody works
      * around rather than one they work on.
      */
-    expect(showingNow(pin, front, { tool: "pointAt", showing: false })).toBe(true);
-    expect(showingNow(pin, front, { tool: "pointer", showing: false })).toBe(false);
-  });
+    expect(showingNow(pin, front, { tool: "pointAt" })).toBe(true);
+    expect(showingNow(pin, front, { tool: "pointer" })).toBe(false);
 
-  test("and always when the Work window has been asked to show them", () => {
-    // The way to look at what is waiting without picking a tool up.
-    expect(showingNow(pin, front, { tool: "pointer", showing: true })).toBe(true);
+    // There was a switch in the Work panel that kept them up. It is gone, and so is the
+    // flag behind it — a setting nothing can reach is a second answer to a question that
+    // now has one.
+    const ui = ["toolbar.js", "toolbar-dock.js", "toolbar-mark.js", "toolbar-work.js"]
+      .map((file) => readFileSync(new URL(`../apps/linux/ui/${file}`, import.meta.url), "utf8"))
+      .join("\n");
+    expect(ui, "the flag is gone from state, storage and drawing").not.toContain("work.showing");
+    expect(ui, "and so is the control").not.toContain("Show marks on screen");
   });
 
   test("a screenshot is not a mark on somebody's screen and is unaffected", () => {
@@ -2568,6 +2572,59 @@ describe("the work panel belongs to the toolbar", () => {
     expect(mark, "and does not invoke it a second way").not.toContain(
       'invoke("colai_take_keyboard")',
     );
+  });
+
+  test("how the ask is taken is the toolbar's own control, and the same one both ways", () => {
+    /*
+     * It was the platform's `<select>`: a grey slab that ignored every token on this page
+     * and could say nothing about what a mode means — the one control in the composer
+     * that looked like it belonged to a different program.
+     *
+     * The menu it opens is the menu `/` opens in the field, because it is the same
+     * choice, and two looks for one decision is how a panel stops reading as one thing.
+     */
+    const compose = readFileSync(
+      new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+      "utf8",
+    );
+    const pick = compose.slice(
+      compose.indexOf("function modePick("),
+      compose.indexOf("\n}", compose.indexOf("function modePick(")),
+    );
+
+    expect(pick, "no platform select").not.toContain('createElement("select")');
+    expect(pick, "no platform option").not.toContain('createElement("option")');
+    // Both ways of choosing a mode draw the same rows.
+    expect(pick, "the shared menu").toContain("ask-menu mode-menu");
+    expect(pick, "and the shared row").toContain("ask-menu-row");
+    // Every mode is offered, with what it does, read from the one table.
+    expect(pick, "read from MODES rather than listed again").toContain("Object.entries(MODES)");
+    expect(pick, "the name").toContain("mode.label");
+    expect(pick, "and what it does to the ask").toContain("mode.says");
+    // It can be got out of without choosing.
+    expect(pick, "Escape closes it").toContain('event.key === "Escape"');
+
+    expect(style, "the key is styled by us").toContain(".mode-key {");
+    expect(style, "and the retired select's rule is gone").not.toContain(".mode-pick-select");
+  });
+
+  test("the Work panel is filled before it is measured against the screen", () => {
+    /*
+     * `within` measures a menu to decide whether it fits, so a menu measured while empty
+     * is fitted to the screen as though it held nothing. Every other menu is drawn before
+     * the placement loop for exactly this reason; the Work panel was drawn after it.
+     *
+     * What that looked like: open the panel with six exchanges in it and it hung two
+     * hundred pixels off the bottom of the display, because it had been fitted to
+     * whatever it was holding the last time it was placed.
+     */
+    const drawn = render.indexOf("drawWork();");
+    const placed = render.indexOf("placeFlyout(node");
+    expect(drawn, "the panel must be drawn").toBeGreaterThan(-1);
+    expect(placed, "and placed").toBeGreaterThan(-1);
+    expect(drawn, "drawn before it is placed, like every other menu").toBeLessThan(placed);
+    // And only once: a second call after placement is a second size to be fitted to.
+    expect(render.split("drawWork();").length - 1, "one call, not two").toBe(1);
   });
 
   test("nothing is left over from when it floated", () => {
