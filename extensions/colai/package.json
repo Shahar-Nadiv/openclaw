@@ -1,0 +1,51 @@
+{
+  "name": "@colai/toolbar",
+  "version": "0.1.0",
+  "description": "Point at anything on screen and hand it to an agent",
+  "type": "module",
+  "keywords": [
+    "openclaw-plugin",
+    "toolbar",
+    "screen",
+    "annotation",
+    "linux"
+  ],
+  "os": [
+    "linux"
+  ],
+  "files": [
+    "index.ts",
+    "openclaw.plugin.json",
+    "scripts/",
+    "toolbar/ui/",
+    "toolbar/src-tauri/src/",
+    "toolbar/src-tauri/permissions/",
+    "toolbar/src-tauri/icons/",
+    "toolbar/src-tauri/Cargo.toml",
+    "toolbar/src-tauri/Cargo.lock",
+    "toolbar/src-tauri/build.rs",
+    "toolbar/src-tauri/tauri.conf.json"
+  ],
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "scripts": {
+    "postinstall": "node scripts/build-toolbar.mjs"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "install": {
+      "clawhubSpec": "colai/toolbar",
+      "defaultChoice": "clawhub",
+      "minHostVersion": ">=2026.9.1"
+    },
+    "compat": {
+      "pluginApi": ">=2026.9.1"
+    }
+  }
+}

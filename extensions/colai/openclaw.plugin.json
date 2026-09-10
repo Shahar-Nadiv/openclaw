@@ -1,0 +1,18 @@
+{
+  "id": "colai",
+  "name": "colai",
+  "description": "Point at anything on screen and hand it to an agent.",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "autostart": {
+        "type": "boolean",
+        "description": "Open the toolbar when OpenClaw starts. On by default."
+      }
+    }
+  }
+}

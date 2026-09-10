@@ -1,6 +1,6 @@
 // Exercises the pure decisions extracted from the Linux toolbar webview script.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import vm from "node:vm";
 import { describe, expect, it as test } from "vitest";
@@ -4545,5 +4545,99 @@ describe("clicking away closes what is open", () => {
     const pressing = mark.slice(mark.indexOf("function startGesture("));
     expect(pressing.slice(0, 1400)).toContain("state.work.open = false");
     expect(pressing, "nothing here clears what was typed").not.toContain('state.text = ""');
+  });
+});
+
+describe("what the plugin ships", () => {
+  const dir = new URL("../extensions/colai/", import.meta.url);
+  const manifest = JSON.parse(readFileSync(new URL("package.json", dir), "utf8")) as {
+    files: string[];
+    dependencies?: Record<string, string>;
+    scripts?: Record<string, string>;
+    openclaw?: { extensions?: string[] };
+  };
+
+  /*
+   * npm ships what `files` names and nothing else.
+   *
+   * The toolbar is compiled on the installing machine, from sources that travel inside
+   * the package — so a path left out of this list is not a missing nicety, it is a build
+   * that cannot happen on anybody's machine but this one, and it fails after install
+   * rather than in any check here. These name the things the install actually opens.
+   */
+  const shipped = (path: string) =>
+    manifest.files.some((entry) => path === entry || path.startsWith(entry));
+
+  test("everything the build reads is in the package", () => {
+    for (const needed of [
+      "toolbar/src-tauri/Cargo.toml",
+      "toolbar/src-tauri/Cargo.lock",
+      "toolbar/src-tauri/build.rs",
+      "toolbar/src-tauri/tauri.conf.json",
+      "toolbar/src-tauri/src/",
+      "toolbar/src-tauri/permissions/",
+      // The pages are embedded into the binary at compile time, so they have to be here
+      // before cargo runs, not after.
+      "toolbar/ui/",
+    ]) {
+      expect(shipped(needed), `${needed} is missing from package.json files`).toBe(true);
+    }
+  });
+
+  test("everything OpenClaw reads is in the package", () => {
+    // The manifest is how the plugin is discovered without running it, and the entry is
+    // what runs. Either one absent is an installed plugin that does nothing.
+    expect(shipped("openclaw.plugin.json")).toBe(true);
+    expect(shipped("index.ts")).toBe(true);
+    expect(manifest.openclaw?.extensions).toEqual(["./index.ts"]);
+  });
+
+  test("the script the install runs travels with it", () => {
+    expect(manifest.scripts?.postinstall).toBe("node scripts/build-toolbar.mjs");
+    expect(shipped("scripts/build-toolbar.mjs")).toBe(true);
+    expect(existsSync(new URL("scripts/build-toolbar.mjs", dir))).toBe(true);
+  });
+
+  test("what index.ts imports, the package declares", () => {
+    // A plugin gets its own dependencies; nothing hoists them from the host.
+    const entry = readFileSync(new URL("index.ts", dir), "utf8");
+    for (const [, from] of entry.matchAll(/^import[^"']+["']([^"']+)["'];$/gm)) {
+      if (from.startsWith("node:") || from.startsWith(".") || from.startsWith("openclaw/")) {
+        continue;
+      }
+      const pkg = from.startsWith("@") ? from.split("/").slice(0, 2).join("/") : from.split("/")[0];
+      expect(manifest.dependencies?.[pkg], `${pkg} is imported but not depended on`).toBeTruthy();
+    }
+  });
+
+  test("installing inside a checkout compiles nothing", () => {
+    /*
+     * Measured, not assumed: `pnpm install` in this repo runs every workspace project's
+     * postinstall, and this one compiles Rust. Without the guard a routine dependency
+     * install costs everybody working on OpenClaw several minutes of cargo.
+     *
+     * Running the real script is the proof — the guard returns before cargo is reached,
+     * so this test is as cheap as the thing it is protecting.
+     */
+    const ran = spawnSync(process.execPath, [new URL("scripts/build-toolbar.mjs", dir).pathname], {
+      encoding: "utf8",
+    });
+    expect(ran.status).toBe(0);
+    expect(ran.stderr, "the build script must not compile from inside the source tree").toContain(
+      "cargo build",
+    );
+  });
+
+  test("it looks for the binary cargo actually writes", () => {
+    /*
+     * Two files decide this name and neither can see the other: `[[bin]] name` in
+     * Cargo.toml puts the file in `target/<profile>/`, and `index.ts` spawns it by path.
+     * Renaming the crate would leave a plugin that installs, builds, and starts nothing.
+     */
+    const cargo = readFileSync(new URL("toolbar/src-tauri/Cargo.toml", dir), "utf8");
+    const named = /\[\[bin\]\][\s\S]*?name\s*=\s*"([^"]+)"/.exec(cargo);
+    expect(named?.[1]).toBeTruthy();
+    const entry = readFileSync(new URL("index.ts", dir), "utf8");
+    expect(entry).toContain(`"${named?.[1]}"`);
   });
 });
