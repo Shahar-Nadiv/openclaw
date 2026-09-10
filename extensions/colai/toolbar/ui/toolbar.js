@@ -60,6 +60,8 @@ const state = {
   // Null while the lists are good, a message while the Gateway could not be asked. The
   // two are different facts and the rail says which.
   whoTrouble: null,
+  // Why the Work panel has no conversations to show, when the reason is not "none".
+  workTrouble: null,
   // Who gets what you point at. An agent is somebody who could answer; a session is a
   // conversation already underway. Which of the two it is has to be carried, because
   // the same name can belong to both and a send has to know which it is addressing.
@@ -755,8 +757,8 @@ async function start() {
   listenForDrops();
   listenForDrag();
   recall();
-  // What was sent from this toolbar before it was last closed. Read before anything is
-  // drawn, so the panel opens on a day's work rather than on "nothing yet".
+  // What only this toolbar knew about those conversations — which marks travelled, what
+  // was pointed at. Read before the list arrives, so it is ready to be laid over it.
   recallWork();
   place();
 
@@ -845,9 +847,9 @@ async function start() {
     render();
   }).catch(() => {});
 
-  // And what the agents said back while it was not running. After the listeners, because
-  // this is a round trip per conversation and nothing else should wait on it.
-  void catchUpOnWork();
+  // And every conversation OpenClaw is holding. One round trip, and it is what the Work
+  // panel is a list of — the toolbar's own record is laid over it rather than being it.
+  void loadWork();
 
   void loadWho();
   // And what every agent is doing, from now until the window closes.

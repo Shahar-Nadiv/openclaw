@@ -1206,6 +1206,18 @@ function stateOf(entry, runs) {
   const turns = (entry.answer && entry.answer.turns) || [];
   if (turns.length > 0 && asksSomething(lastTurn(entry.answer) || "")) return "asking";
   if ((runs || []).some((run) => run.sessionKey === entry.sessionKey)) return "working";
+  /*
+   * What the Gateway says about a conversation this toolbar has not opened.
+   *
+   * Most rows in the panel are now conversations colai never sent to, and their turns are
+   * only fetched when somebody opens one. Until then the transcript cannot answer "is it
+   * working" or "is it waiting on me" — but the session list already did, in the same
+   * round trip that drew the row.
+   */
+  if (turns.length === 0) {
+    if (entry.busy) return "working";
+    if (entry.unread) return "asking";
+  }
   // No answer object at all means nobody is watching this one, which is not "still
   // working" — it is "nothing more is coming here". Saying otherwise would be a glow
   // over nothing, the same lie the rail's light was fixed for.

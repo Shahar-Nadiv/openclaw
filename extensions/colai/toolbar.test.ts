@@ -4734,65 +4734,99 @@ describe("the way back when the toolbar is put away", () => {
   });
 });
 
-describe("the work outlives the toolbar", () => {
+describe("the work panel is a view of OpenClaw's conversations", () => {
   const dir = new URL("./toolbar/ui/", import.meta.url);
   const work = readFileSync(new URL("toolbar-work.js", dir), "utf8");
   const send = readFileSync(new URL("toolbar-send.js", dir), "utf8");
+  const rail = readFileSync(new URL("toolbar-rail.js", dir), "utf8");
   const page = readFileSync(new URL("toolbar.js", dir), "utf8");
 
-  test("what was sent is remembered, and what came back is not", () => {
+  test("the list comes from the Gateway, not from what this toolbar remembers", () => {
     /*
-     * Two facts with two owners. What was sent — which marks, which words, to whom — is
-     * this toolbar's own knowledge and nothing else records it, so it is kept here. What
-     * came back belongs to the Gateway, which held the transcript and went on receiving
-     * while the toolbar was not running; storing that too would mean a panel confidently
-     * showing a conversation that had moved on without it.
+     * The first attempt at this had it the other way round: it remembered what colai had
+     * sent, then asked the Gateway for the replies *to those conversations only*. With
+     * nothing remembered there were no conversations to ask about, so it fetched nothing
+     * and the panel said "nothing yet" over a Gateway full of work.
+     *
+     * OpenClaw holds the conversations. This page holds the few things only it knows
+     * about them.
+     */
+    const loading = work.slice(work.indexOf("async function loadWork"));
+    expect(loading).toContain('invoke("colai_sessions"');
+    expect(work, "the fan-out that needed a populated record is gone").not.toContain(
+      "catchUpOnWork",
+    );
+    // Asked at startup, and again on the ticker that already runs forever: conversations
+    // move without this toolbar — an agent answers, somebody works in the Control UI.
+    expect(page).toContain("void loadWork()");
+    expect(rail).toContain("void loadWork()");
+  });
+
+  test("a row is drawn without its transcript", () => {
+    /*
+     * The whole panel is one round trip. `colai_sessions` carries the name, the last
+     * thing said and when — so forty rows are not forty transcripts down a socket, and
+     * almost every row is one nobody opens.
+     */
+    const receivers = readFileSync(
+      new URL("./toolbar/src-tauri/src/colai_receivers.rs", import.meta.url),
+      "utf8",
+    );
+    const session = receivers.slice(receivers.indexOf("pub(crate) struct ToolbarSession"));
+    const fields = session.slice(0, session.indexOf("\n}"));
+    expect(fields, "the line under the name").toContain("pub preview:");
+    expect(fields, "for ordering, and for saying 4m").toContain("pub at:");
+  });
+
+  test("the transcript arrives when somebody opens one", () => {
+    const opening = work.slice(work.indexOf("fold.addEventListener"));
+    expect(opening.slice(0, 400)).toContain("void loadTurns(entry)");
+    const turns = work.slice(work.indexOf("async function loadTurns"));
+    expect(turns).toContain('invoke("colai_said"');
+    // Once. The reply events keep it current after that, and re-fetching on every open
+    // would be a round trip for a row somebody is toggling shut.
+    expect(turns.slice(0, 300)).toContain("entry.answer) return");
+  });
+
+  test("what is remembered is only what OpenClaw cannot know", () => {
+    /*
+     * Which marks travelled, how many, and whether a send was refused before it left.
+     * The words themselves are the Gateway's and are read from it — a stored transcript
+     * is a transcript that goes stale the moment the conversation moves on.
      */
     const remembered = work.slice(work.indexOf("function rememberWork"));
     const kept = remembered.slice(0, remembered.indexOf("\n}"));
-    for (const field of ["at", "who", "sessionKey", "said", "count", "marks", "blocked"]) {
-      expect(kept, `${field} is what the panel shows`).toContain(`${field}:`);
+    for (const field of ["sessionKey", "count", "marks", "blocked"]) {
+      expect(kept, `${field} is colai's own`).toContain(`${field}:`);
     }
-    expect(kept, "an answer stored is an answer that goes stale").not.toContain("answer:");
-    expect(kept, "the pictures are far too big to keep, and nothing reads them").not.toContain(
-      "shots",
-    );
+    expect(kept, "a stored answer is a stale one").not.toContain("answer:");
+    expect(kept, "only what this toolbar sent is its to remember").toContain("entry.mine");
   });
 
-  test("it is written when the record changes, not when the screen redraws", () => {
-    // A restart between the send and the next frame is exactly what this exists for.
+  test("a send marks itself as ours, so it can be laid over the list", () => {
+    // Both paths: the one that landed, and the one refused before it left.
+    expect([...send.matchAll(/mine: true/g)].length).toBe(2);
     expect(send).toContain("rememberWork()");
   });
 
-  test("the panel opens on the work, then fills in the answers", () => {
-    // Recalled before anything is drawn, so it opens on a day's work rather than on
-    // "nothing yet"; the round trip per conversation happens after.
-    const start = page.indexOf("recallWork()");
-    const catchUp = page.indexOf("catchUpOnWork()");
-    expect(start).toBeGreaterThan(-1);
-    expect(catchUp).toBeGreaterThan(start);
-  });
-
-  test("one ask per conversation, not one per entry", () => {
-    // Several sends to the same agent share a session, and asking per entry would fetch
-    // the same transcript four times.
-    const catchUp = work.slice(work.indexOf("async function catchUpOnWork"));
-    expect(catchUp).toContain("new Set(");
-    expect(catchUp).toContain('invoke("colai_said"');
-  });
-
-  test("rewind still only offers the prompts", () => {
+  test("a row says what it is doing before its transcript exists", () => {
     /*
-     * `colai_said` and `colai_points` read the same transcript, and it now carries both
-     * halves of the conversation. Rewinding to an answer would discard the prompt that
-     * produced it and leave the conversation asking a question nobody had asked.
+     * Most rows are conversations colai never sent to, and their turns are only fetched
+     * on open — so until then the transcript cannot say whether one is running or waiting
+     * on somebody. The session list already did, in the round trip that drew the row.
      */
-    const rust = readFileSync(
-      new URL("./toolbar/src-tauri/src/colai_send.rs", import.meta.url),
-      "utf8",
-    );
-    const points = rust.slice(rust.indexOf("pub(crate) async fn colai_points"));
-    expect(points.slice(0, points.indexOf("\n}"))).toContain("filter(|point| point.mine)");
+    const tools = readFileSync(new URL("toolbar-tools.js", dir), "utf8");
+    const deciding = tools.slice(tools.indexOf("function stateOf"));
+    const body = deciding.slice(0, deciding.indexOf("\n}"));
+    expect(body).toContain("turns.length === 0");
+    expect(body).toContain("entry.busy");
+    expect(body).toContain("entry.unread");
+  });
+
+  test("an empty panel says whether it is empty or merely unanswered", () => {
+    // A list nobody answered looks exactly like a list with nothing in it.
+    const loading = work.slice(work.indexOf("async function loadWork"));
+    expect(loading.slice(0, 900)).toContain("state.workTrouble");
   });
 });
 
@@ -4835,5 +4869,25 @@ describe("bringing the rail back", () => {
     // moment they rejoin the layout — which is a jump unless it is transitioned.
     const rail = sheet.slice(sheet.indexOf(".rail {"), sheet.indexOf(".rail {") + 400);
     expect(rail).toContain("transition: gap var(--fold-time)");
+  });
+});
+
+describe("an empty work panel says which kind of empty it is", () => {
+  const work = readFileSync(new URL("./toolbar/ui/toolbar-work.js", import.meta.url), "utf8");
+
+  test("no conversations and nobody answering are different news", () => {
+    /*
+     * The panel is a view of OpenClaw's conversations now, so "Nothing sent yet" is a
+     * claim about OpenClaw — and it must not be made when the question was never
+     * answered. A Gateway that is down would otherwise look exactly like a Gateway with
+     * no work in it, which is the report that started all of this.
+     */
+    const empty = work.slice(work.indexOf("function nothingYet"));
+    const body = empty.slice(0, empty.indexOf("\n}"));
+    const refused = body.indexOf("state.workTrouble");
+    const nothing = body.indexOf('"Nothing sent yet"');
+    expect(refused).toBeGreaterThan(-1);
+    expect(nothing).toBeGreaterThan(-1);
+    expect(refused, "the claim about OpenClaw comes second").toBeLessThan(nothing);
   });
 });

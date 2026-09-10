@@ -250,9 +250,21 @@ function nothingYet() {
   box.className = "work-empty";
   const title = document.createElement("p");
   title.className = "work-empty-title";
-  title.textContent = "Nothing sent yet";
   const said = document.createElement("p");
   said.className = "work-empty-said";
+  /*
+   * An empty list and a list nobody answered look identical, and they are not the same
+   * news at all: one means there is no work, the other means the panel cannot see it.
+   * The panel is a view of OpenClaw's conversations now, so "nothing yet" is a claim
+   * about OpenClaw — and it must not be made when nobody has answered.
+   */
+  if (state.workTrouble) {
+    title.textContent = "Could not read the conversations";
+    said.textContent = `${state.workTrouble} — the toolbar will keep asking.`;
+    box.append(title, said);
+    return box;
+  }
+  title.textContent = "Nothing sent yet";
   // Marking led, and led wrongly: it made pointing at the screen a step you had to take
   // before you were allowed to ask for anything. It is the toolbar's own trick, not its
   // toll — the field below sends words on their own.
@@ -379,6 +391,9 @@ function askLine(entry) {
   fold.append(mark, words);
   fold.addEventListener("click", () => {
     entry.showAsk = !entry.showAsk;
+    // Opening a conversation is when its transcript is worth fetching. Almost every row
+    // in this panel is one nobody opens, and drawing the list never needed one.
+    if (entry.showAsk) void loadTurns(entry);
     render();
   });
   return fold;
@@ -639,117 +654,146 @@ function flyToWork(marks) {
 }
 
 /*
- * The work outlives the toolbar.
+ * The work outlives the toolbar, because it was never the toolbar's to begin with.
  *
- * Everything the Work panel shows used to live in `state.history` and nowhere else, so
- * restarting the toolbar — an update, a Gateway restart, a reboot — emptied it. What
- * somebody sent this morning was gone, and the panel opened on "nothing yet" over a day's
- * work.
+ * The panel used to be a record this page kept of its own sends, and nothing else. So a
+ * restart emptied it, and the first version of this fix made it worse in a way that was
+ * hard to see: it remembered what colai had sent, then asked the Gateway for the replies
+ * *to those conversations only*. With nothing remembered there were no conversations to
+ * ask about, and the panel said "nothing yet" over a Gateway full of work.
  *
- * Two halves, because the two facts have different owners. What was *sent* is this
- * toolbar's own knowledge — which marks, which words, to whom — and nothing else records
- * it, so it is remembered here. What came *back* belongs to the Gateway, which has the
- * transcript and kept receiving while the toolbar was not running, so it is asked for
- * rather than stored. Storing the answers too would mean a panel confidently showing a
- * conversation that had moved on without it.
+ * The relationship is the other way round. **OpenClaw holds the conversations. The
+ * toolbar holds the few things only it knows about them** — which marks travelled, what
+ * region was pointed at, whether a send was refused before it left. So the list comes
+ * from `colai_sessions`, and what is remembered here is laid over the top of it.
  */
+
+/** What survives a restart: what only this toolbar knew, never the conversation itself. */
 const WORK_REMEMBERED = "colai.toolbar.work";
 
 /**
- * How much is kept.
+ * How much of that is kept.
  *
- * The panel is a record of recent work, not an archive: the Gateway is the archive, and
- * a hundred entries is already more than anybody scrolls. It also bounds what goes into
- * `localStorage`, which is a few megabytes for the whole origin and shared with where
- * the rail was put.
+ * It is a handful of fields per send, not a transcript — the transcripts are OpenClaw's
+ * and are asked for. This bounds what goes into `localStorage`, which is a few megabytes
+ * for the whole origin and shared with where the rail was put.
  */
-const WORK_KEPT = 100;
+const WORK_KEPT = 200;
 
-/** What survives a restart: what was sent, never what came back. */
+/** Sends this toolbar made, by session key, so they can be laid over the Gateway's list. */
+let ourOwnWork = [];
+
+/** What was sent from here, written the moment it lands rather than on the next render. */
 function rememberWork() {
+  ourOwnWork = state.history
+    .filter((entry) => entry.mine)
+    .slice(0, WORK_KEPT)
+    .map((entry) => ({
+      at: entry.at,
+      sessionKey: entry.sessionKey,
+      said: entry.said,
+      count: entry.count,
+      marks: entry.marks,
+      blocked: entry.blocked,
+    }));
   try {
-    window.localStorage.setItem(
-      WORK_REMEMBERED,
-      JSON.stringify(
-        state.history.slice(0, WORK_KEPT).map((entry) => ({
-          at: entry.at,
-          who: entry.who,
-          sessionKey: entry.sessionKey,
-          said: entry.said,
-          count: entry.count,
-          marks: entry.marks,
-          blocked: entry.blocked,
-        })),
-      ),
-    );
+    window.localStorage.setItem(WORK_REMEMBERED, JSON.stringify(ourOwnWork));
   } catch {
-    // A full or refusing store is not a reason to stop working. The panel keeps what it
-    // has for this session, and the Gateway still has the conversations either way.
+    // A full or refusing store is not a reason to stop working. The conversations are
+    // still OpenClaw's and still listed; only the marks beside them would be missing.
   }
 }
 
-/** What was sent before this toolbar started, as far as it recorded it. */
+/** And read back, before anything is drawn. */
 function recallWork() {
-  let kept;
   try {
-    kept = JSON.parse(window.localStorage.getItem(WORK_REMEMBERED) || "[]");
+    const kept = JSON.parse(window.localStorage.getItem(WORK_REMEMBERED) || "[]");
+    ourOwnWork = Array.isArray(kept) ? kept.filter((one) => one && one.sessionKey) : [];
   } catch {
-    return;
+    ourOwnWork = [];
   }
-  if (!Array.isArray(kept)) return;
-  state.history = kept
-    .filter((entry) => entry && typeof entry.said === "string")
-    .map((entry) => ({
-      at: Number(entry.at) || Date.now(),
-      who: typeof entry.who === "string" ? entry.who : "?",
-      sessionKey: typeof entry.sessionKey === "string" ? entry.sessionKey : null,
-      said: entry.said,
-      count: Number(entry.count) || 0,
-      marks: Array.isArray(entry.marks) ? entry.marks.filter((m) => typeof m === "string") : [],
-      blocked: typeof entry.blocked === "string" ? entry.blocked : undefined,
-      // Filled from the Gateway a moment later. Not remembered: the conversation went on
-      // without this toolbar, and a stored answer would be a stale one shown as current.
-      answer: null,
-    }));
 }
 
 /**
- * And what the agents said back, from the Gateway that was listening.
+ * Every conversation OpenClaw knows, newest first, with what colai knows laid over it.
  *
- * One ask per conversation, not per entry: several sends to the same agent share a
- * session, and asking once per entry would be the same transcript fetched four times.
- * Failures are quiet — a conversation the Gateway will not talk about leaves an entry
- * showing what was sent, which is what it showed a moment ago anyway.
+ * One round trip for the whole panel. `colai_sessions` carries the name, the last thing
+ * said in it and when — so a row needs no transcript to be drawn, and forty rows are not
+ * forty transcripts down a socket. The turns arrive when somebody opens one.
  */
-async function catchUpOnWork() {
-  const keys = [...new Set(state.history.map((entry) => entry.sessionKey).filter(Boolean))];
-  for (const sessionKey of keys) {
-    let turns;
-    try {
-      turns = await invoke("colai_said", { sessionKey });
-    } catch {
-      continue;
-    }
-    if (!Array.isArray(turns) || turns.length === 0) continue;
-    for (const entry of state.history) {
-      if (entry.sessionKey !== sessionKey || entry.answer) continue;
-      /*
-       * The turns after the prompt this entry is about.
-       *
-       * Matched on time rather than on the words: the same question asked twice is two
-       * entries with one text, and the Gateway's own ordering is what tells them apart.
-       * An entry with no timestamp to match on takes the whole conversation, which is
-       * the honest answer to "I do not know which part of this was yours".
-       */
-      const after = turns.filter((turn) => !turn.mine && (!entry.at || (turn.at ?? 0) >= entry.at));
-      if (after.length === 0) continue;
-      entry.answer = {
-        sessionKey,
-        who: entry.who,
-        turns: after.map((turn) => ({ said: turn.said, mine: false })),
-        open: false,
-      };
-    }
+async function loadWork() {
+  let sessions;
+  try {
+    sessions = await invoke("colai_sessions", { receiving: null });
+  } catch (error) {
+    // Said, not swallowed: an empty panel that is empty because nobody answered looks
+    // exactly like an empty panel with nothing in it.
+    state.workTrouble = error && error.message ? error.message : String(error);
+    render();
+    return;
   }
+  state.workTrouble = null;
+  if (!Array.isArray(sessions)) return;
+
+  // Keep the turns already fetched, and anything sent in this session of the toolbar that
+  // the Gateway has not caught up with yet.
+  const known = new Map(state.history.map((entry) => [entry.sessionKey, entry]));
+
+  state.history = sessions
+    .map((session) => {
+      const had = known.get(session.key);
+      // What colai did in this conversation, most recent first. Only the toolbar knows
+      // it: the Gateway has the words, not which region of a screen they were about.
+      const ours = ourOwnWork
+        .filter((one) => one.sessionKey === session.key)
+        .sort((a, b) => (b.at || 0) - (a.at || 0))[0];
+      return {
+        sessionKey: session.key,
+        who: session.title,
+        at: session.at || (had && had.at) || Date.now(),
+        // The conversation's own last line. A send colai made says what colai said
+        // instead, because that is the thing somebody is looking for it by.
+        said: (ours && ours.said) || session.preview || "",
+        // Laid over: the marks that travelled, and how many.
+        count: ours ? ours.count : 0,
+        marks: ours ? ours.marks : [],
+        blocked: ours ? ours.blocked : undefined,
+        // Whether this is one of ours, which is what decides if it is written back.
+        mine: Boolean(ours) || Boolean(had && had.mine),
+        // From the same round trip, so a row can say "working" before its transcript
+        // has ever been fetched.
+        busy: Boolean(session.busy),
+        unread: Boolean(session.unread),
+        // Kept if it was already open; otherwise filled in when somebody opens it.
+        answer: (had && had.answer) || null,
+      };
+    })
+    .sort((a, b) => (b.at || 0) - (a.at || 0));
+  render();
+}
+
+/**
+ * The turns in one conversation, when somebody opens it.
+ *
+ * Here rather than with the list because it is a transcript per row, and almost every row
+ * is one nobody opens. Fetched once and kept for as long as the toolbar runs; the reply
+ * events keep it current after that.
+ */
+async function loadTurns(entry) {
+  if (!entry || !entry.sessionKey || entry.answer) return;
+  let turns;
+  try {
+    turns = await invoke("colai_said", { sessionKey: entry.sessionKey });
+  } catch {
+    // A conversation the Gateway will not talk about keeps the row it already had.
+    return;
+  }
+  if (!Array.isArray(turns)) return;
+  entry.answer = {
+    sessionKey: entry.sessionKey,
+    who: entry.who,
+    turns: turns.map((turn) => ({ said: turn.said, mine: Boolean(turn.mine) })),
+    open: true,
+  };
   render();
 }

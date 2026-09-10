@@ -155,6 +155,8 @@ async function sendMarks(ids) {
         count: going.length,
         answer: null,
         blocked: refused.says,
+        // Ours, so it is written back and laid over the Gateway's list next time.
+        mine: true,
       },
       ...state.history,
     ];
@@ -291,6 +293,9 @@ async function sendMarks(ids) {
         // squares. Taken here because this is the last moment the marks still exist.
         marks: going.map((mark) => labelOf(mark)).filter(Boolean),
         answer,
+        // Ours. The Gateway will list this conversation too, and what it cannot know —
+        // which regions of which screen it was about — is laid over it from here.
+        mine: true,
       },
       ...state.history,
     ];

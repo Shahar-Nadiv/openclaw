@@ -93,6 +93,17 @@ pub(crate) struct ToolbarSession {
     pub busy: bool,
     pub unread: bool,
     pub receiving: bool,
+    /// The last thing said in it, which is what the Work panel writes under the name.
+    ///
+    /// Carried here rather than fetched per conversation: a panel of forty rows would
+    /// otherwise be forty transcripts down a socket to draw forty single lines. The
+    /// transcript itself is asked for when somebody opens one.
+    pub preview: Option<String>,
+    /// When it last did anything, for ordering the panel and for saying "4m".
+    ///
+    /// Activity first and the record's own timestamp second: a conversation nobody has
+    /// spoken in since Tuesday is a Tuesday conversation, whatever was written to it since.
+    pub at: Option<i64>,
 }
 
 /// The conversations this machine is holding.
@@ -123,6 +134,16 @@ pub(crate) async fn colai_sessions(
             busy: matches!(row.status.as_deref(), Some("running") | Some("queued")),
             unread: row.unread.unwrap_or(false),
             receiving: chosen == Some(row.key.as_str()),
+            // Not folded into `title`: a nameless conversation falls back to its preview
+            // for a name, and a row whose name and subtitle are the same line reads as a
+            // mistake. Kept apart so the page can tell whether it has two facts or one.
+            preview: row
+                .last_message_preview
+                .as_deref()
+                .map(str::trim)
+                .filter(|said| !said.is_empty())
+                .map(str::to_string),
+            at: row.last_activity_at.or(row.updated_at),
         })
         .collect())
 }

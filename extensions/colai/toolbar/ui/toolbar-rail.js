@@ -564,6 +564,10 @@ async function watchEverything() {
   if (state.whoTrouble || state.allowed.length === 0) {
     void loadWho();
   }
+  // And the conversations, which move without this toolbar: an agent answers, somebody
+  // works in the Control UI, a session is started from a terminal. One round trip on the
+  // same ticker that already runs forever.
+  void loadWork();
   try {
     const work = await invoke("colai_at_work");
     const before = state.atWork;
