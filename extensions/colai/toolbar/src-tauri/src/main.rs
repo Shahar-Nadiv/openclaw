@@ -42,6 +42,7 @@ fn main() {
         .setup(|app| {
             app.manage(gateway_ws::GatewayClient::new());
             app.manage(colai::ShapeState::default());
+            app.manage(colai::ControlUi::default());
             app.manage(colai_capture::MarkShots::default());
 
             // The overlay, straight away: this program is the toolbar, so there is
@@ -72,6 +73,11 @@ fn main() {
                 };
                 match gateway::ensure_ready(&found) {
                     Ok(ready) => {
+                        // Where OpenClaw itself lives, kept for the claw to open. Said
+                        // once, here, because this is the only moment it is known.
+                        handle
+                            .state::<colai::ControlUi>()
+                            .found(ready.dashboard_url.clone());
                         handle
                             .state::<gateway_ws::GatewayClient>()
                             .configure(&handle, ready.gateway_ws.clone());

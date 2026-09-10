@@ -53,24 +53,6 @@ impl GatewaySnapshot {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum GatewayAction {
-    Start,
-    Stop,
-    Restart,
-}
-
-impl GatewayAction {
-    fn command(self) -> &'static str {
-        match self {
-            Self::Start => "start",
-            Self::Stop => "stop",
-            Self::Restart => "restart",
-        }
-    }
-}
-
 pub struct ReadyGateway {
     pub snapshot: GatewaySnapshot,
     pub dashboard_url: String,
@@ -216,14 +198,6 @@ fn wait_until_reachable(cli: &OpenClawCli) -> Result<GatewaySnapshot, String> {
     Err(snapshot
         .detail
         .unwrap_or_else(|| "Gateway did not become reachable.".to_string()))
-}
-
-pub fn act(cli: &OpenClawCli, action: GatewayAction) -> Result<GatewaySnapshot, String> {
-    run_service_command(cli, action.command())?;
-    if matches!(action, GatewayAction::Stop) {
-        return status(cli);
-    }
-    wait_until_reachable(cli)
 }
 
 pub fn dashboard(cli: &OpenClawCli, snapshot: GatewaySnapshot) -> Result<ReadyGateway, String> {

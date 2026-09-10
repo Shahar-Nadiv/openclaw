@@ -739,23 +739,6 @@ pub(crate) fn colai_summon(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Put the toolbar on screen, or take it away.
-///
-/// What the tray's own entry does. Both directions from one place, because the tray only
-/// ever offered the way in — and the toolbar can be put away from its own keyboard, so
-/// somebody who did that was left looking for a way back through a menu that said
-/// nothing about it.
-pub(crate) fn toggle_toolbar(app: &AppHandle) -> Result<(), String> {
-    let showing = app
-        .get_webview_window(OVERLAY_LABEL)
-        .is_some_and(|window| window.is_visible().unwrap_or(false));
-    if showing {
-        colai_release(app.clone())
-    } else {
-        colai_summon(app.clone())
-    }
-}
-
 /// Tell the tray whether the toolbar is on screen.
 ///
 /// There is no tray here yet. It ticked a menu item in the OpenClaw desktop app this was
@@ -786,26 +769,49 @@ pub(crate) fn colai_release(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Settings — the second and last window Colai has.
+/// Where the Control UI is, once the Gateway has said.
 ///
-/// The application's main window, shown, rather than a window of its own. Colai's
-/// Settings page *is* `index.html`, which is what the main window loads, so building a
-/// second window here produced two identical Settings — one behind the other, each with
-/// its own state, and closing the front one revealing a stale copy of the same screen.
+/// Kept from the moment the connection is configured, because that is the only moment
+/// anybody knows it: the URL comes back from the `openclaw` CLI along with the socket and
+/// the token, and asking again later would mean asking the CLI again.
+#[derive(Default)]
+pub(crate) struct ControlUi(std::sync::Mutex<Option<String>>);
+
+impl ControlUi {
+    pub(crate) fn found(&self, url: String) {
+        if let Ok(mut held) = self.0.lock() {
+            *held = Some(url);
+        }
+    }
+
+    fn url(&self) -> Option<String> {
+        self.0.lock().ok().and_then(|held| held.clone())
+    }
+}
+
+/// OpenClaw itself, opened in a browser.
 ///
-/// It also keeps the promise the rest of this file makes. "Two windows and no more" is
-/// the whole shape of Colai's GUI; a third that happens to look like the second is not
-/// a smaller violation of that for being invisible most of the time.
+/// This used to show the desktop app's own window, because the toolbar lived inside that
+/// app and Colai's settings page *was* that window. Standing alone there is no such
+/// window and pressing the claw said so — "There is no main window to show" — which is
+/// true and useless.
+///
+/// The Control UI is the thing somebody wanted, and the Gateway named it at connection.
+///
+/// It answers even when it cannot help. The claw is the one control that survives the
+/// rail being put away, so a press on it that does nothing at all is the toolbar looking
+/// broken at the moment it has least to show for itself.
 #[tauri::command]
 pub(crate) fn colai_open_settings(app: AppHandle) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "There is no main window to show.".to_string())?;
-    let _ = window.show();
-    let _ = window.unminimize();
-    window
-        .set_focus()
-        .map_err(|error| format!("Could not show settings: {error}"))
+    let Some(url) = app.state::<ControlUi>().url() else {
+        return Err(
+            "No Gateway yet, so there is nowhere to open. Start OpenClaw and try again."
+                .to_string(),
+        );
+    };
+    tauri_plugin_opener::OpenerExt::opener(&app)
+        .open_url(url, None::<&str>)
+        .map_err(|error| format!("Could not open OpenClaw: {error}"))
 }
 
 /// Which edges of this monitor the desktop's own chrome is using.

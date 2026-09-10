@@ -52,8 +52,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(35);
-#[cfg(any(target_os = "linux", test))]
-const SUSPEND_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 const DRIVER_TICK: Duration = Duration::from_secs(1);
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 const PAIRING_REQUIRED_DETAIL_CODE: &str = "PAIRING_REQUIRED";
@@ -1975,6 +1973,23 @@ fn gateway_surface_open(app: &AppHandle) -> bool {
             .is_some()
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn is_loopback_ws_url(raw: &str) -> bool {
+    let Ok(url) = Url::parse(raw) else {
+        return false;
+    };
+    if !matches!(url.scheme(), "ws" | "wss") {
+        return false;
+    }
+    url.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .trim_matches(['[', ']'])
+                .parse::<IpAddr>()
+                .is_ok_and(|address| address.is_loopback())
+    })
+}
+
 fn driver_should_run(surface_open: bool, sleep_active: bool) -> bool {
     // Sleep cycles temporarily activate the driver; outside that narrow window the
     // connection lives exactly as long as a surface that needs it.
@@ -2439,23 +2454,6 @@ where
     }
 }
 
-#[cfg(any(target_os = "linux", test))]
-fn is_loopback_ws_url(raw: &str) -> bool {
-    let Ok(url) = Url::parse(raw) else {
-        return false;
-    };
-    if !matches!(url.scheme(), "ws" | "wss") {
-        return false;
-    }
-    url.host_str().is_some_and(|host| {
-        host.eq_ignore_ascii_case("localhost")
-            || host
-                .trim_matches(['[', ']'])
-                .parse::<IpAddr>()
-                .is_ok_and(|address| address.is_loopback())
-    })
-}
-
 async fn request_agents_list<F>(
     socket: &mut GatewaySocket,
     budget: Duration,
@@ -2835,7 +2833,10 @@ mod tests {
         commands
             .send(DriverCommand::Request {
                 request: GatewayRequest::AgentsList,
-                budget: Some(SUSPEND_REQUEST_TIMEOUT),
+                // Any budget short enough that the test does not sit through the
+                // default fifteen seconds. It borrowed the suspend timeout, which was
+                // named for a thing this build does not do.
+                budget: Some(Duration::from_secs(3)),
                 reply,
             })
             .await
