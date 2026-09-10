@@ -183,6 +183,24 @@ const state = {
 /* ── drawing the whole thing ─────────────────────────────────────────────── */
 
 /**
+ * A press on this page, outside whatever is open.
+ *
+ * Controls are left alone. A key on the rail already means something — picking a tool,
+ * toggling the very panel this would be closing — and closing on the way down only to
+ * have the click reopen it on the way up is how a button stops working.
+ */
+function pressedSomewhereElse(event) {
+  const at = event.target;
+  if (!at || typeof at.closest !== "function") return;
+  // Inside the thing that is open is not outside it.
+  if (state.work.open && el.work.contains(at)) return;
+  if (state.library !== null && el.library.contains(at)) return;
+  if (state.open !== null && at.closest(".flyout")) return;
+  if (at.closest("button, input, select, textarea, label, .grip")) return;
+  shutWhatIsOpen();
+}
+
+/**
  * Close whatever is hanging off the rail, because attention went elsewhere.
  *
  * A panel that stays open over a desktop somebody has moved on from is furniture. What
@@ -540,6 +558,21 @@ function boxAround(node) {
 /** Start listening for the single letters that pick a tool, and the ways out. */
 function listenForKeys() {
   window.addEventListener("keydown", onKey);
+  // A press that does reach this page, somewhere that is not the thing that is open.
+  //
+  // The other half of the same rule. Clicks on somebody's editor never arrive here and
+  // are noticed by the front window changing instead; these are the ones that do arrive
+  // — the overlay claims a rectangle around everything it drew, so the rail's own
+  // background, the space beside a panel and the glass all land on this page and used to
+  // land on nothing. That is why closing worked in some places and not others.
+  //
+  // Capture, so it is heard before whatever is underneath decides what the press meant.
+  document.addEventListener("pointerdown", pressedSomewhereElse, true);
+  // And the third route: this window losing the keyboard. The front watcher only speaks
+  // when the front *changes*, so a press on the window that was already in front behind
+  // the overlay says nothing to it — but the overlay still loses focus, and that is the
+  // same fact. Cheap, and it costs nothing when the other two have already closed things.
+  window.addEventListener("blur", () => shutWhatIsOpen());
 }
 
 function onKey(event) {
@@ -722,7 +755,6 @@ async function start() {
     .catch(() => {});
 
   void listen("colai:front", (event) => {
-    const was = state.front;
     state.front = (event && event.payload) || null;
     // Somebody clicked another window, which on a desktop is what "outside" means.
     //
@@ -730,9 +762,13 @@ async function start() {
     // catches clicks where it drew something, which is the whole reason the desktop is
     // still usable underneath it. But the window that press landed on comes to the
     // front, and that is the same news arriving by another route.
-    const left = state.front && state.front.ours === false;
-    const cameFromUs = !was || was.ours !== false;
-    if (left && cameFromUs) shutWhatIsOpen();
+    //
+    // Whatever was in front before does not come into it. It was tempting to close only
+    // when the overlay itself had been front — but the window manager may refuse this
+    // window the keyboard, and then the overlay is never front and nothing ever closes.
+    // The watcher only speaks when the answer changes, so a change to somebody else's
+    // window is a window switch however it started.
+    if (state.front && state.front.ours === false) shutWhatIsOpen();
     redrawMarksSoon();
   }).catch(() => {});
 

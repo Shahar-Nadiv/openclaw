@@ -4369,10 +4369,13 @@ describe("clicking away closes what is open", () => {
      * another route, and it costs nothing because the toolbar already watches for it.
      */
     const listening = page.slice(page.indexOf('listen("colai:front"'));
-    expect(listening.slice(0, 900)).toContain("shutWhatIsOpen()");
-    expect(listening.slice(0, 900), "only when the front is somebody else's").toMatch(
+    expect(listening.slice(0, 1400)).toContain("shutWhatIsOpen()");
+    expect(listening.slice(0, 1400), "only when the front is somebody else's").toMatch(
       /state\.front\.ours === false/,
     );
+    // And not conditioned on the overlay having been front first: the window manager may
+    // refuse this window the keyboard, and then it never is, and nothing ever closes.
+    expect(listening.slice(0, 1400)).not.toMatch(/was\.ours/);
 
     const shutting = page.slice(page.indexOf("function shutWhatIsOpen("));
     expect(shutting.slice(0, 700), "the Work panel").toContain("state.work.open = false");
@@ -4399,6 +4402,36 @@ describe("clicking away closes what is open", () => {
         after.indexOf('document.body.style.visibility = ""'),
       "lowered with the same `finally` that gives the page back",
     ).toBe(true);
+  });
+
+  test("a press that does reach the page is heard wherever it lands", () => {
+    /*
+     * The other half. The overlay claims a rectangle around everything it drew, so the
+     * rail's own background, the space beside an open panel and the glass all land on
+     * this page — and landed on nothing. That is why closing worked in some places
+     * around the Work window and not others.
+     */
+    expect(page).toContain('document.addEventListener("pointerdown", pressedSomewhereElse, true)');
+    const pressing = page.slice(page.indexOf("function pressedSomewhereElse("));
+
+    // Inside what is open is not outside it.
+    expect(pressing.slice(0, 800)).toContain("el.work.contains(at)");
+    expect(pressing.slice(0, 800)).toContain("el.library.contains(at)");
+    expect(pressing.slice(0, 800)).toContain('at.closest(".flyout")');
+
+    // A control already means something. Closing on the way down only to have the click
+    // reopen it on the way up is how a button stops working — the send key toggles this
+    // very panel.
+    expect(pressing.slice(0, 800)).toMatch(
+      /at\.closest\("button, input, select, textarea, label, \.grip"\)/,
+    );
+  });
+
+  test("losing the keyboard counts as leaving, whatever the front watcher saw", () => {
+    // The front watcher only speaks when the front *changes*, so a press on the window
+    // that was already behind the overlay says nothing to it. The overlay still loses
+    // focus, and that is the same fact arriving a third way.
+    expect(page).toMatch(/addEventListener\("blur", \(\) => shutWhatIsOpen\(\)\)/);
   });
 
   test("a press on the glass closes it too, and keeps what was typed", () => {
