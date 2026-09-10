@@ -14,7 +14,7 @@ import { describe, expect, it as test } from "vitest";
  * running all of it is the honest thing to do.
  */
 const toolbarSource = readFileSync(
-  new URL("../apps/linux/ui/toolbar-tools.js", import.meta.url),
+  new URL("../extensions/colai/toolbar/ui/toolbar-tools.js", import.meta.url),
   "utf8",
 );
 assert.ok(toolbarSource.includes("function summaryFor"), "toolbar decisions file");
@@ -28,7 +28,7 @@ assert.ok(toolbarSource.includes("function summaryFor"), "toolbar decisions file
  * of the source that enforces them rather than restated here.
  */
 const marksSource = readFileSync(
-  new URL("../apps/linux/src-tauri/src/colai_marks.rs", import.meta.url),
+  new URL("../extensions/colai/toolbar/src-tauri/src/colai_marks.rs", import.meta.url),
   "utf8",
 );
 assert.ok(marksSource.includes("fn crop_for"), "the mark geometry file");
@@ -1057,7 +1057,10 @@ describe("the design family", () => {
     // the popup that opened after you had already marked something — so somebody
     // looking for a design system opened the menu, did not see one, and concluded the
     // toolbar could not do it. Each kind names itself now, and needs an icon to do so.
-    const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+    const rail = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-rail.js", import.meta.url),
+      "utf8",
+    );
     const drawn = new Set(
       [...rail.matchAll(/^ {2}(\w+):$|^ {2}(\w+):\s*'/gm)].map((found) => found[1] ?? found[2]),
     );
@@ -1243,7 +1246,10 @@ describe("scheduling what was marked", () => {
 });
 
 describe("folding the exact tools on the rail", () => {
-  const sheet = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+  const sheet = readFileSync(
+    new URL("../extensions/colai/toolbar/ui/toolbar.css", import.meta.url),
+    "utf8",
+  );
 
   test("the page and the stylesheet agree on how long it takes", () => {
     // The page re-measures the clickable region every frame while the rail is changing
@@ -1282,7 +1288,10 @@ describe("folding the exact tools on the rail", () => {
   test("nothing about this lives in a menu", () => {
     // Folding is a thing the rail does to itself. A menu would be a second place to go
     // looking for a tool, which is worse than the long rail it was meant to fix.
-    const page = readFileSync(new URL("../apps/linux/ui/toolbar.html", import.meta.url), "utf8");
+    const page = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar.html", import.meta.url),
+      "utf8",
+    );
     expect(page).not.toContain("fly-exact");
   });
 });
@@ -1367,7 +1376,10 @@ describe("what the drawing tool draws with", () => {
   });
 
   test("every pen is on the menu under its own mark", () => {
-    const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+    const rail = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-rail.js", import.meta.url),
+      "utf8",
+    );
     const drawn = new Set(
       [...rail.matchAll(/^ {2}(\w+):$|^ {2}(\w+):\s*'/gm)].map((found) => found[1] ?? found[2]),
     );
@@ -1388,7 +1400,7 @@ describe("the glass and the picture draw the same mark", () => {
    * does the second drawing rather than restated here.
    */
   const capture = readFileSync(
-    new URL("../apps/linux/src-tauri/src/colai_capture.rs", import.meta.url),
+    new URL("../extensions/colai/toolbar/src-tauri/src/colai_capture.rs", import.meta.url),
     "utf8",
   );
   const number = (name: string) => {
@@ -1439,7 +1451,9 @@ describe("nothing is reachable only by right click", () => {
    * a right click opens must also be opened by an ordinary press of something visible.
    */
   const page = ["toolbar-rail.js", "toolbar-compose.js", "toolbar.js"]
-    .map((file) => readFileSync(new URL(`../apps/linux/ui/${file}`, import.meta.url), "utf8"))
+    .map((file) =>
+      readFileSync(new URL(`../extensions/colai/toolbar/ui/${file}`, import.meta.url), "utf8"),
+    )
     .join("\n");
 
   const RIGHT_CLICK = /addEventListener\("contextmenu"[\s\S]{0,400}?\}\);/g;
@@ -1883,7 +1897,7 @@ describe("the page and the commands it calls", () => {
    *
    * Neither language can see the other, so the check has to read both from source.
    */
-  const dir = new URL("../apps/linux/", import.meta.url);
+  const dir = new URL("../extensions/colai/toolbar/", import.meta.url);
   const page = [
     "toolbar.js",
     "toolbar-rail.js",
@@ -2013,8 +2027,14 @@ describe("knowing an agent is working", () => {
     // A pure helper cannot catch this on its own: the defect was the assignment, and it
     // is only wrong because of what the stylesheet does with a bare attribute. So the
     // two files are asserted against each other.
-    const style = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
-    const render = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
+    const style = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar.css", import.meta.url),
+      "utf8",
+    );
+    const render = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar.js", import.meta.url),
+      "utf8",
+    );
     // The stylesheet does key an animation off the attribute simply being present.
     expect(style).toMatch(/\.home-key\[data-mood\]\s*\{[^}]*animation:/);
     // So the render must delete it rather than assign a falsy value to it.
@@ -2480,45 +2500,11 @@ describe("a mark belongs to what it was marked on", () => {
   });
 });
 
-describe("the tray entry for the toolbar", () => {
-  const src = new URL("../apps/linux/src-tauri/src/", import.meta.url);
-  const tray = readFileSync(new URL("tray.rs", src), "utf8");
-  const colai = readFileSync(new URL("colai.rs", src), "utf8");
-
-  test("it is named for the thing, not for one of its tools", () => {
-    // It said "Point at something", which described the first tool on the rail. By now
-    // that is one of nine, and the entry is how somebody finds the toolbar itself.
-    expect(tray).toContain('"Toolbar"');
-    expect(tray).not.toContain('"Point at something"');
-  });
-
-  test("it puts the toolbar away as well as fetching it", () => {
-    // The toolbar can be dismissed from its own keyboard, so an entry that could only
-    // turn it on left somebody hunting for a way back through a menu that said nothing
-    // about it.
-    const pressed = tray.slice(tray.indexOf("COLAI_ID => {"));
-    expect(pressed.slice(0, 200)).toContain("toggle_toolbar");
-  });
-
-  test("and both ways of moving it tell the tray, so the tick cannot lie", () => {
-    /*
-     * The tick is only worth having if it is true. Showing and hiding are the only two
-     * things that move the toolbar, and Escape reaches the second one without the menu
-     * being involved — so a tray that learned only from its own clicks would be
-     * confidently wrong the first time anybody pressed it.
-     */
-    const inside = (fn: string) => {
-      const from = colai.indexOf(`fn ${fn}(`);
-      expect(from, fn).toBeGreaterThan(-1);
-      return colai.slice(from, colai.indexOf("\n}\n", from));
-    };
-    expect(inside("colai_summon")).toContain("tray_says_toolbar(&app, true)");
-    expect(inside("colai_release")).toContain("tray_says_toolbar(&app, false)");
-  });
-});
-
 describe("the crab walks in one place, by one rule", () => {
-  const css = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+  const css = readFileSync(
+    new URL("../extensions/colai/toolbar/ui/toolbar.css", import.meta.url),
+    "utf8",
+  );
 
   test("nothing on the desktop waits with a crab any more", () => {
     /*
@@ -2530,7 +2516,7 @@ describe("the crab walks in one place, by one rule", () => {
      * mascot is drawn in more than one size regardless.
      */
     const answers = readFileSync(
-      new URL("../apps/linux/ui/toolbar-answers.js", import.meta.url),
+      new URL("../extensions/colai/toolbar/ui/toolbar-answers.js", import.meta.url),
       "utf8",
     );
     expect(answers).not.toContain("answer-dot");
@@ -2576,7 +2562,9 @@ describe("the work leaves the screen", () => {
     // flag behind it — a setting nothing can reach is a second answer to a question that
     // now has one.
     const ui = ["toolbar.js", "toolbar-dock.js", "toolbar-mark.js", "toolbar-work.js"]
-      .map((file) => readFileSync(new URL(`../apps/linux/ui/${file}`, import.meta.url), "utf8"))
+      .map((file) =>
+        readFileSync(new URL(`../extensions/colai/toolbar/ui/${file}`, import.meta.url), "utf8"),
+      )
       .join("\n");
     expect(ui, "the flag is gone from state, storage and drawing").not.toContain("work.showing");
     expect(ui, "and so is the control").not.toContain("Show marks on screen");
@@ -2605,7 +2593,7 @@ describe("the work leaves the screen", () => {
 });
 
 describe("where the work is assembled", () => {
-  const dir = new URL("../apps/linux/ui/", import.meta.url);
+  const dir = new URL("../extensions/colai/toolbar/ui/", import.meta.url);
   const rail = readFileSync(new URL("toolbar-rail.js", dir), "utf8");
   const send = readFileSync(new URL("toolbar-send.js", dir), "utf8");
   const compose = readFileSync(new URL("toolbar-compose.js", dir), "utf8");
@@ -2641,8 +2629,14 @@ describe("where the work is assembled", () => {
 });
 
 describe("an answer says that it arrived", () => {
-  const page = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
-  const toast = readFileSync(new URL("../apps/linux/ui/toolbar-toast.js", import.meta.url), "utf8");
+  const page = readFileSync(
+    new URL("../extensions/colai/toolbar/ui/toolbar.js", import.meta.url),
+    "utf8",
+  );
+  const toast = readFileSync(
+    new URL("../extensions/colai/toolbar/ui/toolbar-toast.js", import.meta.url),
+    "utf8",
+  );
 
   test("once per answer, not once per turn", () => {
     /*
@@ -2671,7 +2665,7 @@ describe("an answer says that it arrived", () => {
 });
 
 describe("a mark goes somewhere rather than vanishing", () => {
-  const dir = new URL("../apps/linux/ui/", import.meta.url);
+  const dir = new URL("../extensions/colai/toolbar/ui/", import.meta.url);
   const work = readFileSync(new URL("toolbar-work.js", dir), "utf8");
   const rail = readFileSync(new URL("toolbar-rail.js", dir), "utf8");
   const page = readFileSync(new URL("toolbar.js", dir), "utf8");
@@ -2705,7 +2699,7 @@ describe("a mark goes somewhere rather than vanishing", () => {
 });
 
 describe("nothing the toolbar says about itself outstays it", () => {
-  const dir = new URL("../apps/linux/ui/", import.meta.url);
+  const dir = new URL("../extensions/colai/toolbar/ui/", import.meta.url);
   const page = readFileSync(new URL("toolbar.js", dir), "utf8");
   const toast = readFileSync(new URL("toolbar-toast.js", dir), "utf8");
 
@@ -2738,9 +2732,18 @@ describe("nothing the toolbar says about itself outstays it", () => {
 });
 
 describe("the work panel belongs to the toolbar", () => {
-  const page = readFileSync(new URL("../apps/linux/ui/toolbar.html", import.meta.url), "utf8");
-  const render = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
-  const style = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+  const page = readFileSync(
+    new URL("../extensions/colai/toolbar/ui/toolbar.html", import.meta.url),
+    "utf8",
+  );
+  const render = readFileSync(
+    new URL("../extensions/colai/toolbar/ui/toolbar.js", import.meta.url),
+    "utf8",
+  );
+  const style = readFileSync(
+    new URL("../extensions/colai/toolbar/ui/toolbar.css", import.meta.url),
+    "utf8",
+  );
 
   test("it lives inside the rail, so it travels with it", () => {
     /*
@@ -2774,8 +2777,14 @@ describe("the work panel belongs to the toolbar", () => {
   test("only one panel hangs off the rail at a time", () => {
     // They are anchored to the same keys now, so two open at once would sit on top of
     // each other. `toggleWork` already closed any flyout; this is the other half.
-    const work = readFileSync(new URL("../apps/linux/ui/toolbar-work.js", import.meta.url), "utf8");
-    const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+    const work = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-work.js", import.meta.url),
+      "utf8",
+    );
+    const rail = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-rail.js", import.meta.url),
+      "utf8",
+    );
     // Each opener shuts the other, whether it does it on one line or inside a block.
     const opening = (source: string, after: string) => {
       const at = source.indexOf(after);
@@ -2800,9 +2809,18 @@ describe("the work panel belongs to the toolbar", () => {
      * The composer is the panel's main field and it is there whether anything is marked
      * or not. So every door into a surface with a field in it asks.
      */
-    const work = readFileSync(new URL("../apps/linux/ui/toolbar-work.js", import.meta.url), "utf8");
-    const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
-    const mark = readFileSync(new URL("../apps/linux/ui/toolbar-mark.js", import.meta.url), "utf8");
+    const work = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-work.js", import.meta.url),
+      "utf8",
+    );
+    const rail = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-rail.js", import.meta.url),
+      "utf8",
+    );
+    const mark = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-mark.js", import.meta.url),
+      "utf8",
+    );
 
     expect(work, "one door, so it cannot be half-wired").toContain("function reachTheKeyboard(");
     for (const [where, source, after] of [
@@ -2833,7 +2851,7 @@ describe("the work panel belongs to the toolbar", () => {
      * choice, and two looks for one decision is how a panel stops reading as one thing.
      */
     const compose = readFileSync(
-      new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+      new URL("../extensions/colai/toolbar/ui/toolbar-compose.js", import.meta.url),
       "utf8",
     );
     const pick = compose.slice(
@@ -2889,7 +2907,10 @@ describe("the work panel belongs to the toolbar", () => {
      */
     // `render` is toolbar.js, `page` is toolbar.html and `style` is the stylesheet, all
     // already read by this describe.
-    const dock = readFileSync(new URL("../apps/linux/ui/toolbar-dock.js", import.meta.url), "utf8");
+    const dock = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-dock.js", import.meta.url),
+      "utf8",
+    );
 
     // One key is exempt from the fold, and it is the claw.
     expect(render).toContain("state.away");
@@ -2959,7 +2980,10 @@ describe("the work panel belongs to the toolbar", () => {
      * started. The distance is tracked across the whole gesture, not measured at the
      * end, so a rail carried across the desk and back is still a drag.
      */
-    const dock = readFileSync(new URL("../apps/linux/ui/toolbar-dock.js", import.meta.url), "utf8");
+    const dock = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-dock.js", import.meta.url),
+      "utf8",
+    );
     expect(dock, "no dblclick listener to be swallowed").not.toContain(
       'addEventListener("dblclick"',
     );
@@ -2975,7 +2999,9 @@ describe("the work panel belongs to the toolbar", () => {
     // One canonical way for it to be placed. A leftover drag handle or remembered corner
     // would be a second one, quietly disagreeing with the first.
     const all = ["toolbar-work.js", "toolbar-tools.js", "toolbar-dock.js", "toolbar.js"]
-      .map((file) => readFileSync(new URL(`../apps/linux/ui/${file}`, import.meta.url), "utf8"))
+      .map((file) =>
+        readFileSync(new URL(`../extensions/colai/toolbar/ui/${file}`, import.meta.url), "utf8"),
+      )
       .join("\n");
     for (const gone of ["startWorkDrag", "placeWork", "workSpot", "besideTheRail", "work.at"]) {
       expect(all, `${gone} should be gone`).not.toContain(gone);
@@ -2984,7 +3010,10 @@ describe("the work panel belongs to the toolbar", () => {
 });
 
 describe("hidden means hidden", () => {
-  const css = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+  const css = readFileSync(
+    new URL("../extensions/colai/toolbar/ui/toolbar.css", import.meta.url),
+    "utf8",
+  );
 
   test("one rule outranks every display in the file", () => {
     /*
@@ -3082,7 +3111,7 @@ describe("a window lands on a screen, not across two", () => {
      * silently, and only sometimes.
      */
     const library = readFileSync(
-      new URL("../apps/linux/ui/toolbar-library.js", import.meta.url),
+      new URL("../extensions/colai/toolbar/ui/toolbar-library.js", import.meta.url),
       "utf8",
     );
     const draw = library.slice(library.indexOf("function drawLibrary"));
@@ -3099,7 +3128,10 @@ describe("a window lands on a screen, not across two", () => {
   test("a press outside the library closes it before anything can be drawn", () => {
     // Without this the glass underneath took the press and began another mark behind the
     // window, so pressing away from it did not dismiss it — it quietly drew.
-    const mark = readFileSync(new URL("../apps/linux/ui/toolbar-mark.js", import.meta.url), "utf8");
+    const mark = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-mark.js", import.meta.url),
+      "utf8",
+    );
     const gesture = mark.slice(mark.indexOf("function startGesture"));
     const closes = gesture.indexOf("closeLibrary()");
     const draws = gesture.indexOf("addMark(");
@@ -3213,11 +3245,11 @@ describe("copying what is here, or bringing something in", () => {
     // it belongs to the agent doing the work once, on the one thing somebody chose.
     // Asserted across both languages, because either could reach for it.
     const rust = readFileSync(
-      new URL("../apps/linux/src-tauri/src/colai_library.rs", import.meta.url),
+      new URL("../extensions/colai/toolbar/src-tauri/src/colai_library.rs", import.meta.url),
       "utf8",
     );
     const library = readFileSync(
-      new URL("../apps/linux/ui/toolbar-library.js", import.meta.url),
+      new URL("../extensions/colai/toolbar/ui/toolbar-library.js", import.meta.url),
       "utf8",
     );
     for (const [what, source] of [
@@ -3232,7 +3264,10 @@ describe("copying what is here, or bringing something in", () => {
 });
 
 describe("one light for every agent at once", () => {
-  const css = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+  const css = readFileSync(
+    new URL("../extensions/colai/toolbar/ui/toolbar.css", import.meta.url),
+    "utf8",
+  );
 
   test("nothing known yet is no light, not a green one", () => {
     // Before the Gateway has answered, the toolbar knows nothing about anybody's work.
@@ -3294,9 +3329,13 @@ describe("one light for every agent at once", () => {
    * global, where that is a fatal redeclaration.
    */
   function everyPageScript(): { page: string; script: string; isModule: boolean }[] {
-    const dir = new URL("../apps/linux/ui/", import.meta.url);
+    const dir = new URL("../extensions/colai/toolbar/ui/", import.meta.url);
     const pages = readdirSync(dir).filter((file) => file.endsWith(".html"));
-    expect(pages.length).toBeGreaterThan(1);
+    // One page, and there used to be three: this directory held the OpenClaw desktop
+    // app's own window and Quick Chat's as well. The toolbar stands alone now. What the
+    // count guards is that the sweep found something at all — a directory that has moved
+    // and a directory with nothing to check look identical from here.
+    expect(pages).toEqual(["toolbar.html"]);
     const found: { page: string; script: string; isModule: boolean }[] = [];
     for (const page of pages) {
       const html = readFileSync(new URL(page, dir), "utf8");
@@ -3312,7 +3351,10 @@ describe("one light for every agent at once", () => {
   }
 
   function sourceOfScript(script: string): string {
-    return readFileSync(new URL(`../apps/linux/ui/${script}`, import.meta.url), "utf8");
+    return readFileSync(
+      new URL(`../extensions/colai/toolbar/ui/${script}`, import.meta.url),
+      "utf8",
+    );
   }
 
   test("every script every page loads actually parses", () => {
@@ -3392,12 +3434,17 @@ describe("one light for every agent at once", () => {
      * The tokens now come from `ui/src/styles/base.css` under the same names. This pins
      * the retired literals so they cannot quietly come back one rule at a time.
      */
-    const style = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+    const style = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar.css", import.meta.url),
+      "utf8",
+    );
     const scripts = ["toolbar.js", "toolbar-mark.js", "toolbar-rail.js", "toolbar-work.js"]
-      .map((file) => readFileSync(new URL(`../apps/linux/ui/${file}`, import.meta.url), "utf8"))
+      .map((file) =>
+        readFileSync(new URL(`../extensions/colai/toolbar/ui/${file}`, import.meta.url), "utf8"),
+      )
       .join("\n");
     const rust = readFileSync(
-      new URL("../apps/linux/src-tauri/src/colai_capture.rs", import.meta.url),
+      new URL("../extensions/colai/toolbar/src-tauri/src/colai_capture.rs", import.meta.url),
       "utf8",
     );
 
@@ -3433,7 +3480,10 @@ describe("one light for every agent at once", () => {
      * One spec, from the design: radius 10, a fill inside a border, and the primary
      * darker than the accent that outlines it.
      */
-    const style = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+    const style = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar.css", import.meta.url),
+      "utf8",
+    );
     const ruleFor = (selector: string) => {
       const at = style.indexOf(`\n${selector} {`);
       expect(at, `${selector} must have a rule of its own`).toBeGreaterThan(-1);
@@ -3470,7 +3520,7 @@ describe("one light for every agent at once", () => {
      * beside the page — a missing `@font-face` falls back silently and looks like the
      * change did nothing, so pin the files as well as the rules.
      */
-    const ui = new URL("../apps/linux/ui/", import.meta.url);
+    const ui = new URL("../extensions/colai/toolbar/ui/", import.meta.url);
     const faces = readFileSync(new URL("fonts/fonts.css", ui), "utf8");
     for (const family of ["Instrument Sans", "JetBrains Mono"]) {
       expect(faces, `${family} needs an @font-face`).toContain(family);
@@ -3612,11 +3662,11 @@ describe("one light for every agent at once", () => {
      * and a picker that only *offers* safe paths is not a gate at all.
      */
     const files = readFileSync(
-      new URL("../apps/linux/src-tauri/src/colai_files.rs", import.meta.url),
+      new URL("../extensions/colai/toolbar/src-tauri/src/colai_files.rs", import.meta.url),
       "utf8",
     );
     const send = readFileSync(
-      new URL("../apps/linux/src-tauri/src/colai_send.rs", import.meta.url),
+      new URL("../extensions/colai/toolbar/src-tauri/src/colai_send.rs", import.meta.url),
       "utf8",
     );
 
@@ -3644,7 +3694,7 @@ describe("one light for every agent at once", () => {
      * placeholder carries both, which is the larger space and the one being read.
      */
     const compose = readFileSync(
-      new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+      new URL("../extensions/colai/toolbar/ui/toolbar-compose.js", import.meta.url),
       "utf8",
     );
     const said = compose.matchAll(/text\.placeholder = ([\s\S]{0,240}?);\n/g);
@@ -3664,7 +3714,7 @@ describe("one light for every agent at once", () => {
      * taking it would send whatever half-typed word the menu was offering to complete.
      */
     const compose = readFileSync(
-      new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+      new URL("../extensions/colai/toolbar/ui/toolbar-compose.js", import.meta.url),
       "utf8",
     );
     const at = compose.indexOf('text.addEventListener("keydown"');
@@ -3712,10 +3762,13 @@ describe("one light for every agent at once", () => {
     };
 
     const compose = readFileSync(
-      new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+      new URL("../extensions/colai/toolbar/ui/toolbar-compose.js", import.meta.url),
       "utf8",
     );
-    const work = readFileSync(new URL("../apps/linux/ui/toolbar-work.js", import.meta.url), "utf8");
+    const work = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-work.js", import.meta.url),
+      "utf8",
+    );
 
     // The ask field: keeps the state, wakes the key, and never redraws itself.
     const ask = bodyOf(compose, "function askField(");
@@ -3750,9 +3803,12 @@ describe("one light for every agent at once", () => {
      *
      * The clock was doing it to them twice a minute all by itself, to move one word.
      */
-    const work = readFileSync(new URL("../apps/linux/ui/toolbar-work.js", import.meta.url), "utf8");
+    const work = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-work.js", import.meta.url),
+      "utf8",
+    );
     const compose = readFileSync(
-      new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+      new URL("../extensions/colai/toolbar/ui/toolbar-compose.js", import.meta.url),
       "utf8",
     );
 
@@ -3793,7 +3849,10 @@ describe("one light for every agent at once", () => {
      * Placement asks how big the rail is. What may be clicked is a different question,
      * and the wrapper is still the right answer to that one.
      */
-    const dock = readFileSync(new URL("../apps/linux/ui/toolbar-dock.js", import.meta.url), "utf8");
+    const dock = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-dock.js", import.meta.url),
+      "utf8",
+    );
     expect(dock, "nothing that places the rail may measure the wrapper").not.toContain(
       "el.wrap.getBoundingClientRect()",
     );
@@ -3801,7 +3860,10 @@ describe("one light for every agent at once", () => {
     expect(dock).toContain("el.rail.getBoundingClientRect()");
 
     // And the clickable region still takes the whole wrapper, panel included.
-    const page = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
+    const page = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar.js", import.meta.url),
+      "utf8",
+    );
     expect(page).toContain("boxAround(el.wrap)");
   });
 
@@ -3812,7 +3874,10 @@ describe("one light for every agent at once", () => {
      * run going ten minutes still claimed to have started a moment ago. A panel meant to
      * stay open is exactly where a frozen clock does the most damage.
      */
-    const work = readFileSync(new URL("../apps/linux/ui/toolbar-work.js", import.meta.url), "utf8");
+    const work = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-work.js", import.meta.url),
+      "utf8",
+    );
     expect(work).toContain("function keepTime()");
     // Ticking only while it is open, and stopped when it is not: a timer left running
     // behind a closed panel is a redraw nobody can see.
@@ -3827,7 +3892,10 @@ describe("one light for every agent at once", () => {
      * while the prompt above it sat at twelve and truncated mid-sentence. The thing you
      * opened the window to read was the one thing nobody had sized.
      */
-    const style = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+    const style = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar.css", import.meta.url),
+      "utf8",
+    );
     const said = style.slice(
       style.indexOf(".work-said {"),
       style.indexOf("}", style.indexOf(".work-said {")),
@@ -3843,7 +3911,10 @@ describe("one light for every agent at once", () => {
      * allowed to shrink far enough to scroll at all, which is the part that is easy to
      * leave out and impossible to see in the rules.
      */
-    const style = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+    const style = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar.css", import.meta.url),
+      "utf8",
+    );
     const log = style.slice(
       style.indexOf(".work-log {"),
       style.indexOf("}", style.indexOf(".work-log {")),
@@ -3869,7 +3940,7 @@ describe("one light for every agent at once", () => {
      * happens where the window is made.
      */
     const overlay = readFileSync(
-      new URL("../apps/linux/src-tauri/src/colai.rs", import.meta.url),
+      new URL("../extensions/colai/toolbar/src-tauri/src/colai.rs", import.meta.url),
       "utf8",
     );
     const making = overlay.slice(
@@ -3886,7 +3957,10 @@ describe("one light for every agent at once", () => {
     // A crab merrily scuttling under a red light would be the toolbar contradicting
     // itself. The gait itself is shared now — the pin waiting on a reply walks too — so
     // the mood that earns it is decided in the page rather than in the selector.
-    const page = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
+    const page = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar.js", import.meta.url),
+      "utf8",
+    );
     expect(page).toContain('mood === "working"');
     // And the mood it walks on is the same one the glow is keyed to, so the gait and the
     // colour can never disagree about whether anything is happening.
@@ -3904,7 +3978,10 @@ describe("one light for every agent at once", () => {
 });
 
 describe("what the send key can do with what is marked", () => {
-  const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+  const rail = readFileSync(
+    new URL("../extensions/colai/toolbar/ui/toolbar-rail.js", import.meta.url),
+    "utf8",
+  );
 
   test("a right click asks which, rather than choosing one", () => {
     // It used to drop straight into the schedule, so the second thing this key does was
@@ -3927,9 +4004,12 @@ describe("what the send key can do with what is marked", () => {
 });
 
 describe("a list longer than the screen", () => {
-  const css = readFileSync(new URL("../apps/linux/ui/toolbar.css", import.meta.url), "utf8");
+  const css = readFileSync(
+    new URL("../extensions/colai/toolbar/ui/toolbar.css", import.meta.url),
+    "utf8",
+  );
   const compose = readFileSync(
-    new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+    new URL("../extensions/colai/toolbar/ui/toolbar-compose.js", import.meta.url),
     "utf8",
   );
 
@@ -3957,7 +4037,10 @@ describe("a list longer than the screen", () => {
 });
 
 describe("every tool has a key somebody can find", () => {
-  const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+  const rail = readFileSync(
+    new URL("../extensions/colai/toolbar/ui/toolbar-rail.js", import.meta.url),
+    "utf8",
+  );
   const keys = new Set([...rail.matchAll(/\bkey\("(\w+)"/g)].map((found) => found[1]!));
   const folds = (rail.match(/const EXACT = \[([^\]]+)\]/)?.[1] ?? "")
     .split(",")
@@ -4227,11 +4310,14 @@ describe("how the next send will be answered", () => {
     expect(MODE_FIRST).toBe("build");
     expect(MODES[MODE_FIRST]?.label).toBe("Build");
 
-    const page = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
+    const page = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar.js", import.meta.url),
+      "utf8",
+    );
     expect(page, "the toolbar starts in the default").toContain("mode: MODE_FIRST");
 
     const tools = readFileSync(
-      new URL("../apps/linux/ui/toolbar-tools.js", import.meta.url),
+      new URL("../extensions/colai/toolbar/ui/toolbar-tools.js", import.meta.url),
       "utf8",
     );
     expect(tools, "and an unknown mode is still read as Plan").toContain(
@@ -4244,7 +4330,7 @@ describe("how the next send will be answered", () => {
     // that only knows off and low. Dropped rather than sent, because sending it is how a
     // setting silently does nothing.
     const compose = readFileSync(
-      new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+      new URL("../extensions/colai/toolbar/ui/toolbar-compose.js", import.meta.url),
       "utf8",
     );
     expect(compose).toMatch(
@@ -4261,7 +4347,7 @@ describe("how the next send will be answered", () => {
     // A model missing because nobody has signed in is something to go and fix. One
     // absent from the list is something somebody concludes this toolbar cannot do.
     const compose = readFileSync(
-      new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+      new URL("../extensions/colai/toolbar/ui/toolbar-compose.js", import.meta.url),
       "utf8",
     );
     expect(compose).toContain("one.disabled = model.available === false");
@@ -4277,7 +4363,10 @@ describe("how the next send will be answered", () => {
      * asked for — but a setting that appears to have applied and did not is how somebody
      * spends an hour wondering why the answers look the same.
      */
-    const send = readFileSync(new URL("../apps/linux/ui/toolbar-send.js", import.meta.url), "utf8");
+    const send = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-send.js", import.meta.url),
+      "utf8",
+    );
     expect(send).toContain("sent.settingsTrouble");
     expect(send).toContain("state.trouble");
     // And both travel with every send, because this may be the first one with a
@@ -4325,7 +4414,10 @@ describe("a press that went nowhere", () => {
     // No region and one point, which is what `pointAt` produces — so it draws through
     // `badgeAt` as a numbered pin and carries a coordinate through `spotIn`, with no new
     // drawing code and no second idea of what a placed mark is.
-    const mark = readFileSync(new URL("../apps/linux/ui/toolbar-mark.js", import.meta.url), "utf8");
+    const mark = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-mark.js", import.meta.url),
+      "utf8",
+    );
     const clicking = mark.slice(mark.indexOf("const meant = CLICK_MEANS[state.tool]"));
     expect(clicking.slice(0, 700)).toMatch(
       /meant === "point"[\s\S]{0,220}region: null,\s*points: \[finished\.points\[0\]\]/,
@@ -4342,8 +4434,14 @@ describe("a press that went nowhere", () => {
      * Rebase alongside it. Design had a special case for this; git did not, and the fix
      * is one rule rather than a second special case.
      */
-    const page = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
-    const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+    const page = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar.js", import.meta.url),
+      "utf8",
+    );
+    const rail = readFileSync(
+      new URL("../extensions/colai/toolbar/ui/toolbar-rail.js", import.meta.url),
+      "utf8",
+    );
 
     expect(page).toContain("const kindNow = { design: state.designKind, git: state.gitKind }");
     expect(page).toMatch(/button\.dataset\.kind === kindNow\[button\.dataset\.tool\]/);
@@ -4356,8 +4454,14 @@ describe("a press that went nowhere", () => {
 });
 
 describe("clicking away closes what is open", () => {
-  const page = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
-  const mark = readFileSync(new URL("../apps/linux/ui/toolbar-mark.js", import.meta.url), "utf8");
+  const page = readFileSync(
+    new URL("../extensions/colai/toolbar/ui/toolbar.js", import.meta.url),
+    "utf8",
+  );
+  const mark = readFileSync(
+    new URL("../extensions/colai/toolbar/ui/toolbar-mark.js", import.meta.url),
+    "utf8",
+  );
 
   test("another window coming forward is what 'outside' means here", () => {
     /*

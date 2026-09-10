@@ -63,8 +63,7 @@
             "core:event:allow-listen",
             "core:event:allow-unlisten",
             "process:allow-restart",
-            "updater:default",
-            "allow-colai-shell"
+            "updater:default"
           ]
         },
         {
@@ -76,19 +75,6 @@
           ],
           "permissions": [
             "allow-quickchat",
-            "core:event:allow-listen",
-            "core:event:allow-unlisten"
-          ]
-        },
-        {
-          "identifier": "colai-overlay",
-          "description": "The Colai toolbar over the desktop: shape itself, read the frontmost application, give the screen back.",
-          "local": true,
-          "windows": [
-            "colai-overlay"
-          ],
-          "permissions": [
-            "allow-colai-overlay",
             "core:event:allow-listen",
             "core:event:allow-unlisten"
           ]

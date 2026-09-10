@@ -166,7 +166,8 @@ function drawLibrary() {
   find.className = "popup-note library-find";
   find.type = "text";
   find.value = open.query;
-  find.placeholder = open.kind === "system" ? "A theme — dark, violet…" : "A component — pricing table…";
+  find.placeholder =
+    open.kind === "system" ? "A theme — dark, violet…" : "A component — pricing table…";
   find.setAttribute("aria-label", "Search the library");
   find.addEventListener("input", () => {
     open.query = find.value;

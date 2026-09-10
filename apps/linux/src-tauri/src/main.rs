@@ -1,14 +1,5 @@
 mod cli;
-mod colai;
-mod colai_attach;
-mod colai_capture;
-mod colai_files;
 #[cfg(target_os = "linux")]
-mod colai_inspect;
-mod colai_library;
-mod colai_marks;
-mod colai_receivers;
-mod colai_send;
 mod discovery;
 mod gateway;
 mod gateway_device_identity;
@@ -433,18 +424,6 @@ impl DesktopState {
 
     fn set_tray(&self, handles: tray::TrayHandles) {
         *self.inner.tray.lock().expect("tray mutex poisoned") = Some(handles);
-    }
-
-    pub(crate) fn set_toolbar_checked(&self, checked: bool) {
-        if let Some(tray) = self
-            .inner
-            .tray
-            .lock()
-            .expect("tray mutex poisoned")
-            .as_ref()
-        {
-            tray.set_toolbar_checked(checked);
-        }
     }
 
     pub(crate) fn set_quickchat_shortcut_checked(&self, checked: bool) {
@@ -1365,27 +1344,6 @@ fn main() {
         app.manage(state.clone());
         app.manage(gateway_ws::GatewayClient::new());
 
-        /*
-         * The toolbar, up front, because it is the product.
-         *
-         * It used to wait for a key or a button on Colai's own settings page. That page
-         * is not always there: once a Gateway connects, this window navigates to the
-         * Gateway's interface and everything Colai drew on it — including the way to
-         * the toolbar — goes with it. Somebody opening Colai then found a chat
-         * application and no toolbar anywhere, which is the opposite of the product.
-         *
-         * So it opens with the app and stays available from the tray. `COLAI_NO_OPEN`
-         * is for working on the window behind it without the overlay in the way.
-         */
-        if std::env::var_os("COLAI_NO_OPEN").is_none() {
-            if let Err(trouble) = colai::colai_summon(app.handle().clone()) {
-                eprintln!("[colai] could not open the toolbar: {trouble}");
-            }
-        }
-
-        // And from here on, which window somebody is looking at — so a mark can be drawn
-        // on the application it was made on and nowhere else.
-        colai_attach::watch_the_front(app.handle());
 
         #[cfg(target_os = "linux")]
         app.manage(gateway_sleep_logind::SleepBridge::start(
@@ -1457,42 +1415,7 @@ fn main() {
         updater::open_release_page,
         updater::relaunch,
         updater::updater_ready,
-        colai::colai_shape,
-        colai::colai_frontmost,
-        colai::colai_screens,
-        colai::colai_take_keyboard,
-        colai_receivers::colai_allowed,
-        colai_receivers::colai_agents,
-        colai_receivers::colai_sessions,
-        colai_receivers::colai_threads,
-        colai_capture::colai_capture_mark,
-        colai_capture::colai_forget_marks,
-        colai_send::colai_send,
-        colai_send::colai_unwatch,
-        colai_send::colai_stop,
-        colai_send::colai_points,
-        colai_send::colai_rewind,
-        colai_send::colai_start_here,
-        colai_send::colai_automate,
-        colai_files::colai_describe_files,
-        colai_receivers::colai_at_work,
-        colai_receivers::colai_models,
-        colai_attach::colai_in_front,
-        colai_library::colai_library_search,
-        colai_library::colai_libraries,
-        colai_files::colai_pick_files,
-        colai_files::colai_pick_folder,
-        colai_files::colai_search_files,
-        #[cfg(target_os = "linux")]
-        colai_inspect::colai_showing,
-        colai::colai_summon,
-        colai::colai_release,
-        colai::colai_open_settings
     ]);
-
-    let builder = builder
-        .manage(colai::ShapeState::default())
-        .manage(colai_capture::MarkShots::default());
 
     let app = builder
         .on_window_event(|window, event| {

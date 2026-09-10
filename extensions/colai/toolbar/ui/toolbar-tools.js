@@ -443,7 +443,10 @@ function asDrawn(mark, front, screen) {
   const there = (box) => ontoScreen(box, front.at, screen);
   return {
     ...mark,
-    region: mark.region && mark.inside.box ? { ...mark.region, box: there(mark.inside.box) } : mark.region,
+    region:
+      mark.region && mark.inside.box
+        ? { ...mark.region, box: there(mark.inside.box) }
+        : mark.region,
     points: mark.inside.points.length ? mark.inside.points.map(there) : mark.points,
   };
 }
@@ -542,9 +545,7 @@ function placeOf(front) {
   // colai - Visual Studio Code" with plain hyphens, so the em-dash-only shape silently
   // matched nothing and the file and project were never read at all.
   const code =
-    /^[●•*\s]*(.+?)\s+[—–-]\s+(.+?)\s+-\s+(?:Visual Studio Code|VSCodium|Code - OSS)$/.exec(
-      title,
-    );
+    /^[●•*\s]*(.+?)\s+[—–-]\s+(.+?)\s+-\s+(?:Visual Studio Code|VSCodium|Code - OSS)$/.exec(title);
   if (code) return { file: code[1].trim(), project: code[2].trim() };
 
   // Sublime and friends: "file — folder", and nothing else on the line.
@@ -555,9 +556,8 @@ function placeOf(front) {
 
   // A browser puts the page title in front of its own name. The URL is not in there —
   // that is the layer above, and it is why the layer above exists.
-  const browser = /^(.+?)\s+[—-]\s+(?:Mozilla Firefox|Google Chrome|Chromium|Brave|Microsoft Edge)$/.exec(
-    title,
-  );
+  const browser =
+    /^(.+?)\s+[—-]\s+(?:Mozilla Firefox|Google Chrome|Chromium|Brave|Microsoft Edge)$/.exec(title);
   if (browser) return { page: browser[1].trim() };
 
   // A terminal: "someone@machine: ~/somewhere". The path is the half worth having.
@@ -1005,7 +1005,8 @@ function rewindRefused(said, sessionKey) {
     return HELD_ELSEWHERE;
   }
   if (/archived/i.test(words)) {
-    const archived = "This conversation is archived, and an archived conversation cannot be taken back.";
+    const archived =
+      "This conversation is archived, and an archived conversation cannot be taken back.";
     if (sessionKey) REFUSED.set(sessionKey, archived);
     return archived;
   }
@@ -1077,7 +1078,9 @@ function tokenAt(text, caret, mark) {
  * and a fuzzy match over four short words matches everything.
  */
 function modesMatching(word) {
-  const want = String(word ?? "").trim().toLowerCase();
+  const want = String(word ?? "")
+    .trim()
+    .toLowerCase();
   return Object.entries(MODES)
     .filter(
       ([id, mode]) => !want || id.startsWith(want) || mode.label.toLowerCase().startsWith(want),
@@ -1214,7 +1217,11 @@ function agoSaid(at, now) {
  * explaining has answered itself.
  */
 function asksSomething(said) {
-  const lines = (said || "").trim().split("\n").map((line) => line.trim()).filter(Boolean);
+  const lines = (said || "")
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
   const last = lines[lines.length - 1];
   if (!last) return false;
   if (last.endsWith("?")) return true;
@@ -1384,7 +1391,6 @@ function runningSaid(runs) {
   if (!runs || runs.length === 0) return null;
   return runs.length === 1 ? "working" : `${runs.length} working`;
 }
-
 
 /** Whole seconds left of a recording, never past its ends. */
 function secondsLeft(until, now) {
@@ -1773,8 +1779,6 @@ function isVertical(dock) {
   return dock === "left" || dock === "right";
 }
 
-
-
 /**
  * The part of a screen the toolbar may use.
  *
@@ -1815,7 +1819,9 @@ function screenAt(screens, at) {
       at.y < screen.y + screen.height,
   );
   if (holding) return holding;
-  return screens.reduce((best, screen) => (awayFrom(screen, at) < awayFrom(best, at) ? screen : best));
+  return screens.reduce((best, screen) =>
+    awayFrom(screen, at) < awayFrom(best, at) ? screen : best,
+  );
 }
 
 /**
@@ -1870,9 +1876,7 @@ function dockFor(at, screens, was) {
     bottom: room.bottom - at.y,
   };
   // Ties keep the earlier edge, so a corner has one answer rather than two.
-  const nearest = Object.keys(gaps).reduce((best, edge) =>
-    gaps[edge] < gaps[best] ? edge : best,
-  );
+  const nearest = Object.keys(gaps).reduce((best, edge) => (gaps[edge] < gaps[best] ? edge : best));
   const held = was && was in gaps;
   if (held && gaps[was] <= DOCK_LEAVE) {
     return gaps[nearest] + DOCK_BEAT < gaps[was] ? nearest : was;
@@ -2053,7 +2057,6 @@ function detailOf(mark) {
   }
   return null;
 }
-
 
 /** A count with its noun, so the rail reads as a sentence rather than a gauge. */
 function counted(many, noun) {

@@ -48,7 +48,10 @@ function middleOf(marks) {
   const spots = marks.flatMap((mark) =>
     mark.region
       ? [
-          { x: mark.region.box.x + mark.region.box.w / 2, y: mark.region.box.y + mark.region.box.h / 2 },
+          {
+            x: mark.region.box.x + mark.region.box.w / 2,
+            y: mark.region.box.y + mark.region.box.h / 2,
+          },
         ]
       : mark.points,
   );
@@ -133,7 +136,9 @@ async function sendMarks(ids) {
   // was pointed at — refused here, before anything is dispatched, so there is no path
   // where a write is attempted and then apologised for. Nothing writes yet; this is
   // what will stop the first one that does.
-  const refused = going.map((mark) => gateFor(mark.tool, state.surface)).find((said) => said.blocked);
+  const refused = going
+    .map((mark) => gateFor(mark.tool, state.surface))
+    .find((said) => said.blocked);
   if (refused) {
     state.trouble = refused.says;
     // Kept, rather than only announced and forgotten. Nothing ran and nothing changed,

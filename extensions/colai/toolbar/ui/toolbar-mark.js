@@ -190,9 +190,7 @@ function drawLive() {
     }
     path.setAttribute(
       "fill",
-      PATHS.includes(gesture.kind)
-        ? "none"
-        : "color-mix(in srgb, var(--accent) 13%, transparent)",
+      PATHS.includes(gesture.kind) ? "none" : "color-mix(in srgb, var(--accent) 13%, transparent)",
     );
     // A highlighter shows its real width while it is being drawn, or somebody finds out
     // how much it covered only after letting go.
@@ -313,7 +311,6 @@ async function photograph(mark) {
   }
 }
 
-
 /**
  * Which application is in front, and which project that makes this about.
  *
@@ -373,9 +370,7 @@ function drawMarks() {
     path.setAttribute("d", pathFor({ kind, points: mark.points, screen: screenSize() }));
     path.setAttribute(
       "fill",
-      PATHS.includes(kind)
-        ? "none"
-        : "color-mix(in srgb, var(--accent) 13%, transparent)",
+      PATHS.includes(kind) ? "none" : "color-mix(in srgb, var(--accent) 13%, transparent)",
     );
     path.setAttribute("stroke", "var(--accent)");
     // A highlighter is a wide translucent stripe rather than a line: it is meant to sit

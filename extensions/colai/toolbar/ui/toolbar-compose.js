@@ -289,8 +289,14 @@ function placePopup(mark) {
   // On the screen the mark is on: a popup for something marked on the second display
   // belongs there, not pinned inside the first one's edges.
   const room = usable(screenAt(state.screens, { x: edges.right, y: edges.bottom }));
-  const left = Math.min(Math.max(edges.right + 14, room.left + EDGE), room.right - box.width - EDGE);
-  const top = Math.min(Math.max(edges.bottom + 14, room.top + EDGE), room.bottom - box.height - EDGE);
+  const left = Math.min(
+    Math.max(edges.right + 14, room.left + EDGE),
+    room.right - box.width - EDGE,
+  );
+  const top = Math.min(
+    Math.max(edges.bottom + 14, room.top + EDGE),
+    room.bottom - box.height - EDGE,
+  );
   el.popup.style.left = `${Math.round(left)}px`;
   el.popup.style.top = `${Math.round(top)}px`;
 }
@@ -1061,10 +1067,12 @@ function drawAutomation() {
       drawSchedule();
     });
     line.append(amount);
-    line.append(chips(null, UNITS, cron.unit, (id) => {
-      cron.unit = id;
-      render();
-    }));
+    line.append(
+      chips(null, UNITS, cron.unit, (id) => {
+        cron.unit = id;
+        render();
+      }),
+    );
     rows.push(line);
   } else if (cron.repeat === "at") {
     rows.push(
@@ -1074,14 +1082,26 @@ function drawAutomation() {
     );
   } else {
     rows.push(
-      field("text", cron.expr, "Cron expression", (value) => {
-        cron.expr = value;
-      }, "0 9 * * *"),
+      field(
+        "text",
+        cron.expr,
+        "Cron expression",
+        (value) => {
+          cron.expr = value;
+        },
+        "0 9 * * *",
+      ),
     );
     rows.push(
-      field("text", cron.tz, "Timezone", (value) => {
-        cron.tz = value;
-      }, "Leave blank for this machine's"),
+      field(
+        "text",
+        cron.tz,
+        "Timezone",
+        (value) => {
+          cron.tz = value;
+        },
+        "Leave blank for this machine's",
+      ),
     );
   }
 
@@ -1094,17 +1114,22 @@ function drawAutomation() {
   rows.push(summary);
 
   rows.push(
-    chips("Runs in", { isolated: { label: "Its own session" }, main: { label: "Main session" } },
-      cron.where, (id) => {
+    chips(
+      "Runs in",
+      { isolated: { label: "Its own session" }, main: { label: "Main session" } },
+      cron.where,
+      (id) => {
         cron.where = id;
         render();
-      }),
+      },
+    ),
   );
 
   // The one thing this cannot do, said where it matters rather than discovered later.
   const bare = document.createElement("p");
   bare.className = "cron-bare";
-  bare.textContent = "Carries your words, not the pictures — a scheduled run goes and looks for itself.";
+  bare.textContent =
+    "Carries your words, not the pictures — a scheduled run goes and looks for itself.";
   rows.push(bare);
 
   const foot = document.createElement("div");
@@ -1409,8 +1434,6 @@ function drawComposer(into) {
   into.replaceChildren(...rows);
 }
 
-
-
 /**
  * Agents and conversations, as rows somebody picks from.
  *
@@ -1432,7 +1455,8 @@ function drawWho() {
   if (state.agents.length === 0 && talking() === 0) {
     const empty = document.createElement("p");
     empty.className = "agent-empty";
-    empty.textContent = "Nobody yet. Start a conversation in the OpenClaw window and it appears here.";
+    empty.textContent =
+      "Nobody yet. Start a conversation in the OpenClaw window and it appears here.";
     el.agentRows.replaceChildren(empty);
     return;
   }

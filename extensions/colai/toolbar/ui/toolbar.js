@@ -38,7 +38,6 @@ const el = {
   recordingLeft: document.getElementById("recording-left"),
   capture: document.getElementById("capture"),
   popup: document.getElementById("popup"),
-
 };
 
 const state = {
@@ -245,19 +244,14 @@ function render() {
     } else if (id === "design") {
       button.setAttribute(
         "aria-pressed",
-        String(
-          state.tool === "design" || state.tool === "screenshot" || state.open === "design",
-        ),
+        String(state.tool === "design" || state.tool === "screenshot" || state.open === "design"),
       );
       button.title =
         state.tool === "design"
           ? `Design · ${(DESIGNS[state.designKind] || DESIGNS[DESIGN_FIRST]).label}`
           : "Design";
     } else if (id === "git") {
-      button.setAttribute(
-        "aria-pressed",
-        String(state.tool === "git" || state.open === "git"),
-      );
+      button.setAttribute("aria-pressed", String(state.tool === "git" || state.open === "git"));
       // Which of the six is in your hand, because the key looks the same for all of
       // them and a rebase is not a thing to find out about by doing it.
       button.title =
@@ -269,10 +263,7 @@ function render() {
     } else if (id === "exact") {
       // Lit while the tool in your hand is one of the folded ones, because a folded
       // rail has no other way of saying which tool is out.
-      button.setAttribute(
-        "aria-pressed",
-        String(state.tucked && EXACT.includes(state.tool)),
-      );
+      button.setAttribute("aria-pressed", String(state.tucked && EXACT.includes(state.tool)));
       button.title = state.tucked ? "Show measure, colour, record…" : "Fold these away";
       button.setAttribute("aria-expanded", String(!state.tucked));
       // One mark that turns says "this opens and closes". Two different marks would say
@@ -282,7 +273,10 @@ function render() {
       button.setAttribute("aria-pressed", String(state.tool === "draw" || state.open === "draw"));
       button.title = `Draw · ${(PENS[state.pen] || PENS[PEN_FIRST]).label} · D`;
     } else if (id === "record") {
-      button.setAttribute("aria-pressed", String(state.tool === "record" || state.open === "record"));
+      button.setAttribute(
+        "aria-pressed",
+        String(state.tool === "record" || state.open === "record"),
+      );
       button.title = `Record ${state.recordFor} seconds · R`;
     } else if (TOOLS[id]) {
       button.setAttribute("aria-pressed", String(state.tool === id));
@@ -298,7 +292,8 @@ function render() {
   const working = runningSaid(state.runs);
   buttons.agents.dataset.working = String(state.runs.length > 0);
   buttons.stop.hidden = state.runs.length === 0;
-  buttons.stop.title = state.runs.length === 1 ? "Stop the agent" : `Stop ${state.runs.length} runs`;
+  buttons.stop.title =
+    state.runs.length === 1 ? "Stop the agent" : `Stop ${state.runs.length} runs`;
 
   // The mascot carries what the whole Gateway is doing, including the agents somebody
   // is not looking at. `data-mood` rather than a class, so the stylesheet holds the one
@@ -665,7 +660,9 @@ async function onDrop(event) {
   try {
     bringFiles(await invoke("colai_describe_files", { paths }));
   } catch (error) {
-    sayFailed(`Could not read what was dropped — ${error && error.message ? error.message : String(error)}`);
+    sayFailed(
+      `Could not read what was dropped — ${error && error.message ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -771,7 +768,6 @@ async function start() {
     if (state.front && state.front.ours === false) shutWhatIsOpen();
     redrawMarksSoon();
   }).catch(() => {});
-
 
   void listen("colai:reply", (event) => {
     const payload = event && event.payload;

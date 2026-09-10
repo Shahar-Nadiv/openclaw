@@ -1,0 +1,42 @@
+[package]
+name = "colai-toolbar"
+version = "0.1.0"
+description = "colai — point at anything on screen and hand it to an agent"
+edition = "2021"
+rust-version = "1.97.1"
+
+[[bin]]
+name = "colai-toolbar"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+# The overlay shapes itself through GTK rather than raw X. A shape set behind GTK's
+# back is undone the next time GTK re-applies its own input region, so the call has to
+# be GTK's own. Versions match what Tauri already resolves.
+cairo-rs = "0.18.5"
+gdk = "0.18.2"
+gtk = "0.18.2"
+base64 = "0.23.1"
+# The Gateway handshake signs a device identity, and the identity is stored on disk.
+ed25519-dalek = "3.0.0"
+getrandom = "0.4.3"
+sha2 = "0.11.0"
+subtle = "2.6.1"
+zeroize = "1.9.0"
+futures-util = "0.3.34"
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tauri = { version = "2.11.5", features = ["image-png", "unstable"] }
+tauri-plugin-opener = "2.5.5"
+tauri-plugin-single-instance = "2.4.4"
+tokio = { version = "1.53.1", features = ["macros", "sync", "time"] }
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
+uuid = { version = "1.26.0", features = ["v4"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2.189"
+zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }

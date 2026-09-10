@@ -111,8 +111,7 @@ function drawWork() {
   keepTime();
   const now = Date.now();
   const waiting = needingYou(state.history, state.runs);
-  const shown =
-    state.work.filter === "needs" ? waiting : state.history;
+  const shown = state.work.filter === "needs" ? waiting : state.history;
 
   const held = whatIsBeingTyped();
   el.work.replaceChildren(
@@ -257,7 +256,8 @@ function nothingYet() {
   // Marking led, and led wrongly: it made pointing at the screen a step you had to take
   // before you were allowed to ask for anything. It is the toolbar's own trick, not its
   // toll — the field below sends words on their own.
-  said.textContent = "Say what you want done and send it. Mark something on screen first when the words need a picture.";
+  said.textContent =
+    "Say what you want done and send it. Mark something on screen first when the words need a picture.";
   const steps = document.createElement("ol");
   steps.className = "work-steps";
   for (const step of [
@@ -637,6 +637,3 @@ function flyToWork(marks) {
     run.finished.then(drop, drop);
   }
 }
-
-
-

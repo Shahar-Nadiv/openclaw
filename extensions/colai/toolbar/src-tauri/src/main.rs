@@ -1,0 +1,123 @@
+// colai: point at anything on screen and hand it to an agent.
+//
+// This is only the toolbar. It was built inside OpenClaw's Linux desktop app, which is
+// where the Gateway client, the tray and the window all already existed — and which is
+// why nobody could install it without running that fork. Here it is its own program, so
+// a plugin can put it on somebody's machine.
+//
+// What that costs is one copy: `gateway_ws`, `gateway`, `cli` and
+// `gateway_device_identity` came across from the desktop app, trimmed to what the
+// toolbar calls. See the header on `gateway_ws.rs`.
+//
+// What it does not need is most of that app — the tray, Quick Chat, the updater, the
+// installer, discovery, sleep handling. Fourteen thousand lines the toolbar never called.
+
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod cli;
+mod colai;
+mod colai_attach;
+mod colai_capture;
+mod colai_files;
+#[cfg(target_os = "linux")]
+mod colai_inspect;
+mod colai_library;
+mod colai_marks;
+mod colai_receivers;
+mod colai_send;
+mod gateway;
+mod gateway_device_identity;
+mod gateway_ws;
+
+use tauri::Manager;
+
+fn main() {
+    tauri::Builder::default()
+        // One toolbar. A second copy hands its arguments to the first and exits, which is
+        // also what stops a plugin that starts it twice from putting two on the screen.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            let _ = colai::colai_summon(app.clone());
+        }))
+        .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            app.manage(gateway_ws::GatewayClient::new());
+            app.manage(colai::ShapeState::default());
+            app.manage(colai_capture::MarkShots::default());
+
+            // The overlay, straight away: this program is the toolbar, so there is
+            // nothing to wait for and nowhere else to be.
+            if let Err(trouble) = colai::colai_summon(app.handle().clone()) {
+                eprintln!("[colai] could not open the toolbar: {trouble}");
+            }
+
+            // Which window somebody is looking at, so a mark is drawn on the application
+            // it was made on and nowhere else.
+            colai_attach::watch_the_front(app.handle());
+
+            // And the Gateway, found the way the desktop app finds it: by asking the
+            // OpenClaw CLI. That is why this needs no pairing, no credential store and no
+            // identity of its own — the CLI that installed this already has all three.
+            //
+            // On a background thread because it may install and start the service, which
+            // is slow, and a toolbar that will not draw until the Gateway answers is a
+            // toolbar that looks broken on a cold machine.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let found = match cli::OpenClawCli::discover() {
+                    Ok(found) => found,
+                    Err(trouble) => {
+                        eprintln!("[colai] no openclaw CLI: {trouble}");
+                        return;
+                    }
+                };
+                match gateway::ensure_ready(&found) {
+                    Ok(ready) => {
+                        handle
+                            .state::<gateway_ws::GatewayClient>()
+                            .configure(&handle, ready.gateway_ws.clone());
+                    }
+                    Err(trouble) => {
+                        // Said once, and not fatal. Everything that draws still draws;
+                        // what needs an agent says so when it is asked.
+                        eprintln!("[colai] no Gateway yet: {trouble}");
+                    }
+                }
+            });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            colai::colai_shape,
+            colai::colai_frontmost,
+            colai::colai_screens,
+            colai::colai_take_keyboard,
+            colai::colai_summon,
+            colai::colai_release,
+            colai::colai_open_settings,
+            colai_attach::colai_in_front,
+            colai_capture::colai_capture_mark,
+            colai_capture::colai_forget_marks,
+            colai_files::colai_describe_files,
+            colai_files::colai_pick_files,
+            colai_files::colai_pick_folder,
+            colai_files::colai_search_files,
+            #[cfg(target_os = "linux")]
+            colai_inspect::colai_showing,
+            colai_library::colai_libraries,
+            colai_library::colai_library_search,
+            colai_receivers::colai_agents,
+            colai_receivers::colai_allowed,
+            colai_receivers::colai_at_work,
+            colai_receivers::colai_models,
+            colai_receivers::colai_sessions,
+            colai_receivers::colai_threads,
+            colai_send::colai_automate,
+            colai_send::colai_points,
+            colai_send::colai_rewind,
+            colai_send::colai_send,
+            colai_send::colai_start_here,
+            colai_send::colai_stop,
+            colai_send::colai_unwatch
+        ])
+        .run(tauri::generate_context!())
+        .expect("colai failed to start");
+}

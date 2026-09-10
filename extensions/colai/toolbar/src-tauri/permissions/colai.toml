@@ -1,14 +1,13 @@
 # Colai's overlay and settings commands.
 #
-# Split in two on purpose, and the split is the point.
+# One window, one grant, and the grant is the point.
 #
-# The overlay is a window that covers the whole screen and reads what is in front of
-# it. Everything it can do is here, and nothing else is: it cannot summon another
-# window, and it cannot reach any of the gateway or installer commands the setup
-# screens use. If the page in it were ever compromised, that is the whole blast radius.
+# The overlay covers the whole screen and reads what is in front of it. Everything it
+# can do is here, and nothing else is. If the page in it were ever compromised, that is
+# the whole blast radius.
 #
-# `allow-colai-shell` is the smaller grant a normal window gets — open the toolbar,
-# close it again — with no screen reading at all.
+# It was two grants when the toolbar lived inside the OpenClaw desktop app: the second
+# let an ordinary window of that app summon this one. There is no other window now.
 
 [[permission]]
 identifier = "allow-colai-overlay"
@@ -43,12 +42,4 @@ commands.allow = [
   "colai_search_files",
   "colai_release",
   "colai_open_settings",
-]
-
-[[permission]]
-identifier = "allow-colai-shell"
-description = "Lets an ordinary Colai window summon the toolbar and put it away."
-commands.allow = [
-  "colai_summon",
-  "colai_release",
 ]

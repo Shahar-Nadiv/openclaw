@@ -13,7 +13,7 @@
  * ordered by what reads best rather than by which one happens to touch the page first.
  */
 function listenForDrag() {
-    el.grip.addEventListener("pointerdown", (event) => {
+  el.grip.addEventListener("pointerdown", (event) => {
     event.preventDefault();
     const box = railBox();
     let grabX = event.clientX - box.left;

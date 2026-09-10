@@ -758,14 +758,14 @@ pub(crate) fn toggle_toolbar(app: &AppHandle) -> Result<(), String> {
 
 /// Tell the tray whether the toolbar is on screen.
 ///
-/// Called by the two functions that put it there and take it away, rather than worked
-/// out when the menu opens. Those two are the only ways it moves, so this is the whole
-/// truth — and a tick that guessed would be wrong the first time somebody pressed Escape.
-fn tray_says_toolbar(app: &AppHandle, showing: bool) {
-    if let Some(state) = app.try_state::<crate::DesktopState>() {
-        state.set_toolbar_checked(showing);
-    }
-}
+/// There is no tray here yet. It ticked a menu item in the OpenClaw desktop app this was
+/// lifted out of; standing alone, the toolbar is the whole program and the only thing
+/// that could say whether it is showing is the toolbar itself.
+///
+/// Kept as the one place that answers the question, so whatever says it next — a tray of
+/// its own, a plugin asking — has somewhere to be wired in rather than two callers to
+/// find.
+fn tray_says_toolbar(_app: &AppHandle, _showing: bool) {}
 
 /// Give the screen back.
 #[tauri::command]

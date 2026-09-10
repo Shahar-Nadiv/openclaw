@@ -2,9 +2,6 @@ use crate::gateway_device_identity::{
     GatewayAuth, GatewayDeviceIdentity, GatewayDeviceIdentityStore, CLIENT_DEVICE_FAMILY,
     CLIENT_ID, CLIENT_MODE, CLIENT_PLATFORM, CLIENT_ROLE, CLIENT_SCOPES,
 };
-#[cfg(any(target_os = "linux", test))]
-use crate::gateway_sleep::SleepPrepareOutcome;
-use crate::quickchat::QUICKCHAT_LABEL;
 use futures_util::{SinkExt, StreamExt};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, WebPkiSupportedAlgorithms};
@@ -34,7 +31,8 @@ use uuid::Uuid;
 
 const AGENT_KIND_CLIENT_CAPABILITY: &str = "agent-kind";
 const GATEWAY_STATE_EVENT: &str = "quickchat:gateway-state";
-const CHAT_EVENT: &str = "quickchat:chat-event";
+/// What the toolbar hears when a session it is watching says something.
+const REPLY_EVENT: &str = "colai:reply";
 const GATEWAY_DEVICE_IDENTITY_FILE: &str = "quickchat-gateway-device.json";
 const AGENTS_CACHE_TTL: Duration = Duration::from_secs(60);
 /// How many conversations the toolbar's picker asks for.
@@ -778,31 +776,8 @@ struct PluginSurfaceRefreshResponse {
     plugin_surface_urls: Option<HashMap<String, String>>,
 }
 
-#[cfg(any(target_os = "linux", test))]
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SuspendPrepareResponse {
-    status: Option<String>,
-    suspension_id: Option<String>,
-}
 
-#[cfg(any(target_os = "linux", test))]
-impl SuspendPrepareResponse {
-    fn into_outcome(self) -> SleepPrepareOutcome {
-        match (self.status.as_deref(), self.suspension_id) {
-            (Some("ready"), Some(suspension_id)) if !suspension_id.trim().is_empty() => {
-                SleepPrepareOutcome::Ready { suspension_id }
-            }
-            _ => SleepPrepareOutcome::Busy,
-        }
-    }
-}
 
-#[cfg(any(target_os = "linux", test))]
-#[derive(Deserialize)]
-struct SuspendResumeResponse {
-    resumed: bool,
-}
 
 enum GatewayRequest {
     /// Which models this agent could answer with, and what each one can be asked for.
@@ -850,14 +825,6 @@ enum GatewayRequest {
     RefreshCanvasSurface {
         observed_url: Option<String>,
     },
-    #[cfg(target_os = "linux")]
-    SuspendPrepare {
-        request_id: String,
-    },
-    #[cfg(target_os = "linux")]
-    SuspendResume {
-        suspension_id: String,
-    },
 }
 
 enum GatewayResponse {
@@ -874,10 +841,6 @@ enum GatewayResponse {
     Rewound(Rewound),
     ChatSend(ChatSendAck),
     CanvasSurface(Option<String>),
-    #[cfg(target_os = "linux")]
-    SuspendPrepare(SuspendPrepareResponse),
-    #[cfg(target_os = "linux")]
-    SuspendResume(SuspendResumeResponse),
 }
 
 enum DriverCommand {
@@ -1441,45 +1404,7 @@ impl GatewayClient {
         Ok(Some(refreshed))
     }
 
-    #[cfg(target_os = "linux")]
-    pub async fn suspend_prepare(&self, request_id: String) -> Result<SleepPrepareOutcome, String> {
-        let response = tokio::time::timeout(SUSPEND_REQUEST_TIMEOUT, async {
-            self.wait_for_sleep_connection().await;
-            self.request_with_budget(
-                GatewayRequest::SuspendPrepare { request_id },
-                Some(SUSPEND_REQUEST_TIMEOUT),
-            )
-            .await
-        })
-        .await
-        .map_err(|_| "Gateway sleep preparation timed out.".to_string())??;
-        let GatewayResponse::SuspendPrepare(response) = response else {
-            return Err(
-                "Gateway returned the wrong response for gateway.suspend.prepare.".to_string(),
-            );
-        };
-        Ok(response.into_outcome())
-    }
 
-    #[cfg(target_os = "linux")]
-    pub async fn suspend_resume(&self, suspension_id: String) -> Result<bool, String> {
-        let response = tokio::time::timeout(SUSPEND_REQUEST_TIMEOUT, async {
-            self.wait_for_sleep_connection().await;
-            self.request_with_budget(
-                GatewayRequest::SuspendResume { suspension_id },
-                Some(SUSPEND_REQUEST_TIMEOUT),
-            )
-            .await
-        })
-        .await
-        .map_err(|_| "Gateway sleep resume timed out.".to_string())??;
-        let GatewayResponse::SuspendResume(response) = response else {
-            return Err(
-                "Gateway returned the wrong response for gateway.suspend.resume.".to_string(),
-            );
-        };
-        Ok(response.resumed)
-    }
 
     #[cfg(target_os = "linux")]
     pub fn route_token(&self) -> Option<String> {
@@ -1709,7 +1634,7 @@ impl GatewayClient {
         .map_err(RequestFailure::transport)?;
         let config_changed = AtomicBool::new(false);
         let dispatch = |frame: &Value| {
-            dispatch_chat_event(app, frame);
+            dispatch_session_message(app, frame);
             if frame.get("type").and_then(Value::as_str) == Some("event")
                 && frame.get("event").and_then(Value::as_str) == Some("config.changed")
             {
@@ -1996,7 +1921,7 @@ impl GatewayClient {
         notice: Option<String>,
     ) {
         let _ = app.emit_to(
-            QUICKCHAT_LABEL,
+            crate::colai::OVERLAY_LABEL,
             GATEWAY_STATE_EVENT,
             GatewayStateEvent::new(state, notice, self.canvas_surface_url(), self.user_accent()),
         );
@@ -2039,10 +1964,15 @@ fn reject_disconnected_command(command: DriverCommand) {
 
 /// Whether an always-on-top surface that talks to the Gateway is open.
 ///
-/// Quick Chat is the only one left here. The toolbar was the other, and it now lives in
-/// its own process with its own connection.
+/// The connection is owned by the overlays, not by one of them: Quick Chat sends
+/// messages through it and the toolbar asks it who can receive a region. Gating on Quick
+/// Chat alone left the toolbar permanently reporting an unreachable Gateway while the
+/// dashboard behind it was connected.
 fn gateway_surface_open(app: &AppHandle) -> bool {
-    app.get_webview_window(QUICKCHAT_LABEL).is_some()
+    app.get_webview_window(crate::colai::OVERLAY_LABEL).is_some()
+        || app
+            .get_webview_window(crate::colai::OVERLAY_LABEL)
+            .is_some()
 }
 
 fn driver_should_run(surface_open: bool, sleep_active: bool) -> bool {
@@ -2506,42 +2436,6 @@ where
                 .filter(|url| !url.is_empty());
             Ok(GatewayResponse::CanvasSurface(canvas))
         }
-        #[cfg(target_os = "linux")]
-        GatewayRequest::SuspendPrepare { request_id } => {
-            let payload = request_on_socket(
-                socket,
-                "gateway.suspend.prepare",
-                json!({ "requestId": request_id }),
-                budget,
-                dispatch,
-            )
-            .await?;
-            serde_json::from_value(payload)
-                .map(GatewayResponse::SuspendPrepare)
-                .map_err(|error| {
-                    RequestFailure::transport(format!(
-                        "Invalid gateway.suspend.prepare response: {error}"
-                    ))
-                })
-        }
-        #[cfg(target_os = "linux")]
-        GatewayRequest::SuspendResume { suspension_id } => {
-            let payload = request_on_socket(
-                socket,
-                "gateway.suspend.resume",
-                json!({ "suspensionId": suspension_id }),
-                budget,
-                dispatch,
-            )
-            .await?;
-            serde_json::from_value(payload)
-                .map(GatewayResponse::SuspendResume)
-                .map_err(|error| {
-                    RequestFailure::transport(format!(
-                        "Invalid gateway.suspend.resume response: {error}"
-                    ))
-                })
-        }
     }
 }
 
@@ -2869,159 +2763,26 @@ where
     }
 }
 
-fn dispatch_chat_event<R: tauri::Runtime>(app: &AppHandle<R>, frame: &Value) {
+/// A message from a session the toolbar is watching, sent to the overlay.
+///
+/// The same pushed frames Quick Chat reads, filtered differently. Emitted raw, because
+/// deciding which reply belongs to which mark is the page's business and it already
+/// knows what it sent where.
+fn dispatch_session_message<R: tauri::Runtime>(app: &AppHandle<R>, frame: &Value) {
     if frame.get("type").and_then(Value::as_str) != Some("event")
-        || frame.get("event").and_then(Value::as_str) != Some("chat")
+        || frame.get("event").and_then(Value::as_str) != Some("session.message")
     {
         return;
     }
     if let Some(payload) = frame.get("payload") {
-        // Payload stays raw so the WebView can mirror Gateway delta assembly without native drift.
-        let _ = app.emit_to(QUICKCHAT_LABEL, CHAT_EVENT, payload.clone());
+        let _ = app.emit_to(crate::colai::OVERLAY_LABEL, REPLY_EVENT, payload.clone());
     }
 }
+
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(unix)]
-    mod dashboard_handoff {
-        use super::*;
-        use crate::{cli::OpenClawCli, gateway, NavigationState};
-        use std::ffi::OsString;
-        use std::fs;
-        use std::os::unix::fs::PermissionsExt;
-        use std::path::PathBuf;
-        use std::sync::MutexGuard;
-
-        static CLI_ENV: Mutex<()> = Mutex::new(());
-
-        struct CliFixture {
-            directory: PathBuf,
-            previous_cli: Option<OsString>,
-            _environment: MutexGuard<'static, ()>,
-        }
-
-        impl CliFixture {
-            fn new() -> Self {
-                let environment = CLI_ENV.lock().unwrap_or_else(|error| error.into_inner());
-                let directory = std::env::temp_dir()
-                    .join(format!("openclaw-dashboard-handoff-{}", Uuid::new_v4()));
-                fs::create_dir(&directory).expect("create CLI fixture");
-                let executable = directory.join("openclaw");
-                fs::write(
-                    &executable,
-                    r#"#!/bin/sh
-case "$*" in
-  --version) echo '0.0.0-test' ;;
-  'gateway status --json') echo '{"service":{"loaded":true,"runtime":{"status":"running"}},"rpc":{"ok":true}}' ;;
-  'dashboard --json --no-open') cat "$(dirname "$0")/dashboard.json" ;;
-  *) echo 'Unexpected CLI invocation' >&2; exit 1 ;;
-esac
-"#,
-                )
-                .expect("write CLI fixture");
-                fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
-                    .expect("make CLI fixture executable");
-                let previous_cli = std::env::var_os("OPENCLAW_DESKTOP_CLI");
-                std::env::set_var("OPENCLAW_DESKTOP_CLI", executable);
-                Self {
-                    directory,
-                    previous_cli,
-                    _environment: environment,
-                }
-            }
-
-            fn ready(&self, response: Value) -> Result<gateway::ReadyGateway, String> {
-                fs::write(self.directory.join("dashboard.json"), response.to_string())
-                    .expect("write dashboard response");
-                let cli = OpenClawCli::discover().expect("discover fixture CLI");
-                gateway::ensure_ready(&cli)
-            }
-        }
-
-        impl Drop for CliFixture {
-            fn drop(&mut self) {
-                match self.previous_cli.as_ref() {
-                    Some(value) => std::env::set_var("OPENCLAW_DESKTOP_CLI", value),
-                    None => std::env::remove_var("OPENCLAW_DESKTOP_CLI"),
-                }
-                let _ = fs::remove_dir_all(&self.directory);
-            }
-        }
-
-        #[test]
-        fn browser_pairing_is_separate_from_native_auth_and_survives_first_run_routing() {
-            let fixture = CliFixture::new();
-            let browser_url = "https://127.0.0.1:18789/control/?keep=yes#bootstrapToken=fixture%2Bbrowser%2Fgrant%3D&bootstrapProfile=owner";
-            let ws_url = "wss://127.0.0.1:18789/control";
-            for (mode, fragment, token, password) in [
-                ("password", "", None, Some("fixture-password")),
-                (
-                    "token",
-                    "#token=fixture%2Bshared%2Ftoken%3D",
-                    Some("fixture+shared/token="),
-                    None,
-                ),
-                // The CLI withholds SecretRef-backed shared credentials from JSON.
-                ("SecretRef", "", None, None),
-            ] {
-                let ready = fixture
-                    .ready(json!({
-                        "ok": true,
-                        "url": format!("https://127.0.0.1:18789/control/{fragment}"),
-                        "browserUrl": browser_url,
-                        "wsUrl": ws_url,
-                        "gatewayPassword": password,
-                        "tlsFingerprint": "ab".repeat(32),
-                    }))
-                    .unwrap_or_else(|error| panic!("{mode}: {error}"));
-
-                assert!(ready.snapshot.reachable, "{mode}");
-                assert_eq!(ready.gateway_ws.ws_url, ws_url, "{mode}");
-                assert_eq!(ready.gateway_ws.token.as_deref(), token, "{mode}");
-                assert_eq!(ready.gateway_ws.password.as_deref(), password, "{mode}");
-                assert_eq!(
-                    ready.gateway_ws.tls_fingerprint,
-                    Some("ab".repeat(32)),
-                    "{mode}"
-                );
-                assert_eq!(
-                    ready.dashboard_url, browser_url,
-                    "{mode}: browser pairing URL"
-                );
-
-                let mut navigation = NavigationState::default();
-                navigation.mark_onboarding_pending();
-                let first_run = navigation
-                    .prepare_dashboard_url(&ready.dashboard_url)
-                    .expect("first-run dashboard");
-                assert_eq!(first_run.path(), "/control/settings/model-setup", "{mode}");
-                assert_eq!(first_run.query(), Some("keep=yes&firstRun=1"), "{mode}");
-                assert_eq!(
-                    first_run.fragment(),
-                    Some("bootstrapToken=fixture%2Bbrowser%2Fgrant%3D&bootstrapProfile=owner"),
-                    "{mode}"
-                );
-            }
-        }
-
-        #[test]
-        fn missing_browser_handoff_requires_an_integration_upgrade() {
-            let fixture = CliFixture::new();
-            let result = fixture.ready(json!({
-                "ok": true,
-                "url": "http://127.0.0.1:18789/#token=fixture-shared-token",
-                "wsUrl": "ws://127.0.0.1:18789",
-            }));
-            let error = result
-                .err()
-                .expect("legacy shared URL cannot pair the browser");
-            assert!(error.contains("desktop dashboard integration"), "{error}");
-            assert!(error.contains("Beta or Development"), "{error}");
-        }
-    }
 
     #[test]
     fn sleep_cycle_runs_driver_without_quick_chat() {
@@ -3641,41 +3402,6 @@ esac
         }
     }
 
-    #[test]
-    fn suspend_wire_results_decode_leniently() {
-        let ready: SuspendPrepareResponse = serde_json::from_value(json!({
-            "status": "ready",
-            "suspensionId": "suspension-1",
-            "expiresAtMs": 1_800_000_000_000_u64,
-            "activeCount": 0,
-            "blockers": []
-        }))
-        .expect("ready suspension response");
-        assert_eq!(
-            ready.into_outcome(),
-            SleepPrepareOutcome::Ready {
-                suspension_id: "suspension-1".into()
-            }
-        );
-
-        let busy: SuspendPrepareResponse = serde_json::from_value(json!({
-            "status": "busy",
-            "reason": "active-work",
-            "retryAfterMs": 1000,
-            "activeCount": 1,
-            "blockers": []
-        }))
-        .expect("busy suspension response");
-        assert_eq!(busy.into_outcome(), SleepPrepareOutcome::Busy);
-
-        let resumed: SuspendResumeResponse = serde_json::from_value(json!({
-            "ok": true,
-            "status": "running",
-            "resumed": false
-        }))
-        .expect("resume response");
-        assert!(!resumed.resumed);
-    }
 
     #[test]
     fn gateway_state_event_carries_canvas_surface_in_camel_case() {

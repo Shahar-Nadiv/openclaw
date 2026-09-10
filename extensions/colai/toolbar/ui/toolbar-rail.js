@@ -34,7 +34,8 @@ const GLYPHS = {
     '<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/>',
   send: '<path d="M21 3L10.5 13.5"/><path d="M21 3l-6.8 18-3.7-7.5L3 9.8z"/>',
   schedule: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5.3l3.4 2"/>',
-  folder: '<path d="M3 7.5a2 2 0 0 1 2-2h3.6l2 2.4H19a2 2 0 0 1 2 2v7.6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  folder:
+    '<path d="M3 7.5a2 2 0 0 1 2-2h3.6l2 2.4H19a2 2 0 0 1 2 2v7.6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/>',
   measure: '<path d="M4 6v12M20 6v12M4 12h16"/><path d="M8.5 9l-3 3 3 3M15.5 9l3 3-3 3"/>',
   record:
@@ -54,8 +55,7 @@ const GLYPHS = {
   gitPush: '<path d="M4 4h16"/><path d="M12 20.5V8.2"/><path d="M7.2 13L12 8.2l4.8 4.8"/>',
   gitRebase:
     '<circle cx="6.5" cy="5.5" r="2.2"/><circle cx="6.5" cy="18.5" r="2.2"/><circle cx="17.5" cy="12" r="2.2"/><path d="M6.5 7.7v8.6"/><path d="M8.7 5.5h3.6a3.5 3.5 0 0 1 3.5 3.5v.9"/>',
-  more:
-    '<circle cx="6" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="18" r="1.7" fill="currentColor" stroke="none"/>',
+  more: '<circle cx="6" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="18" r="1.7" fill="currentColor" stroke="none"/>',
 };
 
 function icon(name, size) {
@@ -125,9 +125,7 @@ function key(id, title, glyph, onClick, mark) {
   button.className = "key";
   button.title = title;
   button.setAttribute("aria-label", title);
-  button.innerHTML =
-    icon(glyph) +
-    (mark === MENU ? '<span class="caret">▾</span>' : "");
+  button.innerHTML = icon(glyph) + (mark === MENU ? '<span class="caret">▾</span>' : "");
   button.addEventListener("click", onClick);
   buttons[id] = button;
   return button;
@@ -147,10 +145,7 @@ function buildRail() {
   dividers[0].after(tools);
 
   const edits = document.createDocumentFragment();
-  edits.append(
-    key("undo", "Undo · ⌘Z", "undo", undo),
-    key("redo", "Redo · ⇧⌘Z", "redo", redo),
-  );
+  edits.append(key("undo", "Undo · ⌘Z", "undo", undo), key("redo", "Redo · ⇧⌘Z", "redo", redo));
   dividers[1].after(edits);
 
   // The exact tools, and the key that folds them out of the way.
@@ -186,8 +181,7 @@ function buildRail() {
   send.type = "button";
   send.className = "key send-key";
   send.title = "Work — say what you want done";
-  send.innerHTML =
-    icon("send") + '<span class="send-many"></span><span class="caret">▾</span>';
+  send.innerHTML = icon("send") + '<span class="send-many"></span><span class="caret">▾</span>';
   // The Work window rather than a flyout of its own: one place where work is assembled,
   // and the same place it is reviewed afterwards.
   send.addEventListener("click", toggleWork);

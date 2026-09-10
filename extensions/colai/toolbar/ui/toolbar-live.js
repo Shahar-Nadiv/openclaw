@@ -63,5 +63,3 @@ function drawRecording() {
   el.recordingArea.dataset.under = String(frame.y * screen.height < 34);
   el.recordingLeft.textContent = `${secondsLeft(now.until, Date.now())}s`;
 }
-
-
