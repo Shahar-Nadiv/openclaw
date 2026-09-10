@@ -757,7 +757,19 @@ pub(crate) fn colai_summon(app: AppHandle) -> Result<(), String> {
     window
         .show()
         .map_err(|error| format!("Could not show the overlay: {error}"))?;
+    tray_says_toolbar(&app, true);
     Ok(())
+}
+
+/// Tell the tray whether the toolbar is on screen.
+///
+/// Showing and hiding are the only two things that move it, and both report here —
+/// Escape reaches the second without the menu being involved, so a tray that learned only
+/// from its own clicks would be wrong the first time anybody pressed it.
+fn tray_says_toolbar(app: &AppHandle, showing: bool) {
+    if let Some(tray) = app.try_state::<crate::tray::Tray>() {
+        tray.says_toolbar(showing);
+    }
 }
 
 /// Whether the toolbar is on screen right now.
@@ -785,6 +797,7 @@ pub(crate) fn colai_release(app: AppHandle) -> Result<(), String> {
             *held = None;
         }
     }
+    tray_says_toolbar(&app, false);
     Ok(())
 }
 

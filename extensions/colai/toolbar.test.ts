@@ -4529,53 +4529,37 @@ describe("what the plugin ships", () => {
 });
 
 describe("the way back when the toolbar is put away", () => {
-  const overlay = readFileSync(
-    new URL("./toolbar/src-tauri/src/colai.rs", import.meta.url),
-    "utf8",
-  );
-  const main = readFileSync(new URL("./toolbar/src-tauri/src/main.rs", import.meta.url), "utf8");
+  const dir = new URL("./toolbar/src-tauri/src/", import.meta.url);
+  const tray = readFileSync(new URL("tray.rs", dir), "utf8");
+  const overlay = readFileSync(new URL("colai.rs", dir), "utf8");
+  const main = readFileSync(new URL("main.rs", dir), "utf8");
 
-  test("the toolbar has no tray of its own", () => {
+  test("the toolbar carries a tray icon of its own", () => {
     /*
-     * It had one for an afternoon and it was wrong: a second icon beside OpenClaw's own,
-     * for a thing that is part of OpenClaw. The way back is OpenClaw's tray.
+     * Not in OpenClaw's tray, which is where it belongs and where it cannot go: that menu
+     * is compiled into OpenClaw's desktop app with no seam for a plugin, and this plugin
+     * does not change OpenClaw. A second icon beside OpenClaw's is what staying out of
+     * somebody else's source costs.
+     *
+     * Without one, Escape puts the toolbar away and there is nothing left on screen to
+     * press — the toolbar is the only window this program has.
      */
-    expect(existsSync(new URL("./toolbar/src-tauri/src/tray.rs", import.meta.url))).toBe(false);
-    expect(
-      readFileSync(new URL("./toolbar/src-tauri/Cargo.toml", import.meta.url), "utf8"),
-      "a toolbar with no tray does not need Tauri's tray feature",
-    ).not.toContain("tray-icon");
-  });
-
-  test("the toolbar is turned on and off from outside itself", () => {
-    /*
-     * It has no tray of its own and cannot put one in OpenClaw's: OpenClaw's tray menu is
-     * compiled into that app and has no seam for a plugin, and this plugin does not
-     * change OpenClaw. So the control is a command anything can run — a terminal, a
-     * launcher, a shortcut, OpenClaw itself if it ever grows the seam.
-     */
-    const declaredCommands = JSON.parse(
-      readFileSync(new URL("./openclaw.plugin.json", import.meta.url), "utf8"),
-    ) as { cliCommands?: { name: string; hasSubcommands: boolean }[] };
-    expect(declaredCommands.cliCommands).toEqual([
-      {
-        name: "colai",
-        description: "Show the colai toolbar, or put it away",
-        hasSubcommands: true,
-      },
-    ]);
-    const cli = readFileSync(new URL("./src/cli.ts", import.meta.url), "utf8");
-    for (const word of ["show", "hide", "toggle"]) {
-      expect(cli, `openclaw colai ${word}`).toContain(`["${word}",`);
+    for (const label of ['"Toolbar"', '"Open OpenClaw"', '"Quit colai"']) {
+      expect(tray, `the tray menu must offer ${label}`).toContain(label);
     }
   });
 
-  test("one word on a command line reaches the toolbar already running", () => {
+  test("three ways in, one decision", () => {
     /*
-     * The toolbar refuses to run twice, and a second launch hands its arguments to the
-     * copy on screen. That is the whole transport: no socket, no port, nothing listening
-     * — and it means `openclaw colai toggle` and "start the toolbar" are one command.
+     * The menu, `openclaw colai toggle`, and the toolbar's own keyboard all move the same
+     * window. `asked_for` is where each of them lands, so they cannot drift into three
+     * different ideas of what toggle means.
      */
+    expect(tray, "the menu must go through the same decision").toContain(
+      'colai::asked_for(app, &["toggle".to_string()])',
+    );
+    // A second launch hands its arguments to the copy already on screen: that is the
+    // whole transport for the command line, with no socket and nothing listening.
     expect(main).toContain("colai::asked_for(app, &args)");
     // And the same words decide what the first launch does, so being started by `hide`
     // does not flash a toolbar and take it away again.
@@ -4593,5 +4577,26 @@ describe("the way back when the toolbar is put away", () => {
     // Toggle asks the window rather than remembering, because Escape moves it without
     // telling anybody.
     expect(body).toContain("toolbar_is_showing(app)");
+  });
+
+  test("the tick is told by both things that move the toolbar", () => {
+    // Escape reaches `colai_release` without the menu being involved, so a tray that
+    // learned only from its own clicks would be wrong the first time anybody pressed it.
+    const showing = overlay.slice(overlay.indexOf("pub(crate) fn colai_summon"));
+    expect(showing.slice(0, showing.indexOf("\n}"))).toContain("tray_says_toolbar(&app, true)");
+    const hiding = overlay.slice(overlay.indexOf("pub(crate) fn colai_release"));
+    expect(hiding.slice(0, hiding.indexOf("\n}"))).toContain("tray_says_toolbar(&app, false)");
+  });
+
+  test("opening OpenClaw does not hold the menu open", () => {
+    // It runs the CLI for a fresh sign-in address, which takes most of a second. On the
+    // menu's own thread that is a tray that stays open staring at somebody.
+    const pressed = tray.slice(tray.indexOf("fn pressed"));
+    expect(pressed).toContain("tauri::async_runtime::spawn");
+  });
+
+  test("no tray is not no toolbar", () => {
+    // A desktop without a tray still has a screen to draw on. Only the way back is lost.
+    expect(main).toContain('eprintln!("[colai] no tray: {trouble}")');
   });
 });
