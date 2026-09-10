@@ -137,7 +137,7 @@ type ToolbarHelpers = {
   placeOf: (front: Front | null) => Place;
   whereSaid: (where: Front | null) => string[];
   spotIn: (
-    mark: { region?: { box: Box } | null; points?: Point[] },
+    mark: { tool?: string; region?: { box: Box } | null; points?: Point[] },
     where: Front | null,
     screen: { width: number; height: number },
   ) => Spot | null;
@@ -243,7 +243,15 @@ type Front = {
 };
 type Place = { file?: string; project?: string; page?: string; path?: string };
 type Box = { x: number; y: number; w: number; h: number };
-type Spot = { x: number; y: number; width?: number; height?: number; to?: Point };
+type Spot = {
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+  to?: Point;
+  /** Present only when the numbers are the desktop's own rather than a window's. */
+  on?: "desktop";
+};
 
 /** The automation being written, as the panel holds it. */
 type Cron = {
@@ -662,8 +670,13 @@ describe("what the agent is actually sent", () => {
     expect(said).toBe(`Ask: ${MODES.ask!.says}\n\nwhat does the rail do?`);
   });
 
-  test("not knowing where you are is said, not invented", () => {
-    expect(summaryFor([{ tool: "box" }], "plan", "", null)).toContain("the desktop would not say");
+  test("not knowing which window is said, not invented", () => {
+    // Not knowing is stated rather than papered over. What is *not* missing is where the
+    // mark is: a window the desktop cannot name does not make the position unknown, and
+    // the sentence is about the window alone.
+    const said = summaryFor([{ tool: "box" }], "plan", "", null);
+    expect(said).toContain("Not inside any window");
+    expect(said, "never a claim about a window there is none of").not.toContain("In undefined");
   });
 });
 
@@ -1615,7 +1628,11 @@ describe("the address that travels with a mark", () => {
   });
 
   test("no address is said as no address, not as nothing", () => {
-    expect(whereSaid(null).join(" ")).toContain("would not say");
+    // Silence would read as "there was no window worth mentioning" rather than "the
+    // desktop would not name one", and those lead somewhere different.
+    const said = whereSaid(null).join(" ");
+    expect(said).not.toBe("");
+    expect(said).toContain("Not inside any window");
   });
 
   test("two windows are two addresses, however alike they look", () => {
@@ -1660,16 +1677,32 @@ describe("where a mark sits in the window it was made over", () => {
   });
 
   test("a mark made outside the window is not given coordinates inside it", () => {
-    // The window with the keyboard is usually the one somebody is looking at, and
-    // occasionally they reach across and mark something else. Offering a spot in a
-    // window the mark is not in would be the confident kind of wrong this whole idea
-    // exists to remove — and negative numbers are what it looks like when it happens.
+    /*
+     * The window with the keyboard is usually the one somebody is looking at, and
+     * occasionally they reach across and mark something else. Offering a spot in a
+     * window the mark is not in would be the confident kind of wrong this whole idea
+     * exists to remove — and negative numbers are what it looks like when it happens.
+     *
+     * It still gets a position, because it still has one. What it must never get is that
+     * position presented as if it were inside a window it is not in, so the desktop
+     * coordinate says which desk it is measured against.
+     */
     const across = spotIn(
       { region: { box: { x: 0.05, y: 0.1, w: 0.05, h: 0.05 } } },
       second,
       screen,
     );
-    expect(across).toBeNull();
+    expect(across?.on, "never silently window-relative").toBe("desktop");
+    // Measured from the desk's own origin, not from the window's.
+    expect(across).toMatchObject({
+      x: Math.round(0.05 * screen.width),
+      y: Math.round(0.1 * screen.height),
+    });
+    // And no coordinate may be negative, which is what leaking a window frame looks like.
+    expect(across!.x).toBeGreaterThanOrEqual(0);
+    expect(across!.y).toBeGreaterThanOrEqual(0);
+    // The words carry the frame, so the two can never be read against each other.
+    expect(spotSaid(across)).toContain("on the desktop");
   });
 
   test("the message says when the address and the picture disagree", () => {
@@ -1680,10 +1713,33 @@ describe("where a mark sits in the window it was made over", () => {
     expect(said).toContain("Trust the picture");
   });
 
-  test("no window means no coordinates rather than the desktop's", () => {
-    // Half an answer here is worse than none: an agent given a number will use it.
-    expect(spotIn({ points: [{ x: 0.5, y: 0.5 }] }, null, screen)).toBeNull();
-    expect(spotIn({ points: [{ x: 0.5, y: 0.5 }] }, { app: "Code" }, screen)).toBeNull();
+  test("no window still means a position, said as the desktop's", () => {
+    /*
+     * Pointing at bare desktop and asking for something "exactly here" is a position and
+     * nothing else. This used to answer with no coordinate at all — the wrong lesson
+     * from a right rule. A desktop coordinate must never be offered *as a window
+     * coordinate*; it is still exactly where the thing is, and with no window in the
+     * picture the objection to it — that it goes stale when the window moves — has no
+     * window to be about.
+     */
+    const middle = { points: [{ x: 0.5, y: 0.5 }] };
+    for (const where of [null, { app: "Code" }] as const) {
+      const spot = spotIn(middle, where, screen);
+      expect(spot?.on).toBe("desktop");
+      expect(spot).toMatchObject({
+        x: Math.round(0.5 * screen.width),
+        y: Math.round(0.5 * screen.height),
+      });
+      expect(spotSaid(spot)).toContain("on the desktop");
+    }
+
+    // A window that does contain the mark is still answered in its own terms, unlabelled.
+    const inside = spotIn({ points: [{ x: 0.7, y: 0.5 }] }, second, screen);
+    expect(inside?.on, "a window spot is not relabelled").toBeUndefined();
+    expect(spotSaid(inside)).not.toContain("on the desktop");
+
+    // And a mark with no shape at all has no position to give.
+    expect(spotIn({ points: [] }, null, screen)).toBeNull();
     expect(spotSaid(null)).toBeNull();
   });
 });
@@ -1732,8 +1788,33 @@ describe("the message an agent actually reads", () => {
   test("a mark whose window could not be read still says what it is", () => {
     // Losing the address must never cost the picture and the note as well.
     const said = summaryFor([{ tool: "box", note: "this bit" }], "ask", "", null);
-    expect(said).toContain("would not say");
+    expect(said).toContain("Not inside any window");
     expect(said).toContain("1. Box (mark-1.png) — this bit");
+  });
+
+  test("pointing at bare desktop sends the place, because that is the whole ask", () => {
+    /*
+     * The case this was reported from: a pin on empty desktop and "create a folder name
+     * it test exactly here". The message carried a picture, a mode and the sentence —
+     * and no position at all, because a spot was only ever given in a window's own
+     * pixels and there was no window.
+     *
+     * "Exactly here" is a coordinate and nothing else. The desk is two monitors wide, so
+     * the number has to be the desktop's own, and it has to say so.
+     */
+    const desk = { width: 3840, height: 1080 };
+    const pin = { tool: "pointAt", points: [{ x: 2854 / 3840, y: 374 / 1080 }] };
+    const spot = spotIn(pin, null, desk);
+    const said = summaryFor(
+      [{ ...pin, spot }],
+      "plan",
+      "create a folder name it test exactly here",
+      null,
+    );
+    expect(said).toContain("at 2854,374 on the desktop");
+    // Across the seam of a second monitor, still the desktop's own coordinate.
+    const far = spotIn({ tool: "pointAt", points: [{ x: 3200 / 3840, y: 0.5 }] }, null, desk);
+    expect(far).toMatchObject({ x: 3200, on: "desktop" });
   });
 
   test("an automation carries the address and refuses the coordinates", () => {

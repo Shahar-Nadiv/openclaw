@@ -423,7 +423,10 @@ function placeOf(front) {
  * obvious; the ones with no note are the ones that cannot be wrong.
  */
 function whereSaid(where) {
-  if (!where || !where.app) return ["Somewhere on the screen — the desktop would not say."];
+  // No window to name. Not the same as no idea where this is: the mark below carries a
+  // desktop coordinate, which is exactly where it was made and, with no window to move,
+  // does not go stale. This line is about the window; the position is on the mark.
+  if (!where || !where.app) return ["Not inside any window the desktop would name."];
   const said = [];
   const place = placeOf(where);
   const head = [`In ${where.app}`];
@@ -468,43 +471,77 @@ function whereSaid(where) {
  * coordinate with the window's size beside it can be acted on.
  */
 function spotIn(mark, where, screen) {
-  if (!where || !where.at || !screen || !screen.width) return null;
-  const of = (point) => ({
-    x: Math.round(point.x * screen.width - where.at.x),
-    y: Math.round(point.y * screen.height - where.at.y),
+  if (!screen || !screen.width) return null;
+  const at = where && where.at ? where.at : null;
+
+  // What was actually measured: the place on the desk. Everything else is derived.
+  const onDesk = (point) => ({
+    x: Math.round(point.x * screen.width),
+    y: Math.round(point.y * screen.height),
   });
+  const inWindow = (point) => {
+    const desk = onDesk(point);
+    return { x: desk.x - at.x, y: desk.y - at.y };
+  };
+  const fits = (spot) => spot.x >= 0 && spot.y >= 0 && spot.x <= at.width && spot.y <= at.height;
+
+  const shaped = (of) => {
+    if (mark.region) {
+      const box = mark.region.box;
+      return {
+        ...of({ x: box.x, y: box.y }),
+        width: Math.round(box.w * screen.width),
+        height: Math.round(box.h * screen.height),
+      };
+    }
+    if (!mark.points || mark.points.length === 0) return null;
+    const from = of(mark.points[0]);
+    if (mark.points.length === 1) return from;
+    return { ...from, to: of(mark.points[mark.points.length - 1]) };
+  };
+
   // Marking is not clicking. The window with the keyboard is usually the one somebody
   // is looking at, and occasionally they reach across and mark something else — so a
   // spot that falls outside the window is not a spot in that window, and offering it as
   // one would be the confident kind of wrong this whole idea exists to remove.
-  const inside = (spot) =>
-    spot.x >= 0 && spot.y >= 0 && spot.x <= where.at.width && spot.y <= where.at.height;
-  if (mark.region) {
-    const box = mark.region.box;
-    const corner = of({ x: box.x, y: box.y });
-    if (!inside(corner)) return null;
-    return {
-      ...corner,
-      width: Math.round(box.w * screen.width),
-      height: Math.round(box.h * screen.height),
-    };
+  if (at) {
+    const held = shaped(inWindow);
+    if (held && fits(held)) return held;
   }
-  if (!mark.points || mark.points.length === 0) return null;
-  const from = of(mark.points[0]);
-  if (!inside(from)) return null;
-  if (mark.points.length === 1) return from;
-  const to = of(mark.points[mark.points.length - 1]);
-  return { ...from, to };
+
+  /*
+   * No window, or a mark that landed outside the one in front. Both used to produce no
+   * position at all, which is the wrong lesson drawn from a right rule: a desktop
+   * coordinate must never be offered *as a window coordinate*, but it is still exactly
+   * where the thing is.
+   *
+   * And for a mark on the desktop itself it is the better of the two, because the
+   * objection to desktop coordinates — that they stop being true when somebody moves the
+   * window — has no window to be about. Pointing at bare desktop and asking for a folder
+   * "exactly here" is a position and nothing else; without this the agent was handed a
+   * picture and left to guess.
+   *
+   * Said as a desktop coordinate, so the two can never be confused.
+   */
+  const desk = shaped(onDesk);
+  return desk ? { ...desk, on: "desktop" } : null;
 }
 
-/** That spot, in the words the message uses. */
+/**
+ * That spot, in the words the message uses.
+ *
+ * A coordinate is useless without its frame of reference, and these have two: inside the
+ * window named above, or on the desktop itself. The frame is named whenever it is the
+ * desktop, so a position can never be read against the wrong one.
+ */
 function spotSaid(spot) {
   if (!spot) return null;
+  const frame = spot.on === "desktop" ? " on the desktop" : "";
   if (typeof spot.width === "number") {
-    return `at ${spot.x},${spot.y} · ${spot.width}×${spot.height}`;
+    return `at ${spot.x},${spot.y} · ${spot.width}×${spot.height}${frame}`;
   }
-  if (spot.to) return `${spot.x},${spot.y} → ${spot.to.x},${spot.to.y}`;
-  return `at ${spot.x},${spot.y}`;
+  if (spot.to) return `${spot.x},${spot.y} → ${spot.to.x},${spot.to.y}${frame}`;
+  return `at ${spot.x},${spot.y}${frame}`;
 }
 
 /**
