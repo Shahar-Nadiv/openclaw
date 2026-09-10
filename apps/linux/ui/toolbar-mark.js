@@ -112,11 +112,20 @@ function release() {
   // A press that went nowhere is a click, not a region. Without this every stray click
   // becomes a zero-sized mark that is invisible, un-hittable, and still counted.
   if (!PATHS.includes(finished.kind) && box.w < 0.004 && box.h < 0.004) {
-    // Except for the two tools that photograph: not dragging one out is how somebody
-    // asks for the whole screen, and refusing that as a slip would leave the simplest
-    // thing the toolbar does with no way to ask for it.
-    if (WHOLE_DISPLAY.includes(state.tool)) {
+    const meant = CLICK_MEANS[state.tool];
+    // The tools that photograph: not dragging one out is how somebody asks for the whole
+    // screen, and refusing that as a slip would leave the simplest thing the toolbar does
+    // with no way to ask for it.
+    if (meant === "display") {
       addMark({ tool: state.tool, region: null, points: [] });
+      return;
+    }
+    // And the tools where a click is a place. No region, one point — the same shape a
+    // `pointAt` mark has, so it draws as a numbered pin and carries a coordinate without
+    // a line of new drawing code.
+    if (meant === "point") {
+      addMark({ tool: state.tool, region: null, points: [finished.points[0]] });
+      return;
     }
     return;
   }

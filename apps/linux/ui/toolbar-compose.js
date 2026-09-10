@@ -389,10 +389,7 @@ function modelNow() {
  * else could happen to this message — and folding these in beside them would make one
  * row of six unrelated controls.
  */
-function answeredHow() {
-  const row = document.createElement("div");
-  row.className = "answer-how";
-
+function modelPick() {
   const chosen = modelNow();
   const open = document.createElement("button");
   open.type = "button";
@@ -493,8 +490,18 @@ function answeredHow() {
   const holder = document.createElement("div");
   holder.className = "mode-pick";
   holder.append(open, menu);
-  row.append(holder);
+  return holder;
+}
 
+/**
+ * How hard it should think, as a slider over the chosen model's own stops.
+ *
+ * On the line with Files and Schedule rather than one of its own. Three rows of controls
+ * under one field read as a stack of chrome; this is the row of small things, and the
+ * slider fills the width the two words beside it leave.
+ */
+function effortPick() {
+  const chosen = modelNow();
   const stops = effortStops(chosen);
   if (stops.length > 1) {
     const effort = document.createElement("label");
@@ -525,10 +532,11 @@ function answeredHow() {
       remember();
     });
     effort.append(bar, said);
-    row.append(effort);
+    return effort;
   }
-
-  return row;
+  // A model that does not think in levels gets no slider: an empty one is a control
+  // lying about having a choice.
+  return null;
 }
 
 /** Ask the Gateway which models this receiver could answer with. */
@@ -1380,18 +1388,22 @@ function drawComposer(into) {
   // The two rarest things this message can do, on a line of their own. In the send row
   // they cost the receiver's name its last four characters, and a name shortened to make
   // room for "Schedule…" is the wrong thing to have shortened.
-  rows.push(answeredHow());
-
   const extras = document.createElement("div");
   extras.className = "compose-more";
   extras.append(fileAdd(), later);
+  // The row of small things: what else could happen to this message, and how hard it
+  // should be thought about. The slider takes whatever width the two words leave.
+  const effort = effortPick();
+  if (effort) extras.append(effort);
   rows.push(extras);
 
   // Who and how on the left, what happens to it on the right. `to` takes whatever room
   // the rest leaves, so only a genuinely long agent name shortens.
   const gap = document.createElement("span");
   gap.className = "compose-gap";
-  foot.append(to, modePick(), gap, key, go);
+  // Who, how it should be taken, and which model takes it — the three facts about the
+  // answer, in the order they were asked for. Then what happens to it, on the right.
+  foot.append(to, modePick(), modelPick(), gap, key, go);
   rows.push(foot);
 
   into.replaceChildren(...rows);

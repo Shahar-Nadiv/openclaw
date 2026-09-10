@@ -2003,7 +2003,9 @@ body {
 .popup-foot {
   display: flex;
   align-items: center;
-  gap: 6px;
+  /* Five, not six. With four controls and the send key the row is within a few pixels of
+     full, and those few pixels are the difference between "Claude Code" and "Claude Co…". */
+  gap: 5px;
   padding-top: 7px;
 }
 /*
@@ -2016,8 +2018,10 @@ body {
   align-items: center;
   gap: 6px;
   /* Shrinks before it pushes Send past the card's edge, but does not grow — growing
-     dragged the mode picker away from the name it belongs beside. */
+     dragged the mode picker away from the name it belongs beside. Shrinks last, though:
+     who is answering matters more than which model is doing it. */
   flex: 0 1 auto;
+  flex-shrink: 0.4;
   min-width: 0;
   padding: 3px 5px;
   border-radius: 7px;
@@ -2057,14 +2061,14 @@ body {
  * Schedule — is a different one. The model takes what it needs and the slider takes the
  * rest, so a long model name shortens the slider rather than pushing it off the card.
  */
-.answer-how {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
+/*
+ * Beside the mode in the send row. Both names shrink rather than push Send off the card,
+ * and the receiver yields first: the model is the thing just chosen, and the more likely
+ * to be the one being read.
+ */
 .model-key {
-  min-width: 0;
+  flex: 0 1 auto;
+  min-width: 42px;
 }
 .model-key-name {
   overflow: hidden;
@@ -2089,8 +2093,10 @@ body {
   display: flex;
   align-items: center;
   gap: 7px;
+  /* Takes the width Files and Schedule leave on their row. */
   flex: 1 1 auto;
   min-width: 96px;
+  margin-left: 6px;
 }
 /*
  * The stops are the model's, so the track is drawn rather than ticked: a model with three

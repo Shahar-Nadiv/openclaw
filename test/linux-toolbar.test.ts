@@ -135,6 +135,7 @@ type ToolbarHelpers = {
   >;
   GIT_FIRST: string;
   MODE_FIRST: string;
+  CLICK_MEANS: Record<string, string>;
   effortStops: (model: Model | null) => { id: string; label: string }[];
   effortAt: (model: Model | null, chosen: string | null) => number;
   gitKindOf: (mark: { git?: string } | null) => string;
@@ -354,7 +355,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, GITS, GIT_FIRST, gitKindOf, repoFor, isCommitting, MODE_FIRST, effortStops, effortAt, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, GITS, GIT_FIRST, gitKindOf, repoFor, isCommitting, MODE_FIRST, CLICK_MEANS, effortStops, effortAt, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
   context,
 );
 const {
@@ -386,6 +387,7 @@ const {
   repoFor,
   isCommitting,
   MODE_FIRST,
+  CLICK_MEANS,
   effortStops,
   effortAt,
   labelOf,
@@ -3971,9 +3973,15 @@ describe("every tool has a key somebody can find", () => {
 
 describe("marking several things before saying anything", () => {
   test("annotating accumulates; answering a question does not", () => {
-    // Asserted against the whole tool table rather than as a list, so a tool added later
-    // is not silently left out of the decision — which is how a rule like this rots.
-    expect([...KEEPS_MARKING].toSorted()).toEqual(["box", "circle", "draw", "pointAt"]);
+    /*
+     * Asserted against the whole tool table rather than as a list, so a tool added later
+     * is not silently left out of the decision — which is how a rule like this rots.
+     *
+     * Git was left out, and it made the tool unusable: staging is three files and a
+     * sentence about them, and every press after the first cancelled the mark before it
+     * and started nothing at all. One git mark was the most anybody could have.
+     */
+    expect([...KEEPS_MARKING].toSorted()).toEqual(["box", "circle", "draw", "git", "pointAt"]);
     for (const tool of Object.keys(TOOLS)) {
       const accumulates = KEEPS_MARKING.includes(tool);
       // Every one of these answers one question in one go. Nobody makes three colour
@@ -4250,5 +4258,73 @@ describe("how the next send will be answered", () => {
     // conversation to hold them.
     expect(send).toContain("model: state.model");
     expect(send).toContain("thinkingLevel: state.effort");
+  });
+});
+
+describe("a press that went nowhere", () => {
+  test("means a place for git, the whole screen for the two that photograph", () => {
+    /*
+     * A drag says "this region" for every tool. A click is the same gesture with no
+     * distance in it, and for most tools that is a slip — a zero-sized mark, invisible,
+     * un-hittable and still counted.
+     *
+     * Two tools read it as the whole display: not dragging a screenshot out is how
+     * somebody asks for the screen. Git reads it as *this spot*, which is the other half
+     * of the gesture it was asked for — point at one file, or drag a box round several.
+     * It did neither: git was not in the table at all, so a click was thrown away and
+     * there was no way to point at anything.
+     */
+    expect(CLICK_MEANS.git).toBe("point");
+    expect(CLICK_MEANS.screenshot).toBe("display");
+    expect(CLICK_MEANS.design).toBe("display");
+    // A repository is not a desktop, so a git click can never mean the whole screen.
+    expect(WHOLE_DISPLAY).not.toContain("git");
+
+    // The two answers are kept in one table, so they cannot come to disagree.
+    expect([...WHOLE_DISPLAY].toSorted()).toEqual(["design", "screenshot"]);
+    for (const tool of WHOLE_DISPLAY) {
+      expect(CLICK_MEANS[tool], tool).toBe("display");
+    }
+
+    // Every other tool still throws a stray click away.
+    for (const tool of Object.keys(TOOLS)) {
+      if (["git", "screenshot", "design"].includes(tool)) {
+        continue;
+      }
+      expect(CLICK_MEANS[tool], `${tool} should ignore a click`).toBeUndefined();
+    }
+  });
+
+  test("the mark a git click makes is the shape a pin already is", () => {
+    // No region and one point, which is what `pointAt` produces — so it draws through
+    // `badgeAt` as a numbered pin and carries a coordinate through `spotIn`, with no new
+    // drawing code and no second idea of what a placed mark is.
+    const mark = readFileSync(new URL("../apps/linux/ui/toolbar-mark.js", import.meta.url), "utf8");
+    const clicking = mark.slice(mark.indexOf("const meant = CLICK_MEANS[state.tool]"));
+    expect(clicking.slice(0, 700)).toMatch(
+      /meant === "point"[\s\S]{0,220}region: null,\s*points: \[finished\.points\[0\]\]/,
+    );
+    // And the display case still makes a mark with no point at all, which is what makes
+    // it mean the screen rather than a place on it.
+    expect(clicking.slice(0, 700)).toMatch(/meant === "display"[\s\S]{0,160}points: \[\]/);
+  });
+
+  test("only the git command in your hand is lit, not all of them", () => {
+    /*
+     * Several rows share one tool and differ only in what they ask it for, so "is this
+     * the current tool" lit every one of them — choosing Stage lit Commit, Push and
+     * Rebase alongside it. Design had a special case for this; git did not, and the fix
+     * is one rule rather than a second special case.
+     */
+    const page = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
+    const rail = readFileSync(new URL("../apps/linux/ui/toolbar-rail.js", import.meta.url), "utf8");
+
+    expect(page).toContain("const kindNow = { design: state.designKind, git: state.gitKind }");
+    expect(page).toMatch(/button\.dataset\.kind === kindNow\[button\.dataset\.tool\]/);
+
+    // Both row builders name their kind the same way, or the rule only works for one.
+    const rows = [...rail.matchAll(/button\.dataset\.kind = id;/g)];
+    expect(rows.length, "design rows and git rows both").toBe(2);
+    expect(page, "and the old per-tool attribute is gone").not.toContain("dataset.design");
   });
 });

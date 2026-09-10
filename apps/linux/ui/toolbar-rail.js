@@ -373,7 +373,7 @@ function designRow(into, id, kind) {
   button.type = "button";
   button.className = "row";
   button.dataset.tool = "design";
-  button.dataset.design = id;
+  button.dataset.kind = id;
   button.innerHTML = icon(kind.glyph, 14) + `<span>${kind.label}</span>`;
   button.addEventListener("click", () => {
     state.designKind = id;
@@ -393,7 +393,7 @@ function gitRow(into, id, kind) {
   button.type = "button";
   button.className = "row";
   button.dataset.tool = "git";
-  button.dataset.git = id;
+  button.dataset.kind = id;
   button.innerHTML = icon(kind.glyph, 14) + `<span>${kind.label}</span>`;
   button.addEventListener("click", () => {
     state.gitKind = id;

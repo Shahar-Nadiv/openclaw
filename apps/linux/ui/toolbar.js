@@ -279,12 +279,15 @@ function render() {
       counted(state.agents.length, "agent") +
         (talking() ? ` · ${counted(talking(), "conversation")}` : "");
 
+  // Which kind each tool that has kinds is currently set to. One rule rather than a
+  // special case per tool: several rows share a tool and differ only in what they ask it
+  // for, so "is this the current tool" lights all of them — which it did for git, where
+  // choosing Stage lit Commit, Push and Rebase alongside it.
+  const kindNow = { design: state.designKind, git: state.gitKind };
   for (const button of document.querySelectorAll(".row[data-tool]")) {
-    // Five of these rows are the same tool and differ only in what they ask it for, so
-    // "is this the current tool" would light all five at once.
     const chosen =
       button.dataset.tool === state.tool &&
-      (!button.dataset.design || button.dataset.design === state.designKind);
+      (!button.dataset.kind || button.dataset.kind === kindNow[button.dataset.tool]);
     button.setAttribute("aria-pressed", String(chosen));
   }
 

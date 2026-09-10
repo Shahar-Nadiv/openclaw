@@ -1557,11 +1557,15 @@ function headOf(from, to, screen) {
  * disagree. For these four, a press outside the popup keeps the mark you just made and
  * begins the next one, instead of discarding it.
  *
+ * Git is on it for the same reason and was not, which made it unusable: staging is
+ * three files and a sentence about them, and every press after the first cancelled the
+ * mark before it and started nothing. One git mark was the most anybody could have.
+ *
  * The rest are not on this list because they each answer one question in one go — a
  * distance, a colour, a recording, what the desktop says is under the pointer. Nobody
  * accumulates those, and for them a press outside still means "never mind".
  */
-const KEEPS_MARKING = ["pointAt", "box", "circle", "draw"];
+const KEEPS_MARKING = ["pointAt", "box", "circle", "draw", "git"];
 
 /**
  * What a mark is called on screen, which has to be what it is called in the message.
@@ -1581,8 +1585,30 @@ function numberOf(marks, mark) {
   return at < 0 ? null : at + 1;
 }
 
+/**
+ * What a press that went nowhere means, for the tools where it means anything.
+ *
+ * A drag says "this region" for all of them. A click is the same gesture with no
+ * distance in it, and for most tools that is a slip — a zero-sized mark, invisible,
+ * un-hittable and still counted, which is why it is thrown away.
+ *
+ * Two tools read it as *the whole display*: not dragging a screenshot out is how somebody
+ * asks for the screen, and refusing that as a slip would leave the simplest thing here
+ * with no way to ask for it.
+ *
+ * Git reads it as *this spot*, which is the other half of its gesture: point at one file,
+ * or drag a box round several. It cannot mean the whole display — a desktop is not a
+ * repository — and it must not mean nothing, which is what it did when this was a list of
+ * two names and git was not on it.
+ */
+const CLICK_MEANS = {
+  screenshot: "display",
+  design: "display",
+  git: "point",
+};
+
 /** The tools for which a click that selected nothing means the whole display. */
-const WHOLE_DISPLAY = ["screenshot", "design"];
+const WHOLE_DISPLAY = Object.keys(CLICK_MEANS).filter((tool) => CLICK_MEANS[tool] === "display");
 
 /** Single letters that pick a tool, from the tooltips the rail shows. */
 const KEYS = {
