@@ -104,8 +104,11 @@ for variant in "${wanted[@]}"; do
         # installing this is shown the same surface and accepts it themselves.
         openclaw plugins install 'npm-pack:/work/$(basename "$tarball")' --force --accept-capabilities
         echo
-        echo '--- what doctor says'
-        openclaw doctor 2>&1 | grep -i colai || echo '(colai said nothing about itself)'
+        echo '--- what colai says for itself'
+        # Not doctor: core names the five bundled plugins that contribute health checks
+        # and has no seam for an installed one, so doctor never loads this plugin. Its
+        # own command does.
+        openclaw colai
         echo
         echo '--- is the toolbar there'
         binary=\$(find ~/.openclaw -type f -name colai-toolbar 2>/dev/null | head -1)

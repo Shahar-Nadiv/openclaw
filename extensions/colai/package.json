@@ -15,6 +15,7 @@
   ],
   "files": [
     "index.ts",
+    "src/",
     "dist/",
     "bin/",
     "openclaw.plugin.json",

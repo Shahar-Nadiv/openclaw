@@ -1,4 +1,3 @@
-import { getHealthCheck } from "openclaw/plugin-sdk/health";
 // The plugin entry, loaded and registered the way the Gateway loads it.
 //
 // Everything else about colai is checked by reading files. This is the one test that
@@ -9,10 +8,12 @@ import { describe, expect, it as test } from "vitest";
 import colai from "./index.js";
 
 type Service = { id: string; start: (ctx: unknown) => void; stop?: (ctx: unknown) => void };
+type CliRegistration = { descriptors?: { name: string }[] };
 
 /** Register the plugin against a host that records what it was handed. */
 function registerColai(config: Record<string, unknown> = {}) {
   const services: Service[] = [];
+  const commands: string[] = [];
   const said: string[] = [];
   const logger = {
     info: (message: string) => said.push(message),
@@ -26,20 +27,27 @@ function registerColai(config: Record<string, unknown> = {}) {
       pluginConfig: config,
       logger,
       registerService: (service) => services.push(service as Service),
+      registerCli: (_registrar, options) => {
+        for (const descriptor of (options as CliRegistration)?.descriptors ?? []) {
+          commands.push(descriptor.name);
+        }
+      },
     }),
   );
-  return { services, said, ctx: { logger } };
+  return { services, commands, said, ctx: { logger } };
 }
 
 describe("the plugin OpenClaw loads", () => {
-  test("it registers one service and the doctor check for the toolbar", () => {
-    const { services } = registerColai();
+  test("it registers one service and one command", () => {
+    const { services, commands } = registerColai();
     expect(services.map((service) => service.id)).toEqual(["colai-toolbar"]);
-    expect(getHealthCheck("colai/toolbar-built")?.kind).toBe("plugin");
+    // `openclaw colai` is how anybody outside the Gateway finds out whether the toolbar
+    // is there. Without it there is no answer at all: doctor cannot load this plugin.
+    expect(commands).toEqual(["colai"]);
   });
 
-  test("registering twice does not fight the doctor registry", () => {
-    // `register` runs again on reload, and a second claim on the same check id throws.
+  test("registering twice registers twice, without complaint", () => {
+    // `register` runs again on reload.
     expect(() => registerColai()).not.toThrow();
   });
 
@@ -68,21 +76,6 @@ describe("the plugin OpenClaw loads", () => {
         process.env.DISPLAY = display;
       }
     }
-  });
-
-  test("the doctor check finds its own build script", async () => {
-    /*
-     * `here` is the package root, and this module is `index.ts` at the root in a
-     * checkout but `dist/index.js` one level down when installed from npm. Resolving it
-     * from `import.meta.url` alone gives a plugin that works in development and points
-     * at nothing on anybody else's machine — the check would answer "could not check"
-     * on every installed copy.
-     */
-    registerColai();
-    const found = await getHealthCheck("colai/toolbar-built")?.detect(
-      {} as Parameters<NonNullable<ReturnType<typeof getHealthCheck>>["detect"]>[0],
-    );
-    expect(found?.some((finding) => finding.message.includes("could not check"))).toBe(false);
   });
 
   test("stopping before anything started is not an error", () => {

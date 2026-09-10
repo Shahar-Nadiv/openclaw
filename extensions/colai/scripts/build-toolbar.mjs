@@ -7,13 +7,9 @@
 // somebody who wants a toolbar for a Rust toolchain and GTK headers was never a good
 // trade anyway. So the toolbar travels already built, in `bin/`, and this is what puts
 // it there before the package is packed.
-//
-// Run without arguments it builds and stages. `--check` reports the same findings as
-// JSON and compiles nothing; the plugin's doctor check runs it that way, so what the
-// build decided and what the doctor says later cannot disagree.
 
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -51,17 +47,6 @@ function whatIsMissing() {
 }
 
 const missing = whatIsMissing();
-
-if (process.argv.includes("--check")) {
-  console.log(
-    JSON.stringify({
-      built: existsSync(staged) || existsSync(compiled),
-      missing: missing.map((need) => ({ what: need.what, fix: need.fix })),
-      log: existsSync(logFile) ? logFile : null,
-    }),
-  );
-  process.exit(0);
-}
 
 if (missing.length > 0) {
   console.error("\ncolai: the toolbar cannot be built here, because this machine is missing:\n");

@@ -4589,7 +4589,29 @@ describe("what the plugin ships", () => {
     // what runs. Either one absent is an installed plugin that does nothing.
     expect(shipped("openclaw.plugin.json")).toBe(true);
     expect(shipped("index.ts")).toBe(true);
+    expect(shipped("src/")).toBe(true);
     expect(manifest.openclaw?.extensions).toEqual(["./index.ts"]);
+  });
+
+  test("the command that answers for the toolbar is declared where doctor cannot", () => {
+    /*
+     * `openclaw doctor` cannot ask. Core's `registerBundledHealthChecks` names five
+     * bundled plugins and has no seam for an installed one, and a plugin's `register`
+     * does not run in the doctor process at all — measured, by loading a probe into the
+     * installed copy and running doctor: it never fired.
+     *
+     * A plugin's own command does load it. So the manifest declares `colai`, and it has
+     * to be declared in both places: `cliCommands` for the command tree, and
+     * `activation.onCommands` so the plugin is loaded when somebody types it.
+     */
+    const declared = JSON.parse(readFileSync(new URL("openclaw.plugin.json", dir), "utf8")) as {
+      cliCommands?: { name: string }[];
+      activation?: { onCommands?: string[]; onStartup?: boolean };
+    };
+    expect(declared.cliCommands?.map((command) => command.name)).toEqual(["colai"]);
+    expect(declared.activation?.onCommands).toContain("colai");
+    // And still with the Gateway, which is what actually puts it on screen.
+    expect(declared.activation?.onStartup).toBe(true);
   });
 
   test("the toolbar travels already built", () => {

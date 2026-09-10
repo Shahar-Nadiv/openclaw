@@ -10,20 +10,12 @@
 // starts the service if it is not up yet. Somebody who runs `openclaw plugins install`
 // should get a toolbar, not a form.
 
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
-import {
-  getHealthCheck,
-  registerHealthCheck,
-  type HealthFinding,
-} from "openclaw/plugin-sdk/health";
 import { buildPluginConfigSchema, definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { z } from "zod";
-
-const runFile = promisify(execFile);
 
 /**
  * The package root, whichever file is running.
@@ -81,73 +73,6 @@ function toolbarBinary(): string | null {
   return paths.find((path) => existsSync(path)) ?? null;
 }
 
-const BUILD_CHECK_ID = "colai/toolbar-built";
-
-/**
- * What `openclaw doctor` says about the toolbar.
- *
- * It asks the install script rather than probing again, so the answer here and the one
- * printed during install come from the same list and cannot drift apart.
- */
-const toolbarBuildCheck = {
-  id: BUILD_CHECK_ID,
-  kind: "plugin",
-  description: "Check that the colai toolbar is built and can be built.",
-  source: "colai",
-  async detect(): Promise<readonly HealthFinding[]> {
-    let report: { built: boolean; missing: { what: string; fix: string }[]; log: string | null };
-    try {
-      const { stdout } = await runFile(
-        process.execPath,
-        [join(here, "scripts/build-toolbar.mjs"), "--check"],
-        { encoding: "utf8" },
-      );
-      report = JSON.parse(stdout);
-    } catch (error) {
-      return [
-        {
-          checkId: BUILD_CHECK_ID,
-          severity: "error",
-          source: "colai",
-          message: `colai could not check the toolbar: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ];
-    }
-
-    // Built and running is the whole answer, even on a machine that has since lost the
-    // toolchain — nothing needs rebuilding until the plugin is updated.
-    if (report.built) {
-      return [];
-    }
-
-    if (report.missing.length > 0) {
-      return report.missing.map((need) => ({
-        checkId: BUILD_CHECK_ID,
-        severity: "warning" as const,
-        source: "colai",
-        message: `The colai toolbar cannot be built: this machine is missing ${need.what}.`,
-        requirement: need.what,
-        fixHint: `${need.fix}\nThen run \`openclaw plugins update @colai/toolbar\`.`,
-      }));
-    }
-
-    // Everything it needs is here and it still is not built, so the build is the thing
-    // that failed and its log is what explains it.
-    return [
-      {
-        checkId: BUILD_CHECK_ID,
-        severity: "warning",
-        source: "colai",
-        message: "The colai toolbar is not built, although this machine has everything it needs.",
-        path: report.log ?? undefined,
-        fixHint: report.log
-          ? `Read ${report.log}, then run \`openclaw plugins update @colai/toolbar\`.`
-          : "Run `openclaw plugins update @colai/toolbar`.",
-      },
-    ];
-  },
-} as const;
-
 export default definePluginEntry({
   id: "colai",
   name: "colai",
@@ -162,11 +87,26 @@ export default definePluginEntry({
     }
     const autostart = parsed.data.autostart ?? true;
 
-    // Registering the same id twice throws, and `register` runs again whenever the
-    // plugin is reloaded.
-    if (!getHealthCheck(BUILD_CHECK_ID)) {
-      registerHealthCheck(toolbarBuildCheck);
-    }
+    // `openclaw colai` says whether the toolbar is there and whether it is on screen.
+    // It is a command rather than a doctor check because doctor cannot ask: core names
+    // the five bundled plugins that contribute health checks and has no seam for an
+    // installed one, so a check registered here would only exist inside the Gateway —
+    // which is not the process `openclaw doctor` runs in.
+    api.registerCli(
+      async ({ program }) => {
+        const { registerColaiCli } = await import("./src/cli.js");
+        registerColaiCli(program, toolbarBinary);
+      },
+      {
+        descriptors: [
+          {
+            name: "colai",
+            description: "Show whether the colai toolbar is installed and on screen",
+            hasSubcommands: false,
+          },
+        ],
+      },
+    );
 
     let toolbar: ChildProcess | null = null;
 

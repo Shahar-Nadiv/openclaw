@@ -2,10 +2,17 @@
   "id": "colai",
   "name": "colai",
   "description": "Point at anything on screen and hand it to an agent.",
+  "cliCommands": [
+    {
+      "name": "colai",
+      "description": "Show whether the colai toolbar is installed and on screen",
+      "hasSubcommands": false
+    }
+  ],
   "activation": {
     "onStartup": true,
     "onCommands": [
-      "doctor"
+      "colai"
     ]
   },
   "configSchema": {
@@ -17,5 +24,11 @@
         "description": "Open the toolbar when OpenClaw starts. On by default."
       }
     }
-  }
+  },
+  "commandAliases": [
+    {
+      "name": "colai",
+      "kind": "cli"
+    }
+  ]
 }
