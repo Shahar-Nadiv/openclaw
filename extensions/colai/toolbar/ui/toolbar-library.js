@@ -164,6 +164,7 @@ function drawLibrary() {
 
   const find = document.createElement("input");
   find.className = "popup-note library-find";
+  find.dataset.field = "library-find";
   find.type = "text";
   find.value = open.query;
   find.placeholder =

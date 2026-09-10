@@ -231,7 +231,63 @@ function shutWhatIsOpen() {
   if (shut) render();
 }
 
+/**
+ * The field somebody has their cursor in, and where in it.
+ *
+ * Every panel here redraws whole: `replaceChildren` throws away the box being typed in
+ * and builds a new one in its place. The words survive, because they are held in state
+ * and written back — but the cursor does not. It falls onto the page, and on this page
+ * a single letter typed onto the page is a tool shortcut. That is the whole of the bug
+ * where writing a note under a mark switched the toolbar to another tool mid-sentence.
+ *
+ * Each field says which one it is, so the one that had the cursor can be found again.
+ * A field without a `data-field` is a field that will lose the caret, and that is now
+ * the only way to lose it.
+ */
+function whatIsBeingTyped() {
+  const had = document.activeElement;
+  if (!had || !had.dataset || !had.dataset.field) return null;
+  // Not every field has a caret to be asked about — a slider, a number, a date — and on
+  // some of them asking is itself an error. Being in the right box matters more than
+  // being at the right character, so an unanswerable caret is simply not restored.
+  let from = null;
+  let to = null;
+  try {
+    from = had.selectionStart;
+    to = had.selectionEnd;
+  } catch {}
+  return { field: had.dataset.field, from, to };
+}
+
+/** Put the cursor back where it was, if what it was in is still there. */
+function giveItBack(held) {
+  if (!held) return;
+  // Compared rather than matched with a selector: a field is named after the mark or the
+  // session it belongs to, and those names are not ours to promise are selector-safe.
+  let now = null;
+  for (const field of document.querySelectorAll("[data-field]")) {
+    if (field.dataset.field === held.field) {
+      now = field;
+      break;
+    }
+  }
+  if (!now) return;
+  // Untouched by this redraw, so it still holds the cursor and the selection it had.
+  // Focusing it again would be the one thing able to disturb them.
+  if (now === document.activeElement) return;
+  // Without `preventScroll`, putting the cursor back is itself enough to scroll the
+  // panel — which would undo the position a panel restored a moment ago.
+  now.focus({ preventScroll: true });
+  if (held.from === null) return;
+  try {
+    now.setSelectionRange(held.from, held.to);
+  } catch {}
+}
+
 function render() {
+  // Saved before anything is replaced, and put back once everything has been. Several of
+  // the panels drawn below are boxes somebody is in the middle of writing in.
+  const writing = whatIsBeingTyped();
   const vertical = isVertical(state.dock);
   el.wrap.dataset.vertical = String(vertical);
   el.wrap.dataset.dock = state.dock || "";
@@ -436,6 +492,7 @@ function render() {
   // all — the popup is stacked above it, so its own controls still get their clicks.
   el.capture.hidden = state.tool === "pointer";
   shape();
+  giveItBack(writing);
 }
 
 /**
@@ -627,6 +684,12 @@ function onKey(event) {
   // a character they meant to type.
   if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)))
     return;
+  // Nor while a box is open asking to be written in, whatever the page currently thinks
+  // has the cursor. `render` puts the caret back into the box after every redraw, so
+  // this should not come up — but if it ever does, a letter meant for the note is worth
+  // dropping and is not worth changing the tool for. Both of these open over the work
+  // and close back to it with Escape, which is still the way out.
+  if (state.popup !== null || state.library !== null) return;
   const tool = KEYS[event.key.toLowerCase()];
   if (tool) {
     event.preventDefault();

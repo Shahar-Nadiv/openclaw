@@ -115,6 +115,10 @@ function drawPopup() {
 
   const note = document.createElement("textarea");
   note.className = "popup-note";
+  // Named so a redraw can find it again and put the cursor back. Named apart from the
+  // composer's note for the same mark, because both can be on screen at once and a
+  // cursor restored into the wrong one of the two is its own bug.
+  note.dataset.field = `popup-note:${mark.id}`;
   note.rows = 2;
   note.placeholder = "What about it?";
   note.value = mark.note || "";
@@ -193,6 +197,7 @@ function drawPopup() {
     line.className = "popup-dest-line";
     const where = document.createElement("input");
     where.className = "popup-note popup-dest";
+    where.dataset.field = `dest:${mark.id}`;
     where.type = "text";
     where.value = mark.dest || "";
     // A component has no home to suggest, because only the repository knows where its
@@ -517,6 +522,7 @@ function effortPick() {
     const bar = document.createElement("input");
     bar.type = "range";
     bar.className = "effort-bar";
+    bar.dataset.field = "effort";
     bar.min = "0";
     bar.max = String(stops.length - 1);
     bar.step = "1";
@@ -1051,6 +1057,7 @@ function drawAutomation() {
 
   const name = document.createElement("input");
   name.className = "popup-note";
+  name.dataset.field = "cron-name";
   name.type = "text";
   name.value = cron.name;
   name.placeholder = nameFor(state.marks, state.text, state.surface);
@@ -1072,6 +1079,7 @@ function drawAutomation() {
     line.className = "cron-line";
     const amount = document.createElement("input");
     amount.className = "popup-note cron-amount";
+    amount.dataset.field = "cron-amount";
     amount.type = "number";
     amount.min = "1";
     amount.value = cron.amount;
@@ -1204,6 +1212,9 @@ function chips(label, table, chosen, pick) {
 function field(type, value, label, onInput, placeholder) {
   const input = document.createElement("input");
   input.className = "popup-note";
+  // What it asks for is what it is: these are built from a table, and no two of them on
+  // screen at once ask the same thing.
+  input.dataset.field = `field:${label}`;
   input.type = type;
   input.value = value || "";
   if (placeholder) input.placeholder = placeholder;

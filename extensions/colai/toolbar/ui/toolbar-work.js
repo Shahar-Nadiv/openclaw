@@ -113,7 +113,6 @@ function drawWork() {
   const waiting = needingYou(state.history, state.runs);
   const shown = state.work.filter === "needs" ? waiting : state.history;
 
-  const held = whatIsBeingTyped();
   // Where in the list somebody had got to. `replaceChildren` builds a new scrolling
   // element at the top, so without this the panel throws you back to the first row every
   // time anything redraws.
@@ -126,37 +125,9 @@ function drawWork() {
   );
   const log = el.work.querySelector(".work-log");
   if (log) log.scrollTop = wasAt;
-  giveItBack(held);
-}
-
-/**
- * The field somebody has their cursor in, and where in it.
- *
- * The panel redraws whole, which replaces every field in it with a new one. The words
- * survive — they are held in state and written back — but the focus and the caret do
- * not, so an agent answering while somebody was mid-sentence dropped them out of the
- * box and put their cursor at the end of it. Each field says which one it is, so the
- * one that had the cursor can be found again afterwards.
- */
-function whatIsBeingTyped() {
-  const had = document.activeElement;
-  if (!had || !el.work.contains(had) || !had.dataset || !had.dataset.field) return null;
-  return { field: had.dataset.field, from: had.selectionStart, to: had.selectionEnd };
-}
-
-/** Put the cursor back where it was, if what it was in is still there. */
-function giveItBack(held) {
-  if (!held) return;
-  const now = el.work.querySelector(`[data-field="${held.field}"]`);
-  if (!now) return;
-  // Without `preventScroll`, putting the cursor back is itself enough to scroll the panel
-  // — which would undo the position restored a moment ago.
-  now.focus({ preventScroll: true });
-  // Only where it will take: a field that has lost the text around it would throw, and
-  // the cursor being in the right box matters more than being at the right character.
-  try {
-    now.setSelectionRange(held.from, held.to);
-  } catch {}
+  // The cursor is put back by `render`, which wraps this and every other panel — the
+  // boxes somebody writes in are not all in here, and one panel minding only its own
+  // was how a note in the mark popup kept losing the caret.
 }
 
 /**

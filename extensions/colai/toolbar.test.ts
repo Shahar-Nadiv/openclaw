@@ -3853,22 +3853,49 @@ describe("one light for every agent at once", () => {
       new URL("./toolbar/ui/toolbar-compose.js", import.meta.url),
       "utf8",
     );
-
-    // The redraw takes a note of where the cursor was and puts it back.
-    const draw = work.slice(
-      work.indexOf("function drawWork("),
-      work.indexOf("function whatIsBeingTyped"),
+    const page = readFileSync(new URL("./toolbar/ui/toolbar.js", import.meta.url), "utf8");
+    const library = readFileSync(
+      new URL("./toolbar/ui/toolbar-library.js", import.meta.url),
+      "utf8",
     );
-    expect(draw, "note the cursor before replacing the panel").toContain("whatIsBeingTyped()");
-    expect(draw, "and give it back after").toContain("giveItBack(");
-    expect(draw.indexOf("whatIsBeingTyped()")).toBeLessThan(draw.indexOf("replaceChildren"));
-    expect(draw.indexOf("replaceChildren")).toBeLessThan(draw.indexOf("giveItBack("));
-    expect(work, "the caret, not only the field").toContain("setSelectionRange(");
+
+    // Around the whole redraw, not around one panel. The Work panel minded its own
+    // fields and nothing minded the rest, so a note under a mark — the popup is rebuilt
+    // on every render too — lost the caret to the page, where the next letter typed was
+    // read as a tool shortcut and switched the toolbar mid-sentence.
+    const opens = page.indexOf("function render(");
+    const draw = page.slice(opens, page.indexOf("\nfunction ", opens));
+    expect(draw, "note the cursor before anything is replaced").toContain("whatIsBeingTyped()");
+    expect(draw, "and give it back after everything has been").toContain("giveItBack(");
+    expect(draw.indexOf("whatIsBeingTyped()")).toBeLessThan(draw.indexOf("drawPopup()"));
+    expect(draw.indexOf("drawPopup()")).toBeLessThan(draw.indexOf("giveItBack("));
+    expect(page, "the caret, not only the field").toContain("setSelectionRange(");
+    expect(page, "looked for across the page, not inside one panel").toContain(
+      'document.querySelectorAll("[data-field]")',
+    );
+    expect(work, "the panel no longer keeps its own pair").not.toContain("whatIsBeingTyped");
 
     // Every field somebody types into says which one it is, or it cannot be found again.
     expect(compose, "the ask field").toContain('text.dataset.field = "ask"');
-    expect(compose, "a mark's note").toMatch(/note\.dataset\.field = `note:/);
+    expect(compose, "a mark's note in the composer").toMatch(/note\.dataset\.field = `note:/);
+    expect(compose, "a mark's note in its popup").toMatch(/note\.dataset\.field = `popup-note:/);
+    expect(compose, "where a design goes").toMatch(/where\.dataset\.field = `dest:/);
+    expect(compose, "how hard to think").toContain('bar.dataset.field = "effort"');
+    expect(compose, "an automation's name").toContain('name.dataset.field = "cron-name"');
+    expect(compose, "how many").toContain('amount.dataset.field = "cron-amount"');
+    expect(compose, "the scheduled fields").toMatch(/input\.dataset\.field = `field:/);
+    expect(library, "the library search").toContain('find.dataset.field = "library-find"');
     expect(work, "the reply field").toMatch(/field\.dataset\.field = `say:/);
+
+    // And a letter is never a shortcut while a box is open to be written in — belt to
+    // the braces above, so that losing the caret can cost a keystroke but not the tool.
+    const key = page.slice(page.indexOf("function onKey("), page.indexOf("/* ── start"));
+    expect(key, "not while a mark or the library is open").toContain(
+      "state.popup !== null || state.library !== null",
+    );
+    expect(key.indexOf("state.popup !== null || state.library !== null")).toBeLessThan(
+      key.indexOf("KEYS[event.key.toLowerCase()]"),
+    );
 
     // And the clock moves itself rather than redrawing the panel around it.
     const tick = work.slice(
