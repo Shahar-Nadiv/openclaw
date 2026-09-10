@@ -41,6 +41,19 @@ const GLYPHS = {
     '<rect x="2.5" y="5" width="14" height="14" rx="2.5"/><path d="M16.5 10.2l5-2.7v9l-5-2.7z"/>',
   colour:
     '<path d="M12 3.5s6 6.4 6 10.1a6 6 0 0 1-12 0C6 9.9 12 3.5 12 3.5z"/><path d="M8.6 14.4a3.4 3.4 0 0 0 3.4 3.2"/>',
+  // Git, drawn the way git draws itself: commits are nodes and branches are the lines
+  // between them. Six that read as one family at seventeen pixels, which is what a rail
+  // this size can carry.
+  gitBranch:
+    '<circle cx="6.5" cy="5.5" r="2.3"/><circle cx="6.5" cy="18.5" r="2.3"/><circle cx="17.5" cy="8.5" r="2.3"/><path d="M6.5 7.8v8.4"/><path d="M17.5 10.8c0 3.6-3.1 4.7-6.7 5.3"/>',
+  gitCommit: '<circle cx="12" cy="12" r="3.6"/><path d="M2.5 12h5.9M15.6 12h5.9"/>',
+  gitAdd:
+    '<path d="M13.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z"/><path d="M13.5 3v5.5H19"/><path d="M12 12.5v5M9.5 15h5"/>',
+  gitIgnore:
+    '<path d="M13.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z"/><path d="M13.5 3v5.5H19"/><path d="M8.8 17.2l6.4-7.4"/>',
+  gitPush: '<path d="M4 4h16"/><path d="M12 20.5V8.2"/><path d="M7.2 13L12 8.2l4.8 4.8"/>',
+  gitRebase:
+    '<circle cx="6.5" cy="5.5" r="2.2"/><circle cx="6.5" cy="18.5" r="2.2"/><circle cx="17.5" cy="12" r="2.2"/><path d="M6.5 7.7v8.6"/><path d="M8.7 5.5h3.6a3.5 3.5 0 0 1 3.5 3.5v.9"/>',
   more:
     '<circle cx="6" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="18" r="1.7" fill="currentColor" stroke="none"/>',
 };
@@ -129,6 +142,7 @@ function buildRail() {
     key("draw", "Draw · D", "draw", () => flyout("draw"), MENU),
     key("shape", "Box / circle · S", "shape", () => flyout("shape"), MENU),
     key("design", "Design", "design", () => flyout("design"), MENU),
+    key("git", "Git", "gitBranch", () => flyout("git"), MENU),
   );
   dividers[0].after(tools);
 
@@ -218,6 +232,12 @@ function buildRail() {
   // that does not name it is a menu they conclude cannot do it.
   for (const [id, kind] of Object.entries(DESIGNS)) {
     designRow(el.flyDesign, id, kind);
+  }
+  // Same rule, same reason: every command named on the menu. Somebody who wants to know
+  // whether this toolbar can rebase should be able to find out by opening a menu rather
+  // than by marking something and hoping.
+  for (const [id, kind] of Object.entries(GITS)) {
+    gitRow(el.flyGit, id, kind);
   }
   howRow("send", "Send now", "hand it to the agent straight away", openWork);
   howRow("schedule", "Create an automation…", "the same thing, on a schedule", () => {
@@ -358,6 +378,26 @@ function designRow(into, id, kind) {
   button.addEventListener("click", () => {
     state.designKind = id;
     use("design");
+  });
+  into.append(button);
+}
+
+/**
+ * One git command on the git key's menu.
+ *
+ * Picking one settles what the next mark asks for and puts the tool in your hand, the
+ * way `designRow` does.
+ */
+function gitRow(into, id, kind) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "row";
+  button.dataset.tool = "git";
+  button.dataset.git = id;
+  button.innerHTML = icon(kind.glyph, 14) + `<span>${kind.label}</span>`;
+  button.addEventListener("click", () => {
+    state.gitKind = id;
+    use("git");
   });
   into.append(button);
 }

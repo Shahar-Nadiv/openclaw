@@ -17,6 +17,7 @@ const el = {
   grip: document.getElementById("grip"),
   flyShape: document.getElementById("fly-shape"),
   flyDesign: document.getElementById("fly-design"),
+  flyGit: document.getElementById("fly-git"),
   flyRecord: document.getElementById("fly-record"),
   flyDraw: document.getElementById("fly-draw"),
   flyRow: document.getElementById("fly-row"),
@@ -128,6 +129,9 @@ const state = {
   // Which kind of design the next design mark asks for. Chosen on the menu, and
   // changeable on the mark itself afterwards.
   designKind: DESIGN_FIRST,
+  // Which git command the next git mark is asking for. Chosen on the menu, and
+  // changeable on the mark afterwards, exactly as the design kind is.
+  gitKind: GIT_FIRST,
   // Whether the exact tools are folded shut. Open to begin with — the rail is what
   // this toolbar is, and a first look at it should be the whole thing. Remembered with
   // the dock, because it is the same kind of fact: how somebody wants this to sit.
@@ -187,6 +191,15 @@ function render() {
         state.tool === "design"
           ? `Design · ${(DESIGNS[state.designKind] || DESIGNS[DESIGN_FIRST]).label}`
           : "Design";
+    } else if (id === "git") {
+      button.setAttribute(
+        "aria-pressed",
+        String(state.tool === "git" || state.open === "git"),
+      );
+      // Which of the six is in your hand, because the key looks the same for all of
+      // them and a rebase is not a thing to find out about by doing it.
+      button.title =
+        state.tool === "git" ? `Git · ${GITS[gitKindOf({ git: state.gitKind })].label}` : "Git";
     } else if (id === "agents") {
       button.setAttribute("aria-pressed", String(state.open === "agents"));
     } else if (id === "send") {
@@ -273,6 +286,7 @@ function render() {
 
   el.flyShape.hidden = state.open !== "shape";
   el.flyDesign.hidden = state.open !== "design";
+  el.flyGit.hidden = state.open !== "git";
   el.flyHow.hidden = state.open !== "how";
   el.flyAutomate.hidden = state.open !== "automate";
   // Folded, the six close up where they stand rather than vanishing — the stylesheet
@@ -328,6 +342,7 @@ function render() {
   for (const [node, anchor] of [
     [el.flyShape, buttons.shape],
     [el.flyDesign, buttons.design],
+    [el.flyGit, buttons.git],
     [el.flyRecord, buttons.record],
     [el.flyDraw, buttons.draw],
     [el.flyRow, buttons.agents],

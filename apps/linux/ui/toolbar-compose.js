@@ -433,9 +433,15 @@ function askField(go) {
   // this line does not name it nobody ever finds it. It is the largest empty space in
   // the composer and it is exactly where somebody is about to type.
   const marked = chosenMarks().length;
-  text.placeholder = marked
-    ? `Say what you want done with ${counted(marked, "mark")}… / for mode, @ for a file`
-    : "Say what you want done… / for mode, @ for a file";
+  // A commit's field is not an ask, it is the message — passed through to git exactly as
+  // typed. Saying "say what you want done" over a box whose contents become a permanent
+  // line in somebody's history is the field lying about what it is for.
+  const marks = chosenMarks();
+  text.placeholder = isCommitting(marks)
+    ? "The commit message…"
+    : marked
+      ? `Say what you want done with ${counted(marked, "mark")}… / for mode, @ for a file`
+      : "Say what you want done… / for mode, @ for a file";
   text.value = state.text;
 
   const menu = document.createElement("div");

@@ -198,6 +198,10 @@ function addMark(mark) {
     mark.design = state.designKind;
     mark.dest = (DESIGNS[state.designKind] || DESIGNS[DESIGN_FIRST]).home;
   }
+  // Which git command this mark is asking for. The repository is not settled here: the
+  // address is read after the picture is taken, so it is stamped on in `shoot` where
+  // the rest of the address is.
+  if (mark.tool === "git") mark.git = state.gitKind;
   state.marks.push(mark);
   // A new mark ends the redo trail: what was undone is no longer what comes next.
   state.undone = [];
@@ -248,6 +252,11 @@ async function photograph(mark) {
   // describes it. `inside` is that place said in the window's own terms, so drawing can
   // ask where the window is now instead of where the desktop was then.
   mark.on = anchorOf(mark.where);
+  // The repository this is about, worked out from the address the mark just took. Done
+  // here rather than at send time for the same reason the address is: two marks made in
+  // two checkouts are two repositories, and one read at the end would label both with
+  // whichever window happened to be last.
+  if (mark.tool === "git") mark.repo = repoFor(mark.where);
   if (mark.on) {
     const screen = screenSize();
     mark.inside = {

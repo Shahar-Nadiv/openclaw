@@ -33,7 +33,112 @@ const TOOLS = {
   record: { label: "Recording", press: "R", glyph: "record", writes: false },
   design: { label: "Design", glyph: "wireframe", writes: false },
   screenshot: { label: "Screenshot", glyph: "screenshot", writes: false },
+  git: { label: "Git", glyph: "gitBranch", writes: false },
 };
+
+/**
+ * What a git mark is asking for.
+ *
+ * Six commands behind one key, the way `DESIGNS` puts three behind the design key, and
+ * for the same reason: a rail with six near-identical keys on it is a rail nobody can
+ * read. Each is named on the menu, because a menu that does not name what it can do is
+ * a menu somebody concludes cannot do it.
+ *
+ * `needs` is the gesture, and it follows what the command is actually about. Staging and
+ * ignoring are about files, so they are marked — pointed at for one, boxed for several.
+ * Committing, pushing and rebasing are about a repository, so they are pointed at and
+ * the mark's only job is to say which one. Branches are not a mark at all: they are a
+ * window.
+ *
+ * colai reads git; the agent changes it. Nothing here runs a command — these are the
+ * sentences an agent is given, and a rebase that goes wrong should go wrong in front of
+ * something that can read the diff and stop.
+ */
+const GITS = {
+  add: {
+    label: "Stage",
+    glyph: "gitAdd",
+    needs: "files",
+    says: (repo) =>
+      `Stage what is marked in the picture${repo ? `, in the repository at ${repo}` : ""}. ` +
+      `Read \`git status\` first and match what is marked to what it lists. Say which ` +
+      `paths you matched — a picture is evidence, not a path, and staging the wrong ` +
+      `file is quieter to do than to notice.`,
+  },
+  ignore: {
+    label: "Ignore",
+    glyph: "gitIgnore",
+    needs: "files",
+    says: (repo) =>
+      `Add what is marked in the picture to \`.gitignore\`${repo ? ` in ${repo}` : ""}. ` +
+      `Put each entry under the heading it belongs to and leave the file's existing ` +
+      `order and comments alone. If something marked is already tracked, say so rather ` +
+      `than quietly adding a rule that will not take effect.`,
+  },
+  commit: {
+    label: "Commit",
+    glyph: "gitCommit",
+    needs: "repo",
+    // The one command whose words come from the person rather than the agent. Passed
+    // through exactly: a commit message somebody typed is the message they meant, and
+    // an agent improving it is an agent overwriting a decision.
+    says: (repo, said) =>
+      `Commit what is staged${repo ? ` in ${repo}` : ""}` +
+      (said
+        ? `, with exactly this message and no additions to it:\n\n${said}`
+        : `. Nothing was typed for the message, so write one from the diff.`) +
+      `\n\nIf nothing is staged, say so instead of staging something yourself.`,
+  },
+  push: {
+    label: "Push",
+    glyph: "gitPush",
+    needs: "repo",
+    says: (repo) =>
+      `Push the current branch${repo ? ` of ${repo}` : ""} to its upstream. Say what it ` +
+      `is ahead by before you do. If it has no upstream, say which remote and name you ` +
+      `would set and wait — a branch pushed somewhere nobody chose is hard to take back.`,
+  },
+  rebase: {
+    label: "Rebase",
+    glyph: "gitRebase",
+    needs: "repo",
+    says: (repo) =>
+      `Rebase the current branch${repo ? ` of ${repo}` : ""} onto its upstream. Stop at ` +
+      `the first conflict and show it rather than resolving it. If the branch has ` +
+      `already been pushed, say so before starting: this rewrites what is there.`,
+  },
+};
+
+/** The one a fresh toolbar offers, because it is the commonest thing to want. */
+const GIT_FIRST = "add";
+
+/** Which command a git mark is asking for, defaulted rather than trusted. */
+function gitKindOf(mark) {
+  const id = (mark && mark.git) || GIT_FIRST;
+  return GITS[id] ? id : GIT_FIRST;
+}
+
+/**
+ * The repository a mark is about.
+ *
+ * From the address the mark already carries — the window's working directory, or the
+ * folder of the document it was opened with. Both are real paths measured from the
+ * process behind the window, so this is the one place a git mark can get an answer
+ * without asking somebody to type it.
+ *
+ * A directory rather than a verified repository root: nothing here touches the disk, and
+ * an agent that is handed a directory can run `git rev-parse --show-toplevel` in it far
+ * more cheaply than colai can guess. Null when there is nothing to say, which the
+ * message states rather than hiding.
+ */
+function repoFor(where) {
+  const cwd = ((where && where.cwd) || "").trim();
+  if (cwd) return cwd;
+  const opened = ((where && where.opened) || "").trim();
+  if (!opened) return null;
+  const at = opened.lastIndexOf("/");
+  return at > 0 ? opened.slice(0, at) : null;
+}
 
 /**
  * What a batch of marks is being sent *for*.
@@ -573,6 +678,9 @@ function labelOf(mark) {
   // "Draw" says nothing about what was drawn. An arrow points at something and a
   // highlighter runs over it, and an agent reading the message should be told which.
   if (mark.tool === "draw") return (PENS[mark.pen] || PENS[PEN_FIRST]).label;
+  // "Git" says nothing about which of six. Staging and rebasing are not the same news,
+  // and the tray, the glass and the message all read this one word.
+  if (mark.tool === "git") return GITS[gitKindOf(mark)].label;
   return TOOLS[mark.tool] ? TOOLS[mark.tool].label : mark.tool;
 }
 
@@ -1308,6 +1416,9 @@ const DRAWS = {
   draw: "stroke",
   screenshot: "box",
   design: "box",
+  // Dragged, it takes several files at once; clicked, it is a point — which is what
+  // "this repository" looks like for the three commands that are about one.
+  git: "box",
   measure: "span",
   record: "box",
 };
@@ -1507,6 +1618,24 @@ function summaryFor(marks, mode, text, surface, files) {
           : kind.says(`mark-${at + 1}.png`, homeOf(mark)),
       );
     });
+    // And what a git mark is asking for. Its own sentence per mark, the way a design
+    // mark gets one: two marks in one batch can be two different commands, and folding
+    // them into one instruction would be inventing a command nobody chose.
+    marks.forEach((mark, at) => {
+      if (mark.tool !== "git") return;
+      const kind = GITS[gitKindOf(mark)];
+      if (!kind || !kind.says) return;
+      said.push("");
+      // Named by the mark it is about rather than renumbered. A second list starting at
+      // one, beside a list that already starts at one, is two things called 1.
+      said.push(`Mark ${at + 1}: ${kind.says(mark.repo || null, (text || "").trim())}`);
+      if (!mark.repo) {
+        said.push(
+          "colai could not work out which repository this is. Find it from the picture " +
+            "before doing anything.",
+        );
+      }
+    });
     said.push("");
   }
   // What came in from the file system, split by whether it could travel. Both halves
@@ -1531,11 +1660,19 @@ function summaryFor(marks, mode, text, surface, files) {
   const asked = MODES[mode] || MODES.plan;
   said.push(`${asked.label}: ${asked.says}`);
   const own = (text || "").trim();
-  if (own) {
+  // Not twice. For a commit the field *is* the commit message and has already been
+  // quoted into the instruction verbatim; repeating it underneath as "and here is what
+  // I want" would read as a second, vaguer ask about the same words.
+  if (own && !isCommitting(marks)) {
     said.push("");
     said.push(own);
   }
   return said.join("\n");
+}
+
+/** Whether anything going is a commit, whose words are the message rather than an ask. */
+function isCommitting(marks) {
+  return (marks || []).some((mark) => mark.tool === "git" && gitKindOf(mark) === "commit");
 }
 
 /**

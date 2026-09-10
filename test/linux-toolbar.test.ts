@@ -75,6 +75,9 @@ type ToolbarHelpers = {
       seconds?: number;
       design?: string;
       pen?: string;
+      /** Which git command this mark asks for, and the repository it is about. */
+      git?: string;
+      repo?: string | null;
       where?: Front | null;
       spot?: Spot | null;
       source?: string;
@@ -109,7 +112,20 @@ type ToolbarHelpers = {
     }
   >;
   DESIGN_FIRST: string;
-  labelOf: (mark: { tool: string; design?: string; pen?: string }) => string;
+  labelOf: (mark: { tool: string; design?: string; pen?: string; git?: string }) => string;
+  GITS: Record<
+    string,
+    {
+      label: string;
+      glyph: string;
+      needs: string;
+      says: (repo: string | null, said?: string) => string;
+    }
+  >;
+  GIT_FIRST: string;
+  gitKindOf: (mark: { git?: string } | null) => string;
+  repoFor: (where: Front | null) => string | null;
+  isCommitting: (marks: { tool?: string; git?: string }[]) => boolean;
   homeOf: (mark: { design?: string; dest?: string }) => string;
   WHOLE_DISPLAY: string[];
   scheduleOf: (cron: Cron) => Record<string, unknown> | null;
@@ -324,7 +340,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, GITS, GIT_FIRST, gitKindOf, repoFor, isCommitting, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
   context,
 );
 const {
@@ -350,6 +366,11 @@ const {
   RECORD_CLEAR,
   DESIGNS,
   DESIGN_FIRST,
+  GITS,
+  GIT_FIRST,
+  gitKindOf,
+  repoFor,
+  isCommitting,
   labelOf,
   homeOf,
   WHOLE_DISPLAY,
@@ -3989,5 +4010,111 @@ describe("marking several things before saying anything", () => {
     expect(said).toContain("1. Box");
     expect(said).toContain("2. Circle");
     expect(said).not.toContain("Point at");
+  });
+});
+
+describe("git, as six things one key can mean", () => {
+  const inEditor: Front = {
+    app: "code",
+    id: "0x1",
+    title: "toolbar-tools.js - colai - Visual Studio Code",
+    cwd: "/home/someone/Desktop/colai",
+    at: { x: 0, y: 0, width: 1920, height: 1080 },
+  };
+  const gitMark = (id: string) => ({
+    tool: "git",
+    git: id,
+    repo: repoFor(inEditor),
+    where: inEditor,
+  });
+
+  test("the repository comes from the address the mark already carries", () => {
+    /*
+     * The one thing a git mark needs that a picture cannot give it. Both sources are
+     * real paths measured from the process behind the window, so nobody has to type a
+     * checkout's location into a toolbar that is looking straight at it.
+     */
+    expect(repoFor(inEditor)).toBe("/home/someone/Desktop/colai");
+
+    // A window with no working directory, opened with a document: the document's folder.
+    expect(
+      repoFor({ app: "kicad", opened: "/home/someone/Documents/kicad/quad/quad.kicad_pro" }),
+    ).toBe("/home/someone/Documents/kicad/quad");
+
+    // The working directory wins when there is one — it is about the window, where a
+    // document is about one file that may sit anywhere beneath it.
+    expect(repoFor({ app: "code", cwd: "/srv/work", opened: "/srv/work/deep/one.ts" })).toBe(
+      "/srv/work",
+    );
+
+    // Nothing to say is said as nothing, never as a guess.
+    expect(repoFor(null)).toBeNull();
+    expect(repoFor({ app: "some-game" })).toBeNull();
+    expect(repoFor({ app: "x", opened: "toplevel" })).toBeNull();
+  });
+
+  test("every command names the repository it is about", () => {
+    // A git instruction that does not say where is an instruction about whichever
+    // checkout the agent happens to be sitting in, which is how the right change lands
+    // in the wrong repository.
+    for (const [id, kind] of Object.entries(GITS)) {
+      const said = kind.says("/home/someone/Desktop/colai", "a message");
+      expect(said, `${id} must name the repository`).toContain("/home/someone/Desktop/colai");
+      expect(said.length, `${id} must actually say something`).toBeGreaterThan(40);
+    }
+  });
+
+  test("a repository colai could not work out is said, not invented", () => {
+    // The same rule the address already follows. An agent told the repository is unknown
+    // goes and finds it; one told nothing runs git wherever it happens to be.
+    const said = summaryFor([{ tool: "git", git: "push", where: inEditor }], "build", "", null);
+    expect(said).toContain("could not work out which repository");
+    // And with one, it does not say that.
+    expect(summaryFor([gitMark("push")], "build", "", null)).not.toContain(
+      "could not work out which repository",
+    );
+  });
+
+  test("a commit sends the typed message once, exactly as typed", () => {
+    /*
+     * The one command whose words come from the person rather than the agent. Quoted
+     * into the instruction verbatim — an agent improving a commit message is an agent
+     * overwriting a decision — and not repeated underneath as a second, vaguer ask about
+     * the same words.
+     */
+    const message = "desktop: stop the rail eating its own relaunch";
+    const said = summaryFor([gitMark("commit")], "build", message, null);
+    expect(said).toContain("with exactly this message and no additions to it");
+    expect(said.split(message).length - 1, "said once, not twice").toBe(1);
+
+    // Every other command treats the field as an ask, and still shows it.
+    const asked = summaryFor([gitMark("push")], "build", "do it carefully", null);
+    expect(asked).toContain("do it carefully");
+
+    expect(isCommitting([gitMark("commit")])).toBe(true);
+    expect(isCommitting([gitMark("push")])).toBe(false);
+    expect(isCommitting([{ tool: "box" }])).toBe(false);
+  });
+
+  test('a git mark is called what it will do, not "Git"', () => {
+    // The word appears on the glass, in the tray and in the message. "Git" tells nobody
+    // whether the thing about to happen is a stage or a rebase.
+    expect(labelOf({ tool: "git", git: "rebase" })).toBe("Rebase");
+    expect(labelOf({ tool: "git", git: "add" })).toBe("Stage");
+    // A mark with no command, or one that is not a command, still says something true.
+    const first = GITS[GIT_FIRST];
+    assert.ok(first, "the default command must exist in the table");
+    expect(labelOf({ tool: "git" })).toBe(first.label);
+    expect(gitKindOf({ git: "nonsense" })).toBe(GIT_FIRST);
+  });
+
+  test("one gesture covers pointing at one file and boxing several", () => {
+    // Dragged it takes a region, clicked it is a point — which is what "this repository"
+    // looks like for the three commands that are about one. The box tools already work
+    // that way, so this needed no second mechanism.
+    expect(DRAWS.git).toBe("box");
+    // And it is not one of the tools where a click means the whole display: a click is
+    // the gesture that says *this*, and the whole desktop is not a repository.
+    expect(WHOLE_DISPLAY).not.toContain("git");
   });
 });
