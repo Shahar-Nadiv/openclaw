@@ -115,6 +115,26 @@ function stillFolding() {
   return folding !== null;
 }
 
+/*
+ * Opening has a stage of its own, and it is not symmetrical with closing.
+ *
+ * A folded-away key is `display: none`, because fifteen zero-width items in a pill two
+ * pixels wide overflow it. But nothing transitions *from* `display: none` — an element
+ * that starts being laid out appears at whatever size it computes to, so the keys came
+ * back at full width in a single frame while the pill grew around them.
+ *
+ * So opening takes two frames. The first puts the keys back in the layout still folded
+ * shut; the second unfolds them, and now there is a previous width to animate from.
+ * Closing needs no such thing: the keys are already laid out, and it is leaving the
+ * layout that has to wait, which is what `folding` above is for.
+ */
+let opening = false;
+
+/** Whether the rail should be drawn shut, whether or not it is still meant to be. */
+function foldedAway() {
+  return state.away || opening;
+}
+
 function tapped() {
   const now = Date.now();
   const again = now - lastTap < TAP_AGAIN;
@@ -123,6 +143,7 @@ function tapped() {
   state.away = !state.away;
   if (folding !== null) clearTimeout(folding);
   folding = null;
+  opening = false;
   if (state.away) {
     // Closing: hold them in the layout until they have finished closing.
     folding = setTimeout(() => {
@@ -130,6 +151,15 @@ function tapped() {
       render();
       followTheFold();
     }, FOLD_TIME);
+  } else {
+    // Opening: back into the layout this frame, still shut, and unfolded on the next —
+    // so the keys have a width to grow from rather than arriving at their final one.
+    opening = true;
+    requestAnimationFrame(() => {
+      opening = false;
+      render();
+      followTheFold();
+    });
   }
   // Nothing hangs off a rail that is not there. The same tidy-up opening the Work panel
   // already does for flyouts, in the other direction.

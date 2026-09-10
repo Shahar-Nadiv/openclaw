@@ -361,9 +361,11 @@ function render() {
   // than a second one that would have to agree with it.
   for (const [id, button] of Object.entries(buttons)) {
     if (id === "settings") continue;
-    button.dataset.folded = String(state.away || (EXACT.includes(id) && state.tucked));
+    button.dataset.folded = String(foldedAway() || (EXACT.includes(id) && state.tucked));
   }
-  el.wrap.dataset.away = String(state.away);
+  // Drawn shut for one frame longer than it is meant to be, on the way open: see
+  // `foldedAway`. The rail's own state is unchanged — only what is on screen.
+  el.wrap.dataset.away = String(foldedAway());
   // Only once the keys have finished closing do they leave the layout. Before that they
   // are still on screen, shrinking, which is the whole of the animation.
   el.wrap.dataset.awayDone = String(state.away && !stillFolding());

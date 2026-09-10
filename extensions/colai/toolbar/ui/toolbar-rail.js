@@ -55,10 +55,6 @@ const GLYPHS = {
   gitPush: '<path d="M4 4h16"/><path d="M12 20.5V8.2"/><path d="M7.2 13L12 8.2l4.8 4.8"/>',
   gitRebase:
     '<circle cx="6.5" cy="5.5" r="2.2"/><circle cx="6.5" cy="18.5" r="2.2"/><circle cx="17.5" cy="12" r="2.2"/><path d="M6.5 7.7v8.6"/><path d="M8.7 5.5h3.6a3.5 3.5 0 0 1 3.5 3.5v.9"/>',
-  // Putting the toolbar away. On the rail, because Escape and a double tap on the grip
-  // are both things you have to already know — and somebody who does not know them has
-  // a sheet of glass over their desk and nothing on screen that says how to lift it.
-  away: '<path d="M6 6l12 12"/><path d="M18 6L6 18"/>',
   more: '<circle cx="6" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="6" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="1.7" fill="currentColor" stroke="none"/><circle cx="18" cy="18" r="1.7" fill="currentColor" stroke="none"/>',
 };
 
@@ -220,16 +216,7 @@ function buildRail() {
   stop.classList.add("stop-key");
   stop.hidden = true;
 
-  // The way out, last on the rail and always there. Escape does the same thing, and so
-  // does the tray — but a control somebody can see is the difference between a toolbar
-  // they can put down and one they have to look up how to close.
-  const away = key("away", "Put the toolbar away · Esc", "away", () => {
-    use("pointer");
-    void invoke("colai_release");
-  });
-  away.classList.add("away-key");
-
-  dividers[2].after(send, agents, stop, home, away);
+  dividers[2].after(send, agents, stop, home);
 
   row(el.flyShape, "box", "Box", "box", "B");
   row(el.flyShape, "circle", "Circle", "circle", "O");

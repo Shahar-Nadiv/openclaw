@@ -121,6 +121,7 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+  transition: gap var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1);
   padding: 7px 9px;
   border-radius: 999px;
   /*
@@ -195,7 +196,9 @@ body {
   opacity: 0;
 }
 /* The gap goes with them, but only once they have gone: closing it at the start pulls
-   the keys together while they are still shrinking, which reads as a jump. */
+   the keys together while they are still shrinking, which reads as a jump. Opening is
+   the other way round — the gap comes back the moment they rejoin the layout, and eases
+   open beside them rather than appearing all at once between keys that are still shut. */
 .rail-wrap[data-away-done="true"] .rail {
   gap: 0;
 }
@@ -478,16 +481,6 @@ body {
 .stop-key:hover:not([disabled]) {
   color: var(--card);
   background: var(--danger);
-}
-
-/* The way out. Quiet until somebody reaches for it: it is always on the rail, and a
-   permanent bright × beside the working tools reads as a warning rather than an exit. */
-.away-key {
-  color: var(--muted);
-}
-.away-key:hover:not([disabled]) {
-  color: var(--text-strong);
-  background: rgb(255 255 255 / 8%);
 }
 
 .key:hover:not([disabled]):not([aria-pressed="true"]) {

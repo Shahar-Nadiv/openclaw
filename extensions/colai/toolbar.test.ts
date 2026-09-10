@@ -2941,7 +2941,7 @@ describe("the work panel belongs to the toolbar", () => {
     );
     expect(folding.slice(0, 400), "the claw is what stays").toContain('id === "settings"');
     expect(folding.slice(0, 400), "and both folds close the same way").toMatch(
-      /state\.away \|\| \(EXACT\.includes\(id\) && state\.tucked\)/,
+      /foldedAway\(\) \|\| \(EXACT\.includes\(id\) && state\.tucked\)/,
     );
 
     // Nothing hangs off a rail that is not there.
@@ -4655,22 +4655,16 @@ describe("the way back when the toolbar is put away", () => {
   const overlay = readFileSync(new URL("colai.rs", dir), "utf8");
   const main = readFileSync(new URL("main.rs", dir), "utf8");
 
-  test("the rail itself says how to put the toolbar away", () => {
+  test("the way out is the tray, and there is no second one on the rail", () => {
     /*
-     * Escape does it, and a double tap on the grip does it, and the tray does it — all
-     * three are things somebody has to already know. Without a control on the rail, a
-     * person with a sheet of glass over their desk has nothing on screen telling them
-     * how to lift it, which is exactly the report that produced this key.
+     * There was an × here for an afternoon. It went: the toolbar is controlled from the
+     * tray, and a rail that also carries its own exit is two places to look for one
+     * thing — with the more visible of them sitting beside the working tools, where it
+     * reads as something to press by accident.
      */
     const rail = readFileSync(new URL("./toolbar/ui/toolbar-rail.js", import.meta.url), "utf8");
-    expect(Object.keys(glyphsInTheRail()), "the key needs a face").toContain("away");
-    const drawn = rail.slice(rail.indexOf('key("away"'));
-    expect(drawn.slice(0, 300), "and it must be the same thing Escape does").toContain(
-      'invoke("colai_release")',
-    );
-    // On the rail, not in a menu: a way out that lives behind a caret is a way out
-    // somebody has to go looking for.
-    expect(rail).toContain("dividers[2].after(send, agents, stop, home, away)");
+    expect(Object.keys(glyphsInTheRail())).not.toContain("away");
+    expect(rail).toContain("dividers[2].after(send, agents, stop, home)");
   });
 
   test("the toolbar carries a tray icon of its own", () => {
@@ -4799,5 +4793,47 @@ describe("the work outlives the toolbar", () => {
     );
     const points = rust.slice(rust.indexOf("pub(crate) async fn colai_points"));
     expect(points.slice(0, points.indexOf("\n}"))).toContain("filter(|point| point.mine)");
+  });
+});
+
+describe("bringing the rail back", () => {
+  const dock = readFileSync(new URL("./toolbar/ui/toolbar-dock.js", import.meta.url), "utf8");
+  const render = readFileSync(new URL("./toolbar/ui/toolbar.js", import.meta.url), "utf8");
+  const sheet = readFileSync(new URL("./toolbar/ui/toolbar.css", import.meta.url), "utf8");
+
+  test("opening takes two frames, because nothing transitions from display:none", () => {
+    /*
+     * A folded-away key is `display: none` — fifteen zero-width items in a pill two
+     * pixels wide overflow it, and an overflowing flex row puts them where nobody
+     * expects. But an element that starts being laid out appears at whatever size it
+     * computes to: there is no previous width, so there is nothing to animate from, and
+     * the keys arrived at full size in a single frame while the pill grew around them.
+     *
+     * So the first frame puts them back in the layout still shut, and the second unfolds
+     * them. Closing needs no equivalent — the keys are already laid out, and it is
+     * leaving the layout that has to wait.
+     */
+    const opening = dock.slice(dock.indexOf("function tapped"));
+    const body = opening.slice(0, opening.indexOf("\n}"));
+    expect(body).toContain("opening = true");
+    expect(body).toContain("requestAnimationFrame");
+    // And the frame after sets it back, or the rail would never open at all.
+    expect(body).toContain("opening = false");
+  });
+
+  test("what is drawn shut and what is meant to be shut are different questions", () => {
+    // `state.away` is the rail's own state and the opening frame does not change it —
+    // only what is on screen for that frame.
+    expect(dock).toContain("function foldedAway()");
+    expect(render).toContain("el.wrap.dataset.away = String(foldedAway())");
+    // The tick and the tooltip still speak for the real state, not the drawn one.
+    expect(render).toContain('el.grip.setAttribute("aria-expanded", String(!state.away))');
+  });
+
+  test("the gap eases open with the keys rather than appearing between them", () => {
+    // It is closed only once the keys have gone, so on the way open it comes back the
+    // moment they rejoin the layout — which is a jump unless it is transitioned.
+    const rail = sheet.slice(sheet.indexOf(".rail {"), sheet.indexOf(".rail {") + 400);
+    expect(rail).toContain("transition: gap var(--fold-time)");
   });
 });
