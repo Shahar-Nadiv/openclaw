@@ -33,6 +33,7 @@ fn main() {
         "colai_take_keyboard",
         "colai_threads",
         "colai_unwatch",
+        "colai_watch",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

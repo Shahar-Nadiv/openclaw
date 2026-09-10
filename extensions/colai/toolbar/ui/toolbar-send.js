@@ -157,6 +157,7 @@ async function sendMarks(ids) {
         blocked: refused.says,
         // Ours, so it is written back and laid over the Gateway's list next time.
         mine: true,
+        view: { open: true, shown: new Set() },
       },
       ...state.history,
     ];
@@ -270,7 +271,7 @@ async function sendMarks(ids) {
     // thing it must not look like.
     const named = state.receiving.name || who.id;
     const answer = sent.watching
-      ? { sessionKey: sent.sessionKey, at: middleOf(going), who: named, turns: [], open: false }
+      ? { sessionKey: sent.sessionKey, at: middleOf(going), who: named, turns: [] }
       : null;
     if (answer) state.answers.push(answer);
     // And the same work, kept where it can be looked at afterwards.
@@ -296,12 +297,17 @@ async function sendMarks(ids) {
         // Ours. The Gateway will list this conversation too, and what it cannot know —
         // which regions of which screen it was about — is laid over it from here.
         mine: true,
+        // Open, and scrolled to below. What somebody just asked for is what they should
+        // be looking at while it is being worked on.
+        view: { open: true, shown: new Set() },
       },
       ...state.history,
     ];
     // Written now rather than on the next render: this is the moment the record changes,
     // and a restart between here and the next frame is exactly what it exists for.
     rememberWork();
+    // And brought into view, once the panel has been drawn with it in.
+    showLatestWork(sent.sessionKey);
     state.trouble = sent.watching
       ? null
       : `Sent, but the reply will only be in ${state.receiving.name || who.id} — colai could not listen for it here.`;

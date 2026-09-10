@@ -60,12 +60,23 @@ function drawToasts() {
       said.textContent = toast.said;
       one.append(who, said);
 
-      // Pressing it opens the answer where it was asked, and takes the toast away —
-      // it has done its job the moment somebody has acted on it.
+      /*
+       * Pressing it opens the conversation it is about, and takes the toast away — it has
+       * done its job the moment somebody has acted on it.
+       *
+       * It used to set `answer.open`, a field nothing has read since replies stopped being
+       * pins on the desktop, and only call `openWork()` in the branch that never runs — a
+       * toast is raised only for a session already in `state.answers`. So pressing it
+       * dismissed the toast and opened nothing at all.
+       */
       one.addEventListener("click", () => {
-        const answer = state.answers.find((one) => one.sessionKey === toast.sessionKey);
-        if (answer) answer.open = true;
-        else openWork();
+        const entry = state.history.find((row) => row.sessionKey === toast.sessionKey);
+        if (entry) {
+          entry.view.open = true;
+          void loadTurns(entry);
+        }
+        openWork();
+        showLatestWork(toast.sessionKey);
         dropToast(toast.id);
       });
       return one;

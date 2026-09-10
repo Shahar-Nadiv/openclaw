@@ -177,6 +177,7 @@ fn main() {
             colai_send::colai_send,
             colai_send::colai_start_here,
             colai_send::colai_stop,
+            colai_send::colai_watch,
             colai_send::colai_unwatch
         ])
         .build(tauri::generate_context!())

@@ -2704,10 +2704,20 @@ describe("an answer says that it arrived", () => {
     expect(toast).toContain("fading.delete(id)");
   });
 
-  test("pressing it opens the answer where it was asked", () => {
-    // The pin is how a reply is read in the place it is about; the toast is only how you
-    // find out there is one.
-    expect(toast).toContain("answer.open = true");
+  test("pressing it opens the conversation it is about", () => {
+    /*
+     * It used to set `answer.open` — a field nothing has read since replies stopped being
+     * pins on the desktop — and only fall through to opening the panel in a branch that
+     * never runs, because a toast is raised only for a session already in `state.answers`.
+     * So the branch that did run dismissed the toast and opened nothing at all.
+     */
+    const pressed = toast.slice(toast.indexOf('one.addEventListener("click"'));
+    const handler = pressed.slice(0, pressed.indexOf("});") + 3);
+    expect(handler, "a field nothing reads is not an action").not.toContain("answer.open");
+    expect(handler).toContain("openWork()");
+    expect(handler).toContain("view.open = true");
+    // And the conversation it names is the one brought into view.
+    expect(handler).toContain("showLatestWork(toast.sessionKey)");
   });
 });
 
@@ -4931,5 +4941,141 @@ describe("a window the size of the desktop fails closed", () => {
     expect(shaping.slice(0, 400)).toContain(".catch(");
     expect(shaping.slice(0, 400)).toContain("sayFailed(");
     expect(shaping.slice(0, 400)).toContain('shaped = ""');
+  });
+});
+
+describe("reading a conversation in the work panel", () => {
+  const dir = new URL("./toolbar/ui/", import.meta.url);
+  const work = readFileSync(new URL("toolbar-work.js", dir), "utf8");
+  const sheet = readFileSync(new URL("toolbar.css", dir), "utf8");
+
+  test("the fold controls the replies, not just the arrow", () => {
+    /*
+     * It used to control neither: `showAsk` was read in exactly two places, the chevron's
+     * rotation and the clamp on the ask line, while the turns were drawn unconditionally.
+     * So pressing a second time turned the arrow back and left the whole transcript on
+     * screen, with no code path anywhere that removed it. One flag, meaning one thing.
+     */
+    const drawing = work.slice(work.indexOf("row.append(askLine(entry))"));
+    expect(drawing.slice(0, 600)).toContain("entry.view.open && entry.answer");
+  });
+
+  test("a conversation this toolbar sent still fetches its own history", () => {
+    /*
+     * The guard was `if (entry.answer) return`, and a send creates an answer with an empty
+     * `turns` array — truthy, holding nothing. So it fired forever on exactly the
+     * conversations somebody cares most about, and their history never arrived at all.
+     */
+    const fetching = work.slice(work.indexOf("async function loadTurns"));
+    const guard = fetching.slice(0, fetching.indexOf("let turns;"));
+    expect(guard).toContain("entry.answer.turns.length > 0");
+  });
+
+  test("the transcript lands on the entry that is still on screen", () => {
+    // The refresh rebuilds every entry, and it can land inside the await — leaving the
+    // words attached to an object nothing can reach, so the row showed nothing and
+    // pressing again is what appeared to fix it.
+    const fetching = work.slice(work.indexOf("async function loadTurns"));
+    expect(fetching).toContain("state.history.find((one) => one.sessionKey === entry.sessionKey)");
+    // And it goes on listening, or the conversation is frozen at the instant it opened.
+    expect(fetching).toContain('invoke("colai_watch"');
+  });
+
+  test("a refresh keeps what the person did to the panel", () => {
+    /*
+     * `loadWork` builds fresh objects every few seconds. It used to carry three fields
+     * across and drop the rest, so an open row shut itself on a timer and a row that had
+     * just failed flipped back to done. One `view` carried whole cannot forget the next
+     * thing added to it.
+     */
+    const loading = work.slice(work.indexOf("async function loadWork"));
+    expect(loading).toContain("view: (had && had.view) || freshView()");
+    expect(loading).toContain("failed: Boolean(had && had.failed)");
+    // And it only redraws when something changed, or the list throws you back to the top
+    // while you are reading it.
+    expect(loading).toContain("if (!same) render()");
+  });
+
+  test("the panel keeps a conversation the Gateway has not listed yet", () => {
+    // A send made a moment ago, and a send that was refused before it ever had a session
+    // key — both used to vanish within five seconds, the second one taking the Discard
+    // button that exists to dismiss it.
+    const loading = work.slice(work.indexOf("async function loadWork"));
+    expect(loading).toContain("STILL_NEW");
+    expect(loading).toContain("!listedKeys.has(entry.sessionKey)");
+  });
+
+  test("it shows the conversations of whoever is receiving", () => {
+    // A mixed list is a list nobody can read. The dropdown chooses; the panel follows.
+    const whose = work.slice(work.indexOf("function whoseConversations"));
+    const body = whose.slice(0, whose.indexOf("\n}\n"));
+    expect(body).toContain('who.kind === "session"');
+    expect(body).toContain('who.kind === "agent"');
+    expect(body).toContain('who.kind === "thread"');
+    expect(body).toContain("session.agentId === who.id");
+  });
+
+  test("a long reply is folded, wraps, and keeps its shape", () => {
+    // Three separate things, all missing: no cap at all, newlines flattened by the default
+    // white-space, and nothing able to break a long path in a 394px column.
+    const said = sheet.slice(sheet.indexOf(".work-said {"));
+    expect(said.slice(0, 400)).toContain("white-space: pre-wrap");
+    expect(said.slice(0, 400)).toContain("overflow-wrap: anywhere");
+    expect(sheet).toContain(".work-said[data-open] {");
+    expect(sheet).toContain("-webkit-line-clamp: 6");
+    // Only replies. A prompt is short and it is what the list is scanned by.
+    const folding = work.slice(work.indexOf("function turnSaid"));
+    expect(folding.slice(0, 700)).toContain("turn.mine === true ||");
+  });
+
+  test("the log is not capped at half the panel it lives in", () => {
+    // `.scrolls` carries a shared 46vh, which fought the flex-grow inside an 82vh panel.
+    expect(sheet).toContain(".work-log.scrolls {");
+    const log = sheet.slice(sheet.indexOf(".work-log.scrolls {"));
+    expect(log.slice(0, 120)).toContain("max-height: none");
+  });
+
+  test("a row is addressed by which conversation it is", () => {
+    // It was `entry.at` — the last-activity time, which changes whenever the conversation
+    // does, and is also the sort key. Two touched in the same second collide.
+    expect(work).toContain("row.dataset.entry = entry.sessionKey");
+  });
+});
+
+describe("stopping an agent from the rail", () => {
+  const dir = new URL("./toolbar/ui/", import.meta.url);
+  const tools = readFileSync(new URL("toolbar-tools.js", dir), "utf8");
+  const rail = readFileSync(new URL("toolbar-rail.js", dir), "utf8");
+  const page = readFileSync(new URL("toolbar.js", dir), "utf8");
+
+  test("the key sees what the Gateway is running, not only what this toolbar sent", () => {
+    /*
+     * `state.runs` was only ever appended to by a send from here, and everything else
+     * merely filtered it — so an agent could work for ten minutes with the stop key
+     * hidden, and a restart emptied the list even for colai's own sends. The Gateway is
+     * already asked every few seconds which sessions are working.
+     */
+    expect(tools).toContain("function adopted(");
+    const adopting = tools.slice(tools.indexOf("function adopted("));
+    expect(adopting.slice(0, 900)).toContain("work.working");
+    expect(page).toContain("runsNow(state.runs, state.atWork, Date.now(), state.history)");
+  });
+
+  test("it adopts only conversations the panel is showing", () => {
+    // Which is already only what is being received. Adopting anything else would put a
+    // stop button over a run somebody started in a terminal.
+    const adopting = tools.slice(tools.indexOf("function adopted("));
+    expect(adopting.slice(0, 900)).toContain("named.has(sessionKey)");
+  });
+
+  test("it stops what is being received, not everything on the machine", () => {
+    // Safe before only because it knew so little. One key that kills every agent on the
+    // Gateway is a key nobody can press with confidence.
+    expect(rail).toContain("async function stopReceiving()");
+    expect(rail, "the old everything-stopper is gone").not.toContain("stopEverything");
+    expect(rail).toContain("function runsBeingReceived()");
+    // And the key is hidden or shown by that same list.
+    expect(page).toContain("const stoppable = runsBeingReceived()");
+    expect(page).toContain("buttons.stop.hidden = stoppable.length === 0");
   });
 });

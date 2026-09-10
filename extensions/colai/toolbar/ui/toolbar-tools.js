@@ -1332,6 +1332,40 @@ function stillRunning(runs, now) {
 }
 
 /**
+ * Runs the Gateway is holding that this toolbar never started.
+ *
+ * `state.runs` was only ever appended to by a send from here, and everything downstream
+ * merely filtered it — so an agent working for ten minutes left the rail's stop key hidden
+ * unless colai had been the one to start it, and a restart emptied the list even for the
+ * ones it had. The Gateway is already asked every few seconds which sessions are working;
+ * that answer is the other half.
+ *
+ * Named from the panel's own list where it can be, because "Stop mel" is a button somebody
+ * can press and "Stop agent:main:0f3c" is one they will not.
+ */
+function adopted(runs, work, listed, now) {
+  const working = (work && work.working) || [];
+  const named = new Map((listed || []).map((entry) => [entry.sessionKey, entry.who]));
+  if (working.length === 0 || named.size === 0) return runs;
+  const had = new Set(runs.map((run) => run.sessionKey));
+  return [
+    ...runs,
+    ...working
+      // Only what the panel is showing, which is already only what is being received. A
+      // run on a conversation nobody is looking at is not one the rail's key is about,
+      // and adopting it would put a stop button over somebody else's terminal.
+      .filter((sessionKey) => !had.has(sessionKey) && named.has(sessionKey))
+      .map((sessionKey) => ({
+        sessionKey,
+        who: named.get(sessionKey),
+        // As far as this toolbar knows, it is being heard from right now — which is what
+        // the Gateway just said.
+        heard: now,
+      })),
+  ];
+}
+
+/**
  * Which runs are still underway, once the Gateway has been asked.
  *
  * `stillRunning` alone is an inference: this toolbar started something, has not been
@@ -1376,8 +1410,8 @@ const GATEWAY_LAGS = 45 * 1000;
  * The timeout stays for the one case a name cannot cover: a session the Gateway has
  * never mentioned at all.
  */
-function runsNow(runs, work, now) {
-  const still = stillRunning(runs, now);
+function runsNow(runs, work, now, listed) {
+  const still = adopted(stillRunning(runs, now), work, listed, now);
   // Nothing was heard from the Gateway at all — an unreachable one, or a build that does
   // not name its sessions. The quiet timeout is all there is.
   if (!work || !Array.isArray(work.known)) {

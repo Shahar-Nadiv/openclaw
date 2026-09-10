@@ -389,6 +389,20 @@ pub(crate) async fn colai_stop(
     gateway.chat_abort(&session_key).await
 }
 
+/// Start listening to a conversation this toolbar did not start.
+///
+/// Sending already subscribes to what it sent. This is the other way in: the Work panel
+/// lists every conversation the Gateway holds, and opening one there should mean its
+/// replies keep arriving — otherwise it shows whatever was true at the instant it was
+/// opened while its own pill goes on saying "Working".
+#[tauri::command]
+pub(crate) async fn colai_watch(
+    gateway: State<'_, GatewayClient>,
+    session_key: String,
+) -> Result<(), String> {
+    gateway.watch_session(&session_key, true).await
+}
+
 /// Stop listening to a conversation.
 ///
 /// Called when the overlay is put away and when what was being waited on is dismissed.

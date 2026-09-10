@@ -290,12 +290,15 @@ function render() {
   // What is actually still running, rather than what was last started. A run that has
   // gone quiet for minutes is one the toolbar has lost track of, and claiming it is
   // still working is a worse lie than never having said so.
-  state.runs = runsNow(state.runs, state.atWork, Date.now());
+  state.runs = runsNow(state.runs, state.atWork, Date.now(), state.history);
   const working = runningSaid(state.runs);
   buttons.agents.dataset.working = String(state.runs.length > 0);
-  buttons.stop.hidden = state.runs.length === 0;
-  buttons.stop.title =
-    state.runs.length === 1 ? "Stop the agent" : `Stop ${state.runs.length} runs`;
+  // Only what is being received. The key stops the conversation somebody is looking at,
+  // and the panel is already filtered to it — a run whose conversation is not on screen is
+  // not one this key is about.
+  const stoppable = runsBeingReceived();
+  buttons.stop.hidden = stoppable.length === 0;
+  buttons.stop.title = stoppable.length === 1 ? "Stop the agent" : `Stop ${stoppable.length} runs`;
 
   // The mascot carries what the whole Gateway is doing, including the agents somebody
   // is not looking at. `data-mood` rather than a class, so the stylesheet holds the one

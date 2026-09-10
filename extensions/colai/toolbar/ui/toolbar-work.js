@@ -114,12 +114,18 @@ function drawWork() {
   const shown = state.work.filter === "needs" ? waiting : state.history;
 
   const held = whatIsBeingTyped();
+  // Where in the list somebody had got to. `replaceChildren` builds a new scrolling
+  // element at the top, so without this the panel throws you back to the first row every
+  // time anything redraws.
+  const wasAt = el.work.querySelector(".work-log")?.scrollTop ?? 0;
   el.work.replaceChildren(
     workHead(waiting.length),
     ...(waiting.length && state.work.filter !== "needs" ? [waitingBanner(waiting[0])] : []),
     workLog(shown, now),
     workWrite(),
   );
+  const log = el.work.querySelector(".work-log");
+  if (log) log.scrollTop = wasAt;
   giveItBack(held);
 }
 
@@ -143,7 +149,9 @@ function giveItBack(held) {
   if (!held) return;
   const now = el.work.querySelector(`[data-field="${held.field}"]`);
   if (!now) return;
-  now.focus();
+  // Without `preventScroll`, putting the cursor back is itself enough to scroll the panel
+  // — which would undo the position restored a moment ago.
+  now.focus({ preventScroll: true });
   // Only where it will take: a field that has lost the text around it would throw, and
   // the cursor being in the right box matters more than being at the right character.
   try {
@@ -221,11 +229,28 @@ function waitingBanner(entry) {
   jump.className = "work-jump";
   jump.textContent = "Jump";
   jump.addEventListener("click", () => {
-    const row = el.work.querySelector(`[data-entry="${entry.at}"]`);
+    const row = rowFor(entry.sessionKey);
     if (row) row.scrollIntoView({ block: "center", behavior: still() ? "auto" : "smooth" });
   });
   bar.append(said, jump);
   return bar;
+}
+
+/** The drawn row for a conversation, if it is on screen. */
+function rowFor(sessionKey) {
+  return sessionKey ? el.work.querySelector(`[data-entry="${CSS.escape(sessionKey)}"]`) : null;
+}
+
+/**
+ * Put the newest piece of work in front of whoever just made it.
+ *
+ * After the render, because the row it scrolls to is one the render is about to build.
+ */
+function showLatestWork(sessionKey) {
+  requestAnimationFrame(() => {
+    const row = rowFor(sessionKey);
+    if (row) row.scrollIntoView({ block: "nearest", behavior: still() ? "auto" : "smooth" });
+  });
 }
 
 function workLog(shown, now) {
@@ -297,7 +322,14 @@ function entryRow(entry, now) {
   const row = document.createElement("div");
   row.className = "work-turn";
   row.dataset.state = state_;
-  row.dataset.entry = String(entry.at);
+  /*
+   * Addressed by what it is, not by when it last moved.
+   *
+   * This was `entry.at` — the session's last-activity time, which changes whenever the
+   * conversation does and is also the sort key. Two sessions touched in the same second
+   * collide, and `querySelector` silently takes the first.
+   */
+  row.dataset.entry = entry.sessionKey || `blocked:${entry.at}`;
 
   const node = document.createElement("span");
   node.className = "work-node";
@@ -343,13 +375,18 @@ function entryRow(entry, now) {
   // an hour later it is the only way to know what the reply is about.
   row.append(askLine(entry));
 
-  const turns = (entry.answer && entry.answer.turns) || [];
-  for (const turn of turns) {
-    const line = document.createElement("p");
-    line.className = "work-said";
-    line.dataset.mine = String(turn.mine === true);
-    line.textContent = turn.said;
-    row.append(line);
+  /*
+   * The replies, and only while the row is open.
+   *
+   * They used to be drawn unconditionally, so the fold controlled nothing but the
+   * chevron's rotation and the clamp on the ask line above it. Pressing it a second time
+   * turned the arrow back and left the whole transcript on screen, with no code path
+   * anywhere that removed it — which is exactly "cannot fold after expand". One flag,
+   * meaning one thing.
+   */
+  const turns = (entry.view.open && entry.answer && entry.answer.turns) || [];
+  for (const [at, turn] of turns.entries()) {
+    row.append(turnSaid(entry, turn, at));
   }
   if (state_ === "blocked") {
     const why = document.createElement("p");
@@ -374,14 +411,66 @@ function entryRow(entry, now) {
   return row;
 }
 
+/**
+ * One turn of the conversation, folded if it is long.
+ *
+ * An agent's reply has no length anybody agreed to, and up to forty of them arrive at
+ * once — one long answer used to push every other row out of the panel. So a reply is
+ * clamped, and says so with a control that opens it.
+ *
+ * Which ones are open lives on the entry's `view`, so it survives the refresh that
+ * rebuilds these rows every few seconds. Prompts are never clamped: they are short by
+ * construction, and they are the thing somebody is scanning the list for.
+ */
+function turnSaid(entry, turn, at) {
+  const line = document.createElement("p");
+  line.className = "work-said";
+  line.dataset.mine = String(turn.mine === true);
+  line.textContent = turn.said;
+  if (turn.mine === true || (turn.said || "").length < TURN_FOLDS_OVER) {
+    return line;
+  }
+  const open = entry.view.shown.has(at);
+  line.dataset.open = String(open);
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "work-more";
+  more.textContent = open ? "Show less" : "Show more";
+  more.addEventListener("click", () => {
+    if (entry.view.shown.has(at)) {
+      entry.view.shown.delete(at);
+    } else {
+      entry.view.shown.add(at);
+    }
+    render();
+  });
+  const held = document.createElement("div");
+  held.className = "work-turn";
+  held.append(line, more);
+  return held;
+}
+
+/**
+ * How long a reply has to be before it is worth folding.
+ *
+ * Measured in characters rather than lines because the page cannot know how many lines
+ * something will take until it has laid it out, and a control that appears after a reflow
+ * is a control that moves under the pointer. Roughly the six lines the clamp allows at
+ * this width.
+ */
+const TURN_FOLDS_OVER = 420;
+
 /** The ask, one line, opening on a press. */
 function askLine(entry) {
   const said = entrySaid(entry);
   const fold = document.createElement("button");
   fold.type = "button";
   fold.className = "work-ask";
-  fold.dataset.open = String(Boolean(entry.showAsk));
-  fold.setAttribute("aria-expanded", String(Boolean(entry.showAsk)));
+  fold.dataset.open = String(entry.view.open);
+  fold.setAttribute("aria-expanded", String(entry.view.open));
+  // Named, so the pair that puts focus back after a redraw covers it. Without this a
+  // keyboard user loses their place on the panel every time they press the fold.
+  fold.dataset.field = `ask:${entry.sessionKey || entry.at}`;
   const mark = document.createElement("span");
   mark.className = "work-ask-mark";
   mark.textContent = "›";
@@ -390,10 +479,10 @@ function askLine(entry) {
   words.textContent = said;
   fold.append(mark, words);
   fold.addEventListener("click", () => {
-    entry.showAsk = !entry.showAsk;
+    entry.view.open = !entry.view.open;
     // Opening a conversation is when its transcript is worth fetching. Almost every row
     // in this panel is one nobody opens, and drawing the list never needed one.
-    if (entry.showAsk) void loadTurns(entry);
+    if (entry.view.open) void loadTurns(entry);
     render();
   });
   return fold;
@@ -735,11 +824,12 @@ async function loadWork() {
   state.workTrouble = null;
   if (!Array.isArray(sessions)) return;
 
-  // Keep the turns already fetched, and anything sent in this session of the toolbar that
-  // the Gateway has not caught up with yet.
   const known = new Map(state.history.map((entry) => [entry.sessionKey, entry]));
+  const mine = whoseConversations();
+  const now = Date.now();
 
-  state.history = sessions
+  const listed = sessions
+    .filter((session) => mine(session))
     .map((session) => {
       const had = known.get(session.key);
       // What colai did in this conversation, most recent first. Only the toolbar knows
@@ -749,27 +839,104 @@ async function loadWork() {
         .sort((a, b) => (b.at || 0) - (a.at || 0))[0];
       return {
         sessionKey: session.key,
+        agentId: session.agentId || null,
         who: session.title,
-        at: session.at || (had && had.at) || Date.now(),
+        at: session.at || (had && had.at) || now,
         // The conversation's own last line. A send colai made says what colai said
         // instead, because that is the thing somebody is looking for it by.
         said: (ours && ours.said) || session.preview || "",
-        // Laid over: the marks that travelled, and how many.
         count: ours ? ours.count : 0,
         marks: ours ? ours.marks : [],
         blocked: ours ? ours.blocked : undefined,
-        // Whether this is one of ours, which is what decides if it is written back.
         mine: Boolean(ours) || Boolean(had && had.mine),
-        // From the same round trip, so a row can say "working" before its transcript
-        // has ever been fetched.
+        // From the same round trip, so a row can say "working" before its transcript has
+        // ever been fetched.
         busy: Boolean(session.busy),
         unread: Boolean(session.unread),
-        // Kept if it was already open; otherwise filled in when somebody opens it.
+        // Carried whole, and everything the person did to this panel lives in it. It used
+        // to be one field at a time, and the refresh dropped whichever one was added last
+        // — an open row shutting itself every few seconds.
+        view: (had && had.view) || freshView(),
+        failed: Boolean(had && had.failed),
         answer: (had && had.answer) || null,
       };
-    })
-    .sort((a, b) => (b.at || 0) - (a.at || 0));
-  render();
+    });
+
+  /*
+   * And what the Gateway has not caught up with.
+   *
+   * A conversation created a moment ago is not in `sessions.list` yet, and a send that was
+   * refused never had a session key at all — both used to vanish from the panel within
+   * five seconds, taking the Discard button that exists to dismiss the second one. Kept
+   * until the list has had a chance to mention them.
+   */
+  const listedKeys = new Set(listed.map((entry) => entry.sessionKey));
+  const young = state.history.filter(
+    (entry) => !listedKeys.has(entry.sessionKey) && entry.mine && now - (entry.at || 0) < STILL_NEW,
+  );
+
+  const next = [...listed, ...young].sort((a, b) => (b.at || 0) - (a.at || 0));
+  /*
+   * Drawn only when something changed.
+   *
+   * This ran unconditionally every few seconds, and a redraw replaces the scrolling
+   * element — so reading a reply four rows down meant being thrown back to the top on a
+   * timer. The rail's own watcher next door has always diffed before rendering; this is
+   * the same rule.
+   */
+  const same = sameWork(state.history, next);
+  state.history = next;
+  if (!same) render();
+}
+
+/** How long an entry the Gateway has not listed is kept anyway. */
+const STILL_NEW = 60_000;
+
+/** Everything the person did to this panel, as opposed to everything the Gateway said. */
+function freshView() {
+  return { open: false, shown: new Set() };
+}
+
+/** Whether two builds of the list would draw the same. */
+function sameWork(was, now) {
+  if (was.length !== now.length) return false;
+  return was.every((entry, at) => {
+    const then = now[at];
+    return (
+      entry.sessionKey === then.sessionKey &&
+      entry.at === then.at &&
+      entry.said === then.said &&
+      entry.busy === then.busy &&
+      entry.unread === then.unread &&
+      entry.view === then.view &&
+      entry.answer === then.answer
+    );
+  });
+}
+
+/**
+ * Which conversations belong to whoever is receiving.
+ *
+ * The panel is about the conversation somebody has chosen in the dropdown, not about
+ * everything the Gateway is holding — a mixed list is a list nobody can read. A thread is
+ * matched through the session it was adopted into, which is the only moment it acquires
+ * one.
+ */
+function whoseConversations() {
+  const who = state.receiving;
+  if (who.kind === "session" && who.id) {
+    return (session) => session.key === who.id;
+  }
+  if (who.kind === "thread" && who.id) {
+    const key = state.adoptedKeys ? state.adoptedKeys[who.id] : null;
+    return (session) => Boolean(key) && session.key === key;
+  }
+  if (who.kind === "agent" && who.id) {
+    return (session) => session.agentId === who.id;
+  }
+  // Nobody chosen yet. Everything would be a mixed list, so it is nothing until the rail
+  // has settled on a receiver — which it does as soon as the Gateway answers.
+  return () => false;
 }
 
 /**
@@ -780,7 +947,16 @@ async function loadWork() {
  * events keep it current after that.
  */
 async function loadTurns(entry) {
-  if (!entry || !entry.sessionKey || entry.answer) return;
+  if (!entry || !entry.sessionKey) return;
+  /*
+   * Already has the words, rather than merely has an answer object.
+   *
+   * This used to be `if (entry.answer) return`, and a send creates an answer with an
+   * empty `turns` array — truthy, and holding nothing. So the guard fired forever on
+   * exactly the conversations somebody cares most about: the ones they started from this
+   * toolbar never fetched their own history, ever.
+   */
+  if (entry.answer && entry.answer.turns && entry.answer.turns.length > 0) return;
   let turns;
   try {
     turns = await invoke("colai_said", { sessionKey: entry.sessionKey });
@@ -789,11 +965,31 @@ async function loadTurns(entry) {
     return;
   }
   if (!Array.isArray(turns)) return;
-  entry.answer = {
-    sessionKey: entry.sessionKey,
-    who: entry.who,
+  /*
+   * Written to the entry that is on screen now, not the one this started with.
+   *
+   * The refresh rebuilds `state.history` every few seconds, and it can land inside this
+   * await — leaving the transcript attached to an object nothing can reach any more. The
+   * row then showed nothing, and pressing again is what appeared to fix it.
+   */
+  const live = state.history.find((one) => one.sessionKey === entry.sessionKey);
+  if (!live) return;
+  const answer = {
+    sessionKey: live.sessionKey,
+    who: live.who,
     turns: turns.map((turn) => ({ said: turn.said, mine: Boolean(turn.mine) })),
-    open: true,
   };
+  live.answer = answer;
+  /*
+   * And it goes on listening.
+   *
+   * Replies arrive by finding the session in `state.answers`; an answer built here was
+   * never added to it, so a conversation opened from the panel was frozen at the instant
+   * it was opened — while its own pill went on saying "Working".
+   */
+  if (!state.answers.some((one) => one.sessionKey === live.sessionKey)) {
+    state.answers.push(answer);
+    void invoke("colai_watch", { sessionKey: live.sessionKey }).catch(() => {});
+  }
   render();
 }

@@ -1393,6 +1393,12 @@ body {
   outline: 2px solid var(--accent);
 }
 
+/* Not `.scrolls`' 46vh: this is the growing child of a panel that is already capped at
+   82vh, and inheriting a second, smaller cap meant the panel never used more than about
+   half the room it had. */
+.work-log.scrolls {
+  max-height: none;
+}
 .work-log {
   display: flex;
   flex-direction: column;
@@ -1554,11 +1560,56 @@ body {
   -webkit-line-clamp: 20;
 }
 
+/*
+ * What an agent said back.
+ *
+ * `pre-wrap`, because a reply arrives with paragraphs, bullet lists and fenced code in it
+ * and `textContent` into a default `white-space` turned all of that into one run-on line.
+ * `anywhere`, because the panel is a fixed 394px and the commonest token in a reply is a
+ * path or a URL — which used to reach the edge and be clipped, unreadable.
+ */
 .work-said {
   margin: 0;
   font-size: 13.5px;
   line-height: 1.5;
   color: var(--card-foreground, #f0f0f2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Long ones fold. A reply has no length anybody agreed to, and up to forty arrive at
+   once — one of them used to push every other row out of the panel. Only replies: a
+   prompt is short by construction and it is what somebody scans the list for. */
+.work-said[data-open] {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+}
+.work-said[data-open="true"] {
+  -webkit-line-clamp: none;
+  display: block;
+}
+.work-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.work-more {
+  all: unset;
+  align-self: flex-start;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 1px 0;
+}
+.work-more:hover {
+  color: var(--text-strong);
+  text-decoration: underline;
+}
+.work-more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
 }
 .work-said + .work-said {
   margin-top: 6px;

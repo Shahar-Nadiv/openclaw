@@ -212,7 +212,7 @@ function buildRail() {
   // Only ever on the rail while something is running, and beside the key that says so.
   // Stopping is the one thing here that destroys work rather than describing it, so it
   // is never a key somebody can press by reflex looking for something else.
-  const stop = key("stop", "Stop the agent", "stop", () => void stopEverything());
+  const stop = key("stop", "Stop the agent", "stop", () => void stopReceiving());
   stop.classList.add("stop-key");
   stop.hidden = true;
 
@@ -317,17 +317,23 @@ function followTheFold() {
 /**
  * Stop what is running.
  *
- * Everything, because the key beside the count is about the count. Stopping one
- * particular run is a thing to do from the list where that run has a name, not from a
- * button that does not know which one somebody meant.
+ * What is being received, not everything on the machine.
+ *
+ * The rail's key used to stop every run it knew about, which was safe only because it knew
+ * about so little — sends from this toolbar and nothing else. Now that it can see what the
+ * Gateway is running, "everything" would include agents somebody started in a terminal or
+ * from the Control UI, and one key that kills those is a key nobody can press with
+ * confidence. Rows in the Work panel keep their own Stop for anything else.
  */
-async function stopEverything() {
-  const runs = state.runs;
-  if (runs.length === 0) return;
-  state.runs = [];
+async function stopReceiving() {
+  const running = runsBeingReceived();
+  if (running.length === 0) return;
+  state.runs = state.runs.filter(
+    (run) => !running.some((one) => one.sessionKey === run.sessionKey),
+  );
   render();
   const stopped = [];
-  for (const run of runs) {
+  for (const run of running) {
     try {
       await invoke("colai_stop", { sessionKey: run.sessionKey });
       stopped.push(run.who || run.sessionKey);
@@ -339,6 +345,17 @@ async function stopEverything() {
   // not happen, and somebody who pressed it needs to know which.
   if (stopped.length) state.trouble = `Stopped ${stopped.join(", ")}.`;
   render();
+}
+
+/**
+ * The runs belonging to whoever is receiving.
+ *
+ * The panel is already filtered to them, so its own list is the answer — a run whose
+ * conversation is not on screen is not one this key is about.
+ */
+function runsBeingReceived() {
+  const shown = new Set(state.history.map((entry) => entry.sessionKey));
+  return state.runs.filter((run) => shown.has(run.sessionKey));
 }
 
 /** One pen on the menu the drawing key opens. */
