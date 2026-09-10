@@ -97,12 +97,40 @@ let lastTap = 0;
  * pointer events gets touch right for free, and cannot fire in the middle of a drag
  * because a drag is not a tap.
  */
+/**
+ * Whether the fold is still running.
+ *
+ * The keys close by animating their own width shut, and only once they have finished do
+ * they stop being laid out at all — fifteen zero-width items in a pill two pixels wide
+ * is an overflow, and an overflowing flex row puts them where nobody expects. Taking
+ * them out of the layout at the start is what made the fold snap instead of fold: there
+ * was nothing left on screen to animate.
+ *
+ * `display` cannot be transitioned, so the delay is kept here rather than in the
+ * stylesheet, the way `turn` already stages the rail's orientation change.
+ */
+let folding = null;
+
+function stillFolding() {
+  return folding !== null;
+}
+
 function tapped() {
   const now = Date.now();
   const again = now - lastTap < TAP_AGAIN;
   lastTap = again ? 0 : now;
   if (!again) return;
   state.away = !state.away;
+  if (folding !== null) clearTimeout(folding);
+  folding = null;
+  if (state.away) {
+    // Closing: hold them in the layout until they have finished closing.
+    folding = setTimeout(() => {
+      folding = null;
+      render();
+      followTheFold();
+    }, FOLD_TIME);
+  }
   // Nothing hangs off a rail that is not there. The same tidy-up opening the Work panel
   // already does for flyouts, in the other direction.
   if (state.away) {

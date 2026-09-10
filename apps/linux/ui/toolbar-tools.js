@@ -98,13 +98,14 @@ const GITS = {
       `is ahead by before you do. If it has no upstream, say which remote and name you ` +
       `would set and wait — a branch pushed somewhere nobody chose is hard to take back.`,
   },
-  branches: {
-    label: "Branches",
+  branch: {
+    label: "New branch",
     glyph: "gitBranch",
-    // Not a mark at all. The key opens a window onto the repository instead, because a
-    // branch is a place in a history and the history is what says which place.
-    needs: "window",
-    says: null,
+    needs: "repo",
+    says: (repo) =>
+      `Start a new branch${repo ? ` in ${repo}` : ""} from where HEAD is now. Name it ` +
+      `after the work rather than after the date, say what you called it, and say what ` +
+      `it was branched from — a branch nobody can place is a branch nobody will merge.`,
   },
   rebase: {
     label: "Rebase",
@@ -155,100 +156,6 @@ function effortAt(model, chosen) {
 function gitKindOf(mark) {
   const id = (mark && mark.git) || GIT_FIRST;
   return GITS[id] ? id : GIT_FIRST;
-}
-
-/**
- * Where each commit sits across the graph, and the lines between them.
- *
- * The whole of the hard part, kept out of the drawing so it can be shown to be right
- * without a screen. Given commits newest first — `--date-order`, which is the order they
- * are drawn in — it answers which column each one sits in and which columns run through
- * the gap above it.
- *
- * The rule is the one every git graph uses. A commit takes the column already reserved
- * for it by a child below, or the first free one if nothing reserved it. Its first parent
- * inherits that column, which is what keeps a branch a straight line down the page. Every
- * further parent — a merge — reserves a new column of its own. A column is freed when the
- * last commit expecting it has been placed.
- *
- * `through` is what makes the picture readable: at each row it is the columns that have a
- * line passing *behind* that row, so a branch does not vanish and reappear across a
- * commit it had nothing to do with.
- */
-function lanesOf(commits) {
-  const rows = [];
-  // Which column each commit is expected in when we reach it, reserved by a child.
-  const waiting = new Map();
-  // The columns in use, in order. A hole is a column freed by a branch that has ended and
-  // is filled by the next thing that needs one, which is what stops a graph drifting
-  // rightwards forever.
-  const columns = [];
-
-  const take = (hash) => {
-    const held = waiting.get(hash);
-    if (held !== undefined) return held;
-    const free = columns.indexOf(null);
-    const at = free === -1 ? columns.length : free;
-    columns[at] = hash;
-    waiting.set(hash, at);
-    return at;
-  };
-
-  for (const commit of commits || []) {
-    // Whether anything above expects this commit. A row with nothing above it is the top
-    // of a line as far as the window can see, and drawing a stub upward from it would
-    // claim a child that is not there.
-    const up = waiting.has(commit.hash);
-    const at = take(commit.hash);
-    // Everything still running at this row, before this commit's own parents change it.
-    const through = columns
-      .map((holder, column) => (holder === null || column === at ? null : column))
-      .filter((column) => column !== null);
-
-    const parents = commit.parents || [];
-    if (parents.length === 0) {
-      // A root. Its column ends here.
-      columns[at] = null;
-    } else if (waiting.has(parents[0])) {
-      // The first parent is already expected somewhere else, so this branch joins that
-      // line rather than claiming it. This column ends here and the drawing bends across.
-      //
-      // Without this, the second branch to reach a shared parent moved it into its own
-      // column and left the first branch pointing at a line that was no longer there.
-      columns[at] = null;
-    } else {
-      // The first parent keeps this column, so a branch reads as one line.
-      columns[at] = parents[0];
-      waiting.set(parents[0], at);
-      // A merge's other parents open columns of their own.
-      for (const parent of parents.slice(1)) {
-        if (waiting.has(parent)) continue;
-        const free = columns.indexOf(null);
-        const opened = free === -1 ? columns.length : free;
-        columns[opened] = parent;
-        waiting.set(parent, opened);
-      }
-    }
-    waiting.delete(commit.hash);
-    rows.push({
-      hash: commit.hash,
-      column: at,
-      up,
-      through,
-      // Where each parent's line goes, so the drawing can bend toward it rather than
-      // working the answer out again.
-      parents: parents.map((parent) => ({ hash: parent, column: waiting.get(parent) ?? at })),
-    });
-  }
-  return rows;
-}
-
-/** How many columns wide a graph turned out to be. */
-function lanesWide(rows) {
-  return (rows || []).reduce(
-    (widest, row) => Math.max(widest, row.column + 1, ...row.through.map((c) => c + 1)),
-    0,
-  );
 }
 
 /**

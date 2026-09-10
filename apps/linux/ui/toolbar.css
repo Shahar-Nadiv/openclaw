@@ -187,6 +187,11 @@ body {
   margin: 0;
   opacity: 0;
 }
+/* The gap goes with them, but only once they have gone: closing it at the start pulls
+   the keys together while they are still shrinking, which reads as a jump. */
+.rail-wrap[data-away-done="true"] .rail {
+  gap: 0;
+}
 /*
  * And then they leave the layout altogether.
  *
@@ -199,13 +204,9 @@ body {
  * Held until the fold has finished, the same way `.key[data-folded]` holds `visibility`,
  * so nothing vanishes before it has closed.
  */
-.rail-wrap[data-away="true"] .rail {
-  gap: 0;
-}
-.rail-wrap[data-away="true"] .key[data-folded],
-.rail-wrap[data-away="true"] .divider {
+.rail-wrap[data-away-done="true"] .key[data-folded],
+.rail-wrap[data-away-done="true"] .divider {
   display: none;
-  transition: display 0s linear 220ms;
 }
 .rail-wrap[data-vertical="true"] .divider {
   width: 22px;
@@ -1776,147 +1777,6 @@ body {
   border: 1px solid rgb(255 255 255 / 12%);
   box-shadow: 0 30px 80px rgb(0 0 0 / 68%);
 }
-/*
- * ── the branch window ────────────────────────────────────────────────────────
- *
- * The library's shape, because it is the same kind of thing: a window rather than a menu,
- * for something not recognisable from its name. Narrower, because a graph is read down
- * rather than across.
- */
-.branches {
-  width: min(520px, 78vw);
-  gap: 10px;
-}
-/* Stacked like the Work panel's head: a name, and under it the repository in mono. */
-.branches-title {
-  flex: 1;
-  min-width: 0;
-}
-.branches-title .work-count {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.branches-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-  overflow-y: auto;
-}
-.branches-capped {
-  margin: 0;
-  font-size: 10.5px;
-  color: var(--muted-dim);
-  font-family: var(--font-mono);
-}
-
-/* The branches themselves, above the graph they run through. */
-.branch-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.branch-chip {
-  all: unset;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 9px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg-elevated);
-  font-size: 11.5px;
-  color: var(--text);
-  cursor: pointer;
-}
-.branch-chip:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: var(--border-strong);
-  color: var(--text-strong);
-}
-.branch-chip:focus-visible {
-  outline: 2px solid var(--accent);
-}
-/* The one you are on. Not a hover state and not disabled-looking: it is where you are,
-   which is the first thing anybody opens this to find out. */
-.branch-chip[data-on="true"] {
-  border-color: var(--accent);
-  color: var(--text-strong);
-  cursor: default;
-}
-.branch-drift {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--muted);
-}
-.branch-new {
-  color: var(--muted-dim);
-  border-style: dashed;
-}
-
-/* The graph: drawn lines on the left, words on the right, sharing a row height. */
-.graph {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-}
-.graph-ink {
-  flex-shrink: 0;
-}
-.graph-words {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.graph-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  height: 26px;
-  min-width: 0;
-}
-.graph-hash {
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--muted-dim);
-}
-.graph-said {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--text);
-}
-.graph-row[data-head="true"] .graph-said {
-  color: var(--text-strong);
-}
-.graph-when {
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--muted-dim);
-}
-/* A name pointing at a commit. HEAD is the one worth finding at a glance. */
-.graph-ref {
-  flex-shrink: 0;
-  padding: 1px 6px;
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--muted);
-  white-space: nowrap;
-}
-.graph-ref[data-head="true"] {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
 .library-head {
   display: flex;
   align-items: flex-start;

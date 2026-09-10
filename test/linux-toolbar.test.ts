@@ -136,14 +136,6 @@ type ToolbarHelpers = {
   GIT_FIRST: string;
   MODE_FIRST: string;
   CLICK_MEANS: Record<string, string>;
-  lanesOf: (commits: { hash: string; parents: string[] }[]) => {
-    hash: string;
-    column: number;
-    up: boolean;
-    through: number[];
-    parents: { hash: string; column: number }[];
-  }[];
-  lanesWide: (rows: { column: number; through: number[] }[]) => number;
   effortStops: (model: Model | null) => { id: string; label: string }[];
   effortAt: (model: Model | null, chosen: string | null) => number;
   gitKindOf: (mark: { git?: string } | null) => string;
@@ -363,7 +355,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, GITS, GIT_FIRST, gitKindOf, repoFor, isCommitting, MODE_FIRST, CLICK_MEANS, lanesOf, lanesWide, effortStops, effortAt, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, GITS, GIT_FIRST, gitKindOf, repoFor, isCommitting, MODE_FIRST, CLICK_MEANS, effortStops, effortAt, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
   context,
 );
 const {
@@ -396,8 +388,6 @@ const {
   isCommitting,
   MODE_FIRST,
   CLICK_MEANS,
-  lanesOf,
-  lanesWide,
   effortStops,
   effortAt,
   labelOf,
@@ -2926,10 +2916,31 @@ describe("the work panel belongs to the toolbar", () => {
     expect(dock).toContain("away: state.away");
     expect(dock).toContain("state.away = put.away === true");
 
-    // Once folded, the keys leave the layout: fifteen zero-width items in a two-pixel
-    // pill is an overflow, and an overflowing flex row puts them where nobody expects.
+    /*
+     * The keys leave the layout — fifteen zero-width items in a two-pixel pill is an
+     * overflow, and an overflowing flex row puts them where nobody expects — but only
+     * *after* they have finished closing.
+     *
+     * Taking them out at the start is what made this snap where the exact tools' fold
+     * glides: there was nothing left on screen to animate. `display` cannot be
+     * transitioned, so the wait is staged in script, the way `turn` already stages the
+     * rail's orientation change.
+     */
     expect(style).toContain('.rail-wrap[data-away="true"]');
-    expect(style).toMatch(/\.rail-wrap\[data-away="true"\][\s\S]{0,200}display: none/);
+    expect(style, "leaving the layout is gated on the fold having finished").toMatch(
+      /\.rail-wrap\[data-away-done="true"\][\s\S]{0,120}display: none/,
+    );
+    expect(style, "and never on the fold merely having started").not.toMatch(
+      /\.rail-wrap\[data-away="true"\][^{]*\{[^}]*display: none/,
+    );
+    expect(render, "the page waits for the fold before it stops laying them out").toContain(
+      "state.away && !stillFolding()",
+    );
+    // The wait is the same length as the fold it is waiting for.
+    expect(dock).toMatch(/setTimeout\([\s\S]{0,180}\}, FOLD_TIME\)/);
+    // And only on the way out: opening has to put them back before they can animate open.
+    const closing = dock.slice(dock.indexOf("if (folding !== null) clearTimeout(folding)"));
+    expect(closing.slice(0, 300)).toMatch(/if \(state\.away\) \{[\s\S]{0,200}setTimeout/);
 
     // And the gesture is said out loud, because it is invisible otherwise.
     expect(page, "the markup says it").toContain("double click");
@@ -4088,30 +4099,19 @@ describe("git, as six things one key can mean", () => {
     expect(repoFor({ app: "x", opened: "toplevel" })).toBeNull();
   });
 
-  test("every command that makes a mark names the repository it is about", () => {
-    /*
-     * A git instruction that does not say where is an instruction about whichever
-     * checkout the agent happens to be sitting in, which is how the right change lands
-     * in the wrong repository.
-     *
-     * Branches is the exception and says nothing, because it makes no mark: it opens a
-     * window onto the repository rather than sending anything about it. `needs` is what
-     * tells the two apart, so the exception is a fact in the table rather than a name
-     * written into this test.
-     */
-    const marks = Object.entries(GITS).filter(([, kind]) => kind.needs !== "window");
-    expect(marks.length, "several commands still make marks").toBeGreaterThan(3);
-    for (const [id, kind] of marks) {
+  test("every command names the repository it is about", () => {
+    // A git instruction that does not say where is an instruction about whichever
+    // checkout the agent happens to be sitting in, which is how the right change lands
+    // in the wrong repository.
+    for (const [id, kind] of Object.entries(GITS)) {
       const said = kind.says("/home/someone/Desktop/colai", "a message");
       expect(said, `${id} must name the repository`).toContain("/home/someone/Desktop/colai");
       expect(said.length, `${id} must actually say something`).toBeGreaterThan(40);
     }
-    // And a command that opens a window has nothing to say and must not pretend to.
+    // Each one is either about files or about a repository. Nothing else, now that the
+    // window is gone — a third kind would need a gesture nobody has been given.
     for (const [id, kind] of Object.entries(GITS)) {
-      if (kind.needs !== "window") {
-        continue;
-      }
-      expect(kind.says, `${id} makes no mark`).toBeNull();
+      expect(["files", "repo"], `${id} needs a gesture that exists`).toContain(kind.needs);
     }
   });
 
@@ -4352,95 +4352,5 @@ describe("a press that went nowhere", () => {
     const rows = [...rail.matchAll(/button\.dataset\.kind = id;/g)];
     expect(rows.length, "design rows and git rows both").toBe(2);
     expect(page, "and the old per-tool attribute is gone").not.toContain("dataset.design");
-  });
-});
-
-describe("the shape of a history", () => {
-  /** Newest first, the order `--date-order` gives and the order the graph draws. */
-  const at = (rows: ReturnType<typeof lanesOf>, hash: string) =>
-    rows.find((row) => row.hash === hash);
-
-  test("a history with no branching is one column", () => {
-    const rows = lanesOf([
-      { hash: "c", parents: ["b"] },
-      { hash: "b", parents: ["a"] },
-      { hash: "a", parents: [] },
-    ]);
-    expect(rows.map((row) => row.column)).toEqual([0, 0, 0]);
-    expect(lanesWide(rows)).toBe(1);
-    // Nothing above the newest commit, and a line down to every one after it.
-    expect(rows[0]?.up).toBe(false);
-    expect(rows[1]?.up).toBe(true);
-    // A root ends its line rather than pointing anywhere.
-    expect(rows[2]?.parents).toEqual([]);
-  });
-
-  test("a merge fans out, and the branch it merged rejoins", () => {
-    /*
-     *   M   a merge of A and B
-     *   |\
-     *   A |
-     *   | B
-     *   |/
-     *   R   the commit they both came from
-     *
-     * The second branch to reach R must bend back into R's column rather than moving R
-     * into its own — which is what it did until the shared-parent case was written, and
-     * it left the first branch pointing at a line that was no longer there.
-     */
-    const rows = lanesOf([
-      { hash: "M", parents: ["A", "B"] },
-      { hash: "A", parents: ["R"] },
-      { hash: "B", parents: ["R"] },
-      { hash: "R", parents: [] },
-    ]);
-    expect(lanesWide(rows)).toBe(2);
-    // The merge sits on the main line and its second parent opens a column beside it.
-    expect(at(rows, "M")?.column).toBe(0);
-    expect(at(rows, "M")?.parents.map((p) => p.column)).toEqual([0, 1]);
-    expect(at(rows, "A")?.column).toBe(0);
-    expect(at(rows, "B")?.column).toBe(1);
-    // Both branches point at R in the one column R is actually drawn in.
-    expect(at(rows, "R")?.column).toBe(0);
-    expect(at(rows, "A")?.parents[0]?.column).toBe(0);
-    expect(at(rows, "B")?.parents[0]?.column).toBe(0);
-  });
-
-  test("a branch stays drawn across rows it had nothing to do with", () => {
-    // `through` is what makes the picture readable. Without it a line vanishes at every
-    // commit on another branch and reappears below, which reads as two branches.
-    const rows = lanesOf([
-      { hash: "M", parents: ["A", "B"] },
-      { hash: "A", parents: ["R"] },
-      { hash: "B", parents: ["R"] },
-      { hash: "R", parents: [] },
-    ]);
-    // While A is drawn, B's column is still running behind it.
-    expect(at(rows, "A")?.through).toContain(1);
-    // And while B is drawn, the line down to R is still running.
-    expect(at(rows, "B")?.through).toContain(0);
-    // A row never lists its own column as passing behind it.
-    for (const row of rows) {
-      expect(row.through).not.toContain(row.column);
-    }
-  });
-
-  test("a freed column is used again rather than drifting rightwards", () => {
-    // Two branches that end, then a third: it takes a column that was given back rather
-    // than a fourth one, or a long history walks off the side of the window.
-    const rows = lanesOf([
-      { hash: "M", parents: ["A", "B"] },
-      { hash: "A", parents: ["R"] },
-      { hash: "B", parents: ["R"] },
-      { hash: "R", parents: ["Q"] },
-      { hash: "Q", parents: [] },
-    ]);
-    expect(lanesWide(rows)).toBe(2);
-    expect(at(rows, "Q")?.column).toBe(0);
-  });
-
-  test("nothing to draw is not an error", () => {
-    expect(lanesOf([])).toEqual([]);
-    expect(lanesWide([])).toBe(0);
   });
 });

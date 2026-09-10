@@ -396,12 +396,6 @@ function gitRow(into, id, kind) {
   button.dataset.kind = id;
   button.innerHTML = icon(kind.glyph, 14) + `<span>${kind.label}</span>`;
   button.addEventListener("click", () => {
-    // Branches is a window, not a tool. Choosing it must not leave a git tool in
-    // somebody's hand that they never asked for.
-    if (kind.needs === "window") {
-      openBranches();
-      return;
-    }
     state.gitKind = id;
     use("git");
   });

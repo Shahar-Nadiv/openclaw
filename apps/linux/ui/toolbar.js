@@ -18,7 +18,6 @@ const el = {
   flyShape: document.getElementById("fly-shape"),
   flyDesign: document.getElementById("fly-design"),
   flyGit: document.getElementById("fly-git"),
-  branches: document.getElementById("branches"),
   flyRecord: document.getElementById("fly-record"),
   flyDraw: document.getElementById("fly-draw"),
   flyRow: document.getElementById("fly-row"),
@@ -141,8 +140,6 @@ const state = {
   // The catalogue, asked for when the picker opens rather than kept warm.
   models: null,
   modelsTrouble: null,
-  // The branch window, when it is open: which repository, and what git said about it.
-  branches: null,
   // Whether the exact tools are folded shut. Open to begin with — the rail is what
   // this toolbar is, and a first look at it should be the whole thing. Remembered with
   // the dock, because it is the same kind of fact: how somebody wants this to sit.
@@ -318,6 +315,9 @@ function render() {
     button.dataset.folded = String(state.away || (EXACT.includes(id) && state.tucked));
   }
   el.wrap.dataset.away = String(state.away);
+  // Only once the keys have finished closing do they leave the layout. Before that they
+  // are still on screen, shrinking, which is the whole of the animation.
+  el.wrap.dataset.awayDone = String(state.away && !stillFolding());
   // What the handle says it will do next, and what a screen reader is told the rail is.
   el.grip.setAttribute("aria-expanded", String(!state.away));
   el.grip.title = state.away
@@ -374,7 +374,6 @@ function render() {
   drawMarks();
   drawPopup();
   drawLibrary();
-  drawBranches();
   drawToasts();
   drawTrouble();
   // Left mounted while a popup is open, which is how a click off the popup is heard at
