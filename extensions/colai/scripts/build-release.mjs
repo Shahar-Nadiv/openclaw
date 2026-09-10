@@ -108,5 +108,12 @@ try {
   console.log(`colai: staged at bin/colai-toolbar, runs on glibc ${glibc} and newer.`);
   console.log(`colai: sha256 ${digest}`);
 } finally {
-  rmSync(work, { recursive: true, force: true });
+  // Belt to the braces of the container clearing its own `target/`: anything left that
+  // this user cannot delete is a temporary directory, and losing it is not worth failing
+  // a build that has already produced its artifact.
+  try {
+    rmSync(work, { recursive: true, force: true });
+  } catch (error) {
+    console.warn(`colai: could not remove ${work} — ${error.message}`);
+  }
 }
