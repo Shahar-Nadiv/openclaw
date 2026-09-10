@@ -132,7 +132,10 @@ export function registerColaiCli(program: CliProgram, toolbarBinary: () => strin
         console.log("Restart OpenClaw to pick this one up: openclaw gateway restart");
         return;
       }
+      // Running is all this can honestly say. Whether the overlay is drawn right now is
+      // inside that process — asking X would mean a window-manager dependency to answer
+      // a question `toggle` already answers correctly by asking the window itself.
       console.log(`Running: yes (pid ${found.pid}).`);
-      console.log("Put it away with: openclaw colai hide");
+      console.log("On screen or put away: openclaw colai toggle");
     });
 }
