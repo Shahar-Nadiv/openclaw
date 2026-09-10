@@ -24,7 +24,10 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 plugin="$(cd "$here/.." && pwd)"
-work="${TMPDIR:-/tmp}/colai-fresh-install"
+# A directory of this run's own. Two runs sharing one path is a tarball replaced under a
+# container that had already mounted it — which fails as `EISDIR` several steps later and
+# reads like a packaging bug rather than what it is.
+work="$(mktemp -d "${TMPDIR:-/tmp}/colai-fresh-install-XXXXXX")"
 share_display=0
 declare -a wanted=()
 
@@ -63,8 +66,6 @@ echo "building the plugin runtime"
 
 # One tarball for every variant: exactly what `npm publish` would upload, and the only
 # thing any container is allowed to see of this repo.
-mkdir -p "$work"
-rm -f "$work"/colai-toolbar-*.tgz
 echo "packing $plugin"
 tarball="$work/$( (cd "$plugin" && npm pack --pack-destination "$work" --silent) | tail -1 )"
 echo "packed $(basename "$tarball") ($(du -h "$tarball" | cut -f1))"
@@ -152,6 +153,19 @@ echo
 echo "A container has no screen, so none of this proves the overlay draws."
 echo "Run one variant with --display for that, at least once."
 
+# The images are gigabytes each and exist for one run. Kept only when something failed,
+# because that is when somebody wants to go and look inside one.
+failed=0
 for row in "${results[@]}"; do
-  case "$row" in *"|FAILED|"*) exit 1 ;; esac
+  case "$row" in *"|FAILED|"*) failed=1 ;; esac
 done
+if [ "$failed" = "0" ]; then
+  rm -rf "$work"
+  for variant in "${wanted[@]}"; do
+    docker rmi -f "colai-fresh:$variant" >/dev/null 2>&1 || true
+  done
+  docker builder prune -af >/dev/null 2>&1 || true
+else
+  echo "Left behind for inspection: $work, and the colai-fresh:* images."
+  exit 1
+fi
