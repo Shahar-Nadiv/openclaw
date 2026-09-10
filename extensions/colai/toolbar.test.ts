@@ -4642,9 +4642,50 @@ describe("what the plugin ships", () => {
      * stopped forcing it; nothing here reads OpenClaw's source to find out.
      */
     expect(manifest.scripts?.postinstall, "a postinstall here can never run").toBeUndefined();
-    expect(manifest.scripts?.prepack).toContain("node scripts/build-toolbar.mjs");
-    expect(shipped("bin/")).toBe(true);
+    expect(shipped("bin/"), "the built toolbar travels in the tarball").toBe(true);
+    // Two ways to produce it, and they are not interchangeable: one for working on it
+    // here, one for the copy strangers get. Which is which is settled by the test below
+    // about publishing; this only asserts both exist.
     expect(existsSync(new URL("scripts/build-toolbar.mjs", dir))).toBe(true);
+    expect(existsSync(new URL("scripts/build-release.mjs", dir))).toBe(true);
+    expect(manifest.scripts?.["build:toolbar"]).toBe("node scripts/build-toolbar.mjs");
+  });
+
+  test("a toolbar built on a developer's machine cannot be published", () => {
+    /*
+     * Two properties of the binary are decided by the machine that compiled it and by
+     * nothing in this repository: the oldest Linux it will run on, and whose home
+     * directory is inside it. Built on a current desktop, both were wrong — a GLIBC_2.39
+     * floor, which is Ubuntu 24.04 and little else, and the author's checkout path, which
+     * `--remap-path-prefix` structurally cannot reach because Tauri embeds it rather than
+     * rustc emitting it.
+     *
+     * Neither is visible in the tarball. The size is right, the digest matches, the
+     * install succeeds, and the failure arrives on a stranger's machine as a window that
+     * never opens. So it is refused at the one moment it is still catchable.
+     */
+    expect(manifest.scripts?.prepack, "the gate runs before anything is packed").toContain(
+      "node scripts/check-shippable.mjs",
+    );
+    // Packing must not rebuild the toolbar. A local cargo build here would overwrite the
+    // release artifact with one carrying this machine's floor and path — the exact thing
+    // the gate exists to prevent, done immediately after passing it.
+    expect(manifest.scripts?.prepack, "and does not rebuild what it just approved").not.toContain(
+      "build-toolbar",
+    );
+    expect(manifest.scripts?.["build:release"]).toBe("node scripts/build-release.mjs");
+    for (const file of [
+      "scripts/check-shippable.mjs",
+      "scripts/build-release.mjs",
+      "release/Dockerfile",
+    ]) {
+      expect(existsSync(new URL(file, dir)), `${file} is missing`).toBe(true);
+    }
+
+    // A developer build must invalidate the note that says otherwise, or the gate waves
+    // through a stale approval.
+    const dev = readFileSync(new URL("scripts/build-toolbar.mjs", dir), "utf8");
+    expect(dev, "a local build clears the release note").toContain("colai-toolbar.build.json");
   });
 
   test("drawing happens on the thread allowed to draw", () => {

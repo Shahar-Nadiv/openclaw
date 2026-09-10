@@ -34,9 +34,10 @@
   },
   "scripts": {
     "build": "node scripts/build-runtime.mjs && node scripts/build-toolbar.mjs",
-    "prepack": "node scripts/build-runtime.mjs && node scripts/build-toolbar.mjs",
+    "prepack": "node scripts/check-shippable.mjs && node scripts/build-runtime.mjs",
     "build:runtime": "node scripts/build-runtime.mjs",
-    "build:toolbar": "node scripts/build-toolbar.mjs"
+    "build:toolbar": "node scripts/build-toolbar.mjs",
+    "build:release": "node scripts/build-release.mjs"
   },
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*",

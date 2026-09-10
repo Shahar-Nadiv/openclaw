@@ -10,7 +10,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -125,6 +125,12 @@ try {
  * can replace the digest beside it. It closes the case where only the artifact is
  * tampered with, and it makes what shipped auditable against a rebuild.
  */
+// A build from here is for this machine, so any note saying the staged binary came out
+// of the release image is now false. Removed rather than left to be believed: that note
+// is what `check-shippable.mjs` reads to decide whether a tarball may be published, and
+// a stale one would wave through a binary that runs on no Linux but this one.
+rmSync(join(root, "bin", "colai-toolbar.build.json"), { force: true });
+
 const digest = createHash("sha256").update(readFileSync(staged)).digest("hex");
 writeFileSync(`${staged}.sha256`, `${digest}\n`);
 console.error(`colai: toolbar built in ${took}s and staged at bin/colai-toolbar.`);
