@@ -205,6 +205,27 @@ async function sendMarks(ids) {
     if (sent.settingsTrouble) {
       state.trouble = `Sent, but the model and effort did not take: ${sent.settingsTrouble}`;
     }
+    /*
+     * And whether everything the message named actually travelled.
+     *
+     * The message lists every file and picture it decided could go, and the Rust side
+     * has always reported honestly how many did — but nobody read the numbers. A file
+     * outside every work root, or a picture whose shot had aged out, arrived as a clean
+     * send: the agent was told a log was attached, no log was attached, and it answered
+     * about something it could not see.
+     */
+    const shortfall = [];
+    if (sent.pictures < ids.length) {
+      shortfall.push(`${ids.length - sent.pictures} picture(s) had already been let go`);
+    }
+    if (sent.refused && sent.refused.length) {
+      shortfall.push(
+        `${sent.refused.length} file(s) could not be read: ${sent.refused.join(", ")}`,
+      );
+    }
+    if (shortfall.length) {
+      state.trouble = `Sent, but ${shortfall.join("; ")} — so the message names more than arrived.`;
+    }
     if (who.kind === "thread") {
       state.adopted = [...state.adopted, who.id];
       // Adopting a thread is what gives it a Gateway session, and a session is the only

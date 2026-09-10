@@ -36,7 +36,17 @@ mod gateway_device_identity;
 mod gateway_ws;
 mod tray;
 
+use std::time::Duration;
 use tauri::Manager;
+
+/// How long to wait before asking for the Gateway again, and the cap it grows to.
+///
+/// `ensure_ready` already spends up to fifteen seconds installing and starting the
+/// service, so this is for the case where that whole attempt failed — a machine still
+/// booting, a Gateway being upgraded. Doubling to a minute keeps a laptop that is simply
+/// offline from spinning.
+const FIRST_RETRY: Duration = Duration::from_secs(2);
+const LONGEST_RETRY: Duration = Duration::from_secs(60);
 
 fn main() {
     tauri::Builder::default()
@@ -48,7 +58,13 @@ fn main() {
         // the argument rather than a second window — which is why the toolbar needs no
         // socket, no port and nothing listening.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            let _ = colai::asked_for(app, &args);
+            // Said, not swallowed. This is the only path `openclaw colai show|hide|toggle`
+            // and the tray take while a toolbar is up, and the caller has already exited
+            // 0 by the time it runs — so a failure here is a command that appeared to
+            // work and did nothing, with this line the only trace it ever left.
+            if let Err(trouble) = colai::asked_for(app, &args) {
+                eprintln!("[colai] could not do what was asked: {trouble}");
+            }
         }))
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -96,20 +112,27 @@ fn main() {
                         return;
                     }
                 };
-                match gateway::ensure_ready(&found) {
-                    Ok(ready) => {
-                        // How to ask where OpenClaw is, kept for the claw. The address
-                        // itself is not: it carries a one-time grant, so the claw asks
-                        // again on every press rather than replaying a spent one.
-                        handle.state::<colai::ControlUi>().found(found.clone());
-                        handle
-                            .state::<gateway_ws::GatewayClient>()
-                            .configure(&handle, ready.gateway_ws.clone());
-                    }
-                    Err(trouble) => {
-                        // Said once, and not fatal. Everything that draws still draws;
-                        // what needs an agent says so when it is asked.
-                        eprintln!("[colai] no Gateway yet: {trouble}");
+                // How to ask where OpenClaw is, kept for the claw. The address itself is
+                // not: it carries a one-time grant, so the claw asks again on every press
+                // rather than replaying a spent one.
+                handle.state::<colai::ControlUi>().found(found.clone());
+                // Kept trying. One attempt was a toolbar that stayed disconnected for the
+                // rest of the session if the Gateway happened to be slow that morning,
+                // with every menu empty and no way back but killing it.
+                let mut wait = FIRST_RETRY;
+                loop {
+                    match gateway::ensure_ready(&found) {
+                        Ok(socket) => {
+                            handle
+                                .state::<gateway_ws::GatewayClient>()
+                                .configure(&handle, socket);
+                            return;
+                        }
+                        Err(trouble) => {
+                            eprintln!("[colai] no Gateway yet ({trouble}); trying again in {wait:?}");
+                            std::thread::sleep(wait);
+                            wait = (wait * 2).min(LONGEST_RETRY);
+                        }
                     }
                 }
             });

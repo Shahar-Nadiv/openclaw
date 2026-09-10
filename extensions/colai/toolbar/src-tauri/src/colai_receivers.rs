@@ -256,9 +256,10 @@ pub(crate) async fn work_roots(
     roots
 }
 
-/// what the toolbar looked wrong about: it reported nothing while the window behind it
-/// listed a day's work. Archived threads are left out; they are history rather than
-/// somewhere to send a region.
+/// The conversations already under way, so a mark can join one instead of starting over.
+///
+/// Archived threads are left out; they are history rather than somewhere to send a
+/// region.
 ///
 /// Grouped by project here rather than in the page, and by the dashboard's own rule, so
 /// the two surfaces never disagree about which folder a conversation belongs to.

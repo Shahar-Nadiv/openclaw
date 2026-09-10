@@ -37,12 +37,45 @@ const DEEPEST: usize = 6;
 const MOST_ENTRIES: usize = 20_000;
 
 /// Describe paths that arrived by drag and drop.
+///
+/// Deliberately ungated on roots, unlike everything that *reads* a file: a drop is
+/// somebody pointing at something, and the answer is a name, a size and whether it is a
+/// folder. What may actually be read is decided later, by `readable`, at the moment bytes
+/// are opened.
+///
+/// It still refuses the names that are never anybody's business. Reporting that
+/// `~/.ssh/id_ed25519` exists and is 411 bytes is a smaller thing than reading it, and it
+/// is not nothing.
+///
+/// Paths that cannot be described come back named, rather than quietly dropped: three
+/// files dropped and two appearing is a toolbar that lost one without saying so.
 #[tauri::command]
-pub(crate) fn colai_describe_files(paths: Vec<String>) -> Vec<Chosen> {
-    paths
-        .iter()
-        .filter_map(|path| describe(path.as_ref()))
-        .collect()
+pub(crate) fn colai_describe_files(paths: Vec<String>) -> Described {
+    let mut chosen = Vec::new();
+    let mut refused = Vec::new();
+    for path in &paths {
+        let at = std::path::Path::new(path);
+        let secret = std::fs::canonicalize(at)
+            .map(|real| {
+                real.components()
+                    .filter_map(|part| part.as_os_str().to_str())
+                    .any(never_named)
+            })
+            .unwrap_or(false);
+        match (secret, describe(at)) {
+            (false, Some(one)) => chosen.push(one),
+            _ => refused.push(path.clone()),
+        }
+    }
+    Described { chosen, refused }
+}
+
+/// What could be described, and what was named but could not.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Described {
+    pub chosen: Vec<Chosen>,
+    pub refused: Vec<String>,
 }
 
 /// Ask for files, or for a folder, through the desktop's own file dialog.
@@ -256,8 +289,9 @@ fn weigh(root: &std::path::Path) -> u64 {
                 return total;
             }
             seen += 1;
-            // `symlink_metadata`, so a link into a parent directory is counted as the
-            // few bytes it is rather than walked into a loop.
+            // `DirEntry::metadata` does not follow the link, so a link into a parent
+            // directory is counted as the few bytes it is rather than walked into a loop.
+            // Named for what is called, because `fs::metadata` here would reintroduce it.
             let Ok(facts) = entry.metadata() else {
                 continue;
             };
@@ -354,8 +388,9 @@ fn search_within(roots: &[std::path::PathBuf], query: &str) -> Vec<Found> {
                 let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                     continue;
                 };
-                // `symlink_metadata`, so a link back into a parent is not walked into a
-                // loop — the same reason the folder walk above uses it.
+                // `DirEntry::metadata` again, for the same reason as the folder walk
+                // above: it does not follow the link, so a link back into a parent is not
+                // walked into a loop.
                 let Ok(facts) = entry.metadata() else {
                     continue;
                 };
@@ -462,21 +497,33 @@ fn never_named(part: &str) -> bool {
 /// does not exist is refused: there is nothing to read, and saying yes to it would make
 /// the answer depend on what appears there later.
 pub(crate) fn may_read(path: &std::path::Path, roots: &[std::path::PathBuf]) -> bool {
-    let Ok(real) = std::fs::canonicalize(path) else {
-        return false;
-    };
+    readable(path, roots).is_some()
+}
+
+/// The path to actually open, once it is allowed.
+///
+/// The resolved path comes back rather than a yes, and the caller reads *that*. Deciding
+/// on the canonical path and then opening the original leaves a window in which a symlink
+/// component can be swapped — a build script inside a project could point `notes.txt` at
+/// `~/.ssh/id_ed25519` between the two, and the file would travel.
+pub(crate) fn readable(
+    path: &std::path::Path,
+    roots: &[std::path::PathBuf],
+) -> Option<std::path::PathBuf> {
+    let real = std::fs::canonicalize(path).ok()?;
     // Every component, not just the last: a file inside `.ssh` is inside `.ssh`.
     if real
         .components()
         .filter_map(|part| part.as_os_str().to_str())
         .any(never_named)
     {
-        return false;
+        return None;
     }
-    roots.iter().any(|root| {
+    let inside = roots.iter().any(|root| {
         std::fs::canonicalize(root)
             .is_ok_and(|root| !root.as_os_str().is_empty() && real.starts_with(root))
-    })
+    });
+    inside.then_some(real)
 }
 
 /// Read the files that are travelling with a message.
@@ -485,31 +532,54 @@ pub(crate) fn may_read(path: &std::path::Path, roots: &[std::path::PathBuf]) -> 
 /// composer that shows them, and are tested there. A path that has gone since it was
 /// dropped is skipped rather than failing the send: the message still names it, and
 /// losing a whole send because one of four files moved is the worse outcome.
-pub(crate) fn carry(paths: &[String], roots: &[std::path::PathBuf]) -> Vec<ChatAttachment> {
-    paths
-        .iter()
-        .filter_map(|path| {
-            let path = std::path::Path::new(path);
-            // The gate, at the only moment that counts. The picker offers what is inside
-            // a project, but a path can reach this list by drag and drop, by a dialog, or
-            // by anything else the page decides to put in it — so what may be read is
-            // decided here, once, rather than by whichever surface happened to add it.
-            if !may_read(path, roots) {
-                return None;
-            }
-            let bytes = std::fs::read(path).ok()?;
-            Some(ChatAttachment {
-                kind: "file".to_string(),
-                mime_type: mime_of(path).to_string(),
-                file_name: path.file_name()?.to_str()?.to_string(),
-                content: base64::engine::general_purpose::STANDARD.encode(bytes),
-                // Not a picture, so it has no size on screen. The Gateway sniffs the
-                // real type off the bytes anyway; these are a hint, not a claim.
-                width: 0,
-                height: 0,
-            })
-        })
-        .collect()
+pub(crate) fn carry(paths: &[String], roots: &[std::path::PathBuf]) -> Carried {
+    let mut travelling = Vec::new();
+    let mut refused = Vec::new();
+    for path in paths {
+        let asked = std::path::Path::new(path);
+        // The gate, at the only moment that counts. The picker offers what is inside a
+        // project, but a path can reach this list by drag and drop, by a dialog, or by
+        // anything else the page decides to put in it — so what may be read is decided
+        // here, once, rather than by whichever surface happened to add it.
+        //
+        // And the resolved path is what gets opened, so nothing can be swapped underneath
+        // between the decision and the read.
+        let Some(real) = readable(asked, roots) else {
+            refused.push(path.clone());
+            continue;
+        };
+        let (Ok(bytes), Some(name)) = (
+            std::fs::read(&real),
+            asked.file_name().and_then(|name| name.to_str()),
+        ) else {
+            refused.push(path.clone());
+            continue;
+        };
+        travelling.push(ChatAttachment {
+            kind: "file".to_string(),
+            mime_type: mime_of(asked).to_string(),
+            file_name: name.to_string(),
+            content: base64::engine::general_purpose::STANDARD.encode(bytes),
+            // Not a picture, so it has no size on screen. The Gateway sniffs the real
+            // type off the bytes anyway; these are a hint, not a claim.
+            width: 0,
+            height: 0,
+        });
+    }
+    Carried {
+        travelling,
+        refused,
+    }
+}
+
+/// What travelled, and what was named but did not.
+///
+/// The refusals come back because the message has already told the agent those files are
+/// attached. Dropping them quietly means a message that says "the log is attached" with
+/// no log — the agent answers about something it cannot see, and nobody is told why.
+pub(crate) struct Carried {
+    pub travelling: Vec<ChatAttachment>,
+    pub refused: Vec<String>,
 }
 
 /// A guess at the type, from the extension.
@@ -560,9 +630,9 @@ mod tests {
          * the gate has nothing to let through either way. This is that equivalence: with
          * no paths, the roots cannot change the answer.
          */
-        assert!(carry(&[], &[]).is_empty());
-        assert!(carry(&[], &[std::path::PathBuf::from("/")]).is_empty());
-        assert!(carry(&[], &[std::env::temp_dir()]).is_empty());
+        assert!(carry(&[], &[]).travelling.is_empty());
+        assert!(carry(&[], &[std::path::PathBuf::from("/")]).travelling.is_empty());
+        assert!(carry(&[], &[std::env::temp_dir()]).travelling.is_empty());
     }
 
     #[test]
@@ -735,11 +805,14 @@ mod tests {
     #[test]
     fn a_path_that_is_not_there_is_left_out_rather_than_described_as_empty() {
         assert!(describe(std::path::Path::new("/nowhere/at/all/really")).is_none());
-        assert!(carry(
+        // Named but not travelling, and the caller is told which — a message that says a
+        // file is attached with no file is the outcome this refusal list exists to stop.
+        let brought = carry(
             &["/nowhere/at/all/really".to_string()],
-            &[std::path::PathBuf::from("/")]
-        )
-        .is_empty());
+            &[std::path::PathBuf::from("/")],
+        );
+        assert!(brought.travelling.is_empty());
+        assert_eq!(brought.refused, vec!["/nowhere/at/all/really".to_string()]);
     }
 
     #[test]
@@ -750,7 +823,7 @@ mod tests {
         // The temp directory stands in for a project root here; what may be read is
         // its own test below.
         let roots = vec![std::fs::canonicalize(std::env::temp_dir()).unwrap()];
-        let carried = carry(&[path.to_str().unwrap().to_string()], &roots);
+        let carried = carry(&[path.to_str().unwrap().to_string()], &roots).travelling;
         assert_eq!(carried.len(), 1);
         assert_eq!(
             carried[0].file_name,

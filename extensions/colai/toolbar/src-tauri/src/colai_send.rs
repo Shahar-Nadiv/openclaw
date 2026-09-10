@@ -45,6 +45,10 @@ pub(crate) struct Sent {
     pub pictures: usize,
     /// How many of the files somebody brought in actually went with it.
     pub carried: usize,
+    /// Files the message named that did not travel, and why they are worth saying: the
+    /// agent has been told they are attached, so silence here is a conversation about a
+    /// file nobody sent.
+    pub refused: Vec<String>,
     /// Whether the reply will find its way back to the screen.
     ///
     /// Said rather than swallowed. A subscription that quietly failed leaves a mark
@@ -116,12 +120,15 @@ pub(crate) async fn colai_send(
             settings_trouble = Some(trouble);
         }
     }
-    let mut attachments = attach(
+    let (mut attachments, sheet_trouble) = attach(
         &shots,
         &mark_ids,
         &sheets.unwrap_or_default(),
         &accent.unwrap_or_else(|| "#ff5c5c".to_string()),
     )?;
+    if let Some(why) = sheet_trouble {
+        settings_trouble.get_or_insert(why);
+    }
     let pictures = attachments.len();
     // After the pictures, in the order the message describes them. The message has
     // already decided which of these travel and which are only named; anything in this
@@ -135,9 +142,12 @@ pub(crate) async fn colai_send(
     // an empty list of files. The gate is unchanged: with nothing to carry there is
     // nothing for it to let through.
     let files = files.unwrap_or_default();
+    let mut refused: Vec<String> = Vec::new();
     if !files.is_empty() {
         let roots = crate::colai_receivers::work_roots(&gateway).await;
-        attachments.extend(crate::colai_files::carry(&files, &roots));
+        let brought = crate::colai_files::carry(&files, &roots);
+        attachments.extend(brought.travelling);
+        refused = brought.refused;
     }
     let carried = attachments.len() - pictures;
     let sent = gateway
@@ -152,7 +162,13 @@ pub(crate) async fn colai_send(
         .await?;
     // Only once it has landed. A failed send that had already forgotten its pictures
     // would leave the marks in the tray with nothing behind them.
-    shots.forget(&mark_ids)?;
+    //
+    // And its failure is not the send's. The message is delivered by this point, so
+    // returning an error here would tell somebody their send failed and invite them to
+    // send it twice.
+    if let Err(why) = shots.forget(&mark_ids) {
+        eprintln!("[colai] the pictures could not be released after sending: {why}");
+    }
     // Listening is not worth failing the send over — the message has already landed,
     // and all that is lost is the answer coming back to the screen rather than to the
     // conversation. Worth saying, though, which is what `watching` is for.
@@ -165,6 +181,7 @@ pub(crate) async fn colai_send(
         run_id: sent.run_id,
         pictures,
         carried,
+        refused,
         watching,
         settings_trouble,
     })
@@ -213,9 +230,13 @@ fn attach(
     mark_ids: &[String],
     sheets: &[String],
     accent: &str,
-) -> Result<Vec<ChatAttachment>, String> {
+) -> Result<(Vec<ChatAttachment>, Option<String>), String> {
     let mut carried = Vec::new();
-    for (at, (id, frames, width, height)) in shots.pick(mark_ids)?.into_iter().enumerate() {
+    let mut trouble: Option<String> = None;
+    for picked in shots.pick(mark_ids)?.into_iter() {
+        // The position it was asked for at, not the position it survived at: a mark whose
+        // shot aged out leaves a gap, and closing it would rename everything after it.
+        let numbered = picked.asked_at + 1;
         let one = |png: Vec<u8>, name: String, size: (i32, i32)| ChatAttachment {
             kind: "image".to_string(),
             mime_type: "image/png".to_string(),
@@ -231,24 +252,37 @@ fn attach(
         //
         // Which marks want it is the page's call, not this function's: what deserves a
         // sheet is a question about what somebody meant, and this end only knows bytes.
-        if frames.len() > 1 && sheets.contains(&id) {
+        if picked.frames.len() > 1 && sheets.contains(&picked.id) {
             #[cfg(target_os = "linux")]
-            if let Ok(sheet) = crate::colai_capture::contact_sheet(&frames, accent) {
-                carried.push(one(sheet, format!("mark-{}.png", at + 1), (0, 0)));
-                continue;
+            match crate::colai_capture::contact_sheet(&picked.frames, accent) {
+                Ok(sheet) => {
+                    carried.push(one(
+                        sheet.png,
+                        format!("mark-{numbered}.png"),
+                        (sheet.width, sheet.height),
+                    ));
+                    continue;
+                }
+                // Falling through sends every frame on its own, which costs about fifteen
+                // times the image tokens and reads worse. Somebody asked for a sheet and
+                // is getting something else, so it is said rather than absorbed.
+                Err(why) => {
+                    trouble.get_or_insert(format!("A recording could not be laid out as one picture, so its frames were sent separately: {why}"));
+                }
             }
         }
-        let many = frames.len() > 1;
-        for (frame, png) in frames.into_iter().enumerate() {
+        let many = picked.frames.len() > 1;
+        let size = (picked.width, picked.height);
+        for (frame, png) in picked.frames.into_iter().enumerate() {
             let name = if many {
-                format!("mark-{}-{}.png", at + 1, frame + 1)
+                format!("mark-{numbered}-{}.png", frame + 1)
             } else {
-                format!("mark-{}.png", at + 1)
+                format!("mark-{numbered}.png")
             };
-            carried.push(one(png, name, (width, height)));
+            carried.push(one(png, name, size));
         }
     }
-    Ok(carried)
+    Ok((carried, trouble))
 }
 
 /// Make an automation out of what was marked.

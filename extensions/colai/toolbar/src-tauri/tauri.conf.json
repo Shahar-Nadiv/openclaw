@@ -10,6 +10,8 @@
     "withGlobalTauri": true,
     "windows": [],
     "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https:; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'",
+      "freezePrototype": true,
       "capabilities": [
         {
           "identifier": "colai-overlay",

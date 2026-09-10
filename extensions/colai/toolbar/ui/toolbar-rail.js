@@ -240,7 +240,7 @@ function buildRail() {
     state.cron = { ...AUTOMATION_FIRST };
     flyout("automate");
   });
-  for (const seconds of RECORD_LENGTHS) length(el.flyRecord, seconds);
+  for (const seconds of RECORD_LENGTHS) lengthRow(el.flyRecord, seconds);
   for (const [id, pen] of Object.entries(PENS)) penRow(el.flyDraw, id, pen);
 }
 
@@ -262,7 +262,10 @@ function howRow(glyph, label, under, chose) {
 }
 
 /** One of the lengths a recording can be, on the menu the record key opens. */
-function length(into, seconds) {
+// `lengthRow`, not `length`: these scripts share one global scope, and a top-level
+// `function length` overwrites `window.length`. Legal, and exactly the collision the
+// no-modules arrangement is most likely to produce.
+function lengthRow(into, seconds) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "row";
@@ -548,6 +551,19 @@ const WATCH_EVERY = 5000;
  * times a minute for a picture that is usually identical.
  */
 async function watchEverything() {
+  /*
+   * The receivers, if this machine still does not know who it may talk to.
+   *
+   * The Gateway connects a moment after the app does, so the first ask usually lands
+   * before anything can answer it. This used to be three `setTimeout`s at 1.5, 4 and 9
+   * seconds — all of which expired before the Rust side's own fifteen-second budget for
+   * starting the Gateway had even finished on a cold machine, and after that nothing
+   * asked again for the rest of the session. This ticker already runs forever, which is
+   * the property the retry actually needed.
+   */
+  if (state.whoTrouble || state.allowed.length === 0) {
+    void loadWho();
+  }
   try {
     const work = await invoke("colai_at_work");
     const before = state.atWork;

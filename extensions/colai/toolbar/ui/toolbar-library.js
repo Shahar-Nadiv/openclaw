@@ -257,6 +257,23 @@ function placeLibrary() {
 }
 
 /** One thing to choose, as a picture with its name under it. */
+/**
+ * An address safe to fetch a picture from, or nothing.
+ *
+ * `https:` only. `file:` would read the user's own disk into the page, and plain `http:`
+ * announces every keystroke of a library search to anybody on the network between here
+ * and the catalogue.
+ */
+function httpsOnly(address) {
+  if (typeof address !== "string" || !address) return null;
+  try {
+    return new URL(address).protocol === "https:" ? address : null;
+  } catch {
+    // Not an address at all.
+    return null;
+  }
+}
+
 function cardIn(card) {
   const button = document.createElement("button");
   button.type = "button";
@@ -265,11 +282,24 @@ function cardIn(card) {
 
   const shot = document.createElement("div");
   shot.className = "library-shot";
-  if (card.preview) {
+  /*
+   * A preview is an address from a catalogue server, so it is checked before it is
+   * fetched.
+   *
+   * Loading it is an outbound request from the toolbar to a third party, and it hands
+   * attacker-chosen bytes to whatever image decoder the user's WebKitGTK happens to be.
+   * `https:` only — `file:` would read the user's disk into the page, and plain `http:`
+   * announces every keystroke of a library search to anybody on the network.
+   */
+  const preview = httpsOnly(card.preview);
+  if (preview) {
     const picture = document.createElement("img");
-    picture.src = card.preview;
+    picture.src = preview;
     picture.alt = "";
     picture.loading = "lazy";
+    // Nothing about which card was looked at travels to the catalogue's server.
+    picture.referrerPolicy = "no-referrer";
+    picture.crossOrigin = "anonymous";
     // A catalogue's picture may be gone, and a broken-image glyph in a grid of previews
     // reads as a broken toolbar. The empty frame reads as a thing with no picture.
     picture.addEventListener("error", () => picture.remove());

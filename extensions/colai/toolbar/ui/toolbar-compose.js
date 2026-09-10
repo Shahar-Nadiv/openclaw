@@ -845,9 +845,23 @@ async function pickFiles(folders) {
  * it twice would also encode it twice into the message.
  */
 function bringFiles(brought) {
-  if (!brought || !brought.length) return;
+  if (!brought) return;
+  const chosen = brought.chosen || [];
+  // What could not be described, named. Three files dropped and two appearing is a
+  // toolbar that lost one without saying so, and the one it lost is the one somebody
+  // most wants to ask about — a broken link, an unreadable mount.
+  const refused = brought.refused || [];
+  if (refused.length) {
+    state.trouble = `Could not read ${refused.join(", ")} — ${
+      refused.length === 1 ? "it was" : "they were"
+    } left out.`;
+  }
+  if (!chosen.length) {
+    if (refused.length) render();
+    return;
+  }
   const had = new Set(state.files.map((file) => file.path));
-  state.files = [...state.files, ...brought.filter((file) => !had.has(file.path))];
+  state.files = [...state.files, ...chosen.filter((file) => !had.has(file.path))];
   // Opened, because a file dropped onto a closed toolbar has nowhere visible to land,
   // and something that vanishes on arrival reads as a drop that failed.
   state.open = "send";

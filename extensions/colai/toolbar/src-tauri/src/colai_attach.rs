@@ -15,11 +15,10 @@
 //! is not worth any of that. What matters for cost is that nothing is *sent* unless the
 //! answer changed, and that is the part with a test on it.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter as _, Manager as _, Runtime};
+use tauri::{AppHandle, Emitter as _, Runtime};
 
 /// How often the front window is looked at.
 ///
@@ -96,8 +95,6 @@ pub(crate) fn watch_the_front<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(target_os = "linux")]
     {
         let app = app.clone();
-        let running = Arc::new(AtomicBool::new(true));
-        app.manage(Watching(running.clone()));
         std::thread::spawn(move || {
             let Some(mut eyes) = x11::Eyes::open() else {
                 // No X display: nothing to watch and nothing to say about it. The page
@@ -106,7 +103,11 @@ pub(crate) fn watch_the_front<R: Runtime>(app: &AppHandle<R>) {
             };
             let mut said: Option<InFront> = None;
             let mut moved = std::time::Instant::now();
-            while running.load(Ordering::Relaxed) {
+            // For as long as the process. There was an `AtomicBool` here under a comment
+            // saying the thread stopped when the app did — nothing ever stored `false`,
+            // so it was always true and the thread ended because the process did. Saying
+            // so is better than a flag that documents a stop nobody implemented.
+            loop {
                 let now = eyes.in_front();
                 if let Ok(mut held) = LAST_LOOK.lock() {
                     held.clone_from(&now);
@@ -131,9 +132,6 @@ pub(crate) fn watch_the_front<R: Runtime>(app: &AppHandle<R>) {
         let _ = app;
     }
 }
-
-/// Held so the thread stops when the app does.
-struct Watching(#[allow(dead_code)] Arc<AtomicBool>);
 
 /// Whether the answer is worth sending.
 ///

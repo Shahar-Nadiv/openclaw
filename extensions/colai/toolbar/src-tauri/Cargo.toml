@@ -40,3 +40,19 @@ uuid = { version = "1.26.0", features = ["v4"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.189"
 zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
+
+# What gets published.
+#
+# The binary ships inside an npm package that anybody can download and unpack, so it is
+# stripped: the symbol table is nobody's business and it is most of the size. Paths are
+# remapped in the build script, because panic locations from dependencies otherwise carry
+# whoever built it home directory into a public artifact.
+[profile.release]
+strip = "symbols"
+# One codegen unit and fat LTO: this is built once at publish time, not in a loop, so the
+# minutes are cheap and the megabytes are not — every install pays for the size.
+codegen-units = 1
+lto = true
+# Unwinding stays. Aborting would save a little more, at the price of one panic anywhere
+# taking the whole toolbar off the screen instead of failing the thing that panicked —
+# the wrong trade for a window somebody leaves open all day.

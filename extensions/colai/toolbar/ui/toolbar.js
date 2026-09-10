@@ -463,6 +463,20 @@ function redrawMarksSoon() {
  * Timed from the words rather than from the render, because this runs on every frame and
  * restarting the clock each time would mean it never ran out.
  */
+/**
+ * What each way of being disconnected means, for somebody who did not cause it.
+ *
+ * The Gateway sends a notice of its own for most of these and it wins — these are the
+ * words for when it has nothing to add, and they name the next thing to do rather than
+ * the state, because a state is not an instruction.
+ */
+const GATEWAY_TROUBLE = {
+  down: "OpenClaw is not answering. Retrying…",
+  "pairing-required": "This machine is not paired with OpenClaw yet.",
+  "credential-required": "OpenClaw needs a credential before it will answer.",
+  "tls-failure": "OpenClaw's certificate did not match the one this toolbar pinned.",
+};
+
 let saidLast = "";
 let fadingTrouble = null;
 function drawTrouble() {
@@ -705,18 +719,30 @@ async function start() {
   } catch {
     state.screens = [];
   }
-  // One screen the size of the window, when the shell cannot say. Everything below
-  // works in screens, and none of it should have to ask whether there are any.
+  /*
+   * One screen the size of the window, when the shell cannot say.
+   *
+   * Everything below works in screens, and none of it should have to ask whether there
+   * are any. In physical pixels, like the answer it stands in for: `innerWidth` is CSS
+   * pixels, so on a 2× display the plain number is half the desk, and every dock and
+   * clamp decision below would be out by that factor.
+   *
+   * And it is said out loud. GTK failing to name a single monitor is not a normal state,
+   * and a toolbar that silently invents one is a toolbar that behaves strangely for a
+   * reason nobody can find.
+   */
   if (state.screens.length === 0) {
+    const ratio = window.devicePixelRatio || 1;
     state.screens = [
       {
         x: 0,
         y: 0,
-        width: window.innerWidth,
-        height: window.innerHeight,
+        width: Math.round(window.innerWidth * ratio),
+        height: Math.round(window.innerHeight * ratio),
         reserved: NOTHING_RESERVED,
       },
     ];
+    sayFailed("The desktop did not name any monitor, so the toolbar is guessing at one.");
   }
   // Everything this page listens to, started here rather than while its scripts load.
   // A registration that runs at load makes the order of the script tags into a
@@ -796,22 +822,28 @@ async function start() {
     render();
   }).catch(() => {});
 
+  /*
+   * Whether the Gateway is there.
+   *
+   * The toolbar had no indicator at all: down, waiting to be paired and a refused
+   * certificate were indistinguishable from "the menus happen to be empty". The Rust
+   * side had been announcing every one of those all along and nobody was listening.
+   *
+   * Only the trouble is shown. "Up" is what the rest of the toolbar working already
+   * says, and a banner announcing that everything is fine is a banner people learn to
+   * ignore before the one that matters arrives.
+   */
+  void listen("colai:gateway", (event) => {
+    const said = event && event.payload;
+    if (!said || said.state === "up") return;
+    state.trouble = said.notice || GATEWAY_TROUBLE[said.state] || GATEWAY_TROUBLE.down;
+    render();
+  }).catch(() => {});
+
   void loadWho();
   // And what every agent is doing, from now until the window closes.
   void watchEverything();
   setInterval(() => void watchEverything(), WATCH_EVERY);
-  // The Gateway connects a moment after the app does, so the first ask usually lands
-  // before there is anything to answer it. Asked again rather than leaving the rail
-  // saying "unavailable" until somebody happens to open the menu.
-  for (const wait of [1500, 4000, 9000]) {
-    setTimeout(() => {
-      // Or while this machine still has no idea what it is allowed to do. The two
-      // usually fail together — nothing answers before the handshake — but tying the
-      // retry to only one of them makes that coincidence load-bearing, and the menu
-      // that depends on the other spends the session refusing.
-      if (state.whoTrouble || state.allowed.length === 0) void loadWho();
-    }, wait);
-  }
   render();
   clamp();
   // The rail redraws itself when a flyout opens, and the shape has to grow to hold it.

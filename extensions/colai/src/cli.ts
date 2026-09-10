@@ -1,9 +1,9 @@
 // `openclaw colai` — show the toolbar, put it away, or say where it stands.
 //
-// `toggle` is the whole control surface. The toolbar has no tray of its own and cannot
-// put an entry in OpenClaw's — that menu is compiled into OpenClaw's desktop app and has
-// no seam for a plugin, and this plugin does not change OpenClaw. So the control is a
-// command, which anything can run: a terminal, a launcher, a keyboard shortcut.
+// `toggle` is the control surface for everything that is not the tray icon: a terminal,
+// a launcher, a keyboard shortcut, a script. It matters most where the tray is not there
+// to help — a GNOME session with no AppIndicator extension shows no icon at all, and then
+// this is the only way back after Escape.
 //
 // Reaching the running toolbar costs nothing here. It refuses to run twice, and a second
 // launch hands its arguments to the copy already on screen — so "tell the toolbar
@@ -16,46 +16,19 @@
 // A plugin's own command does load the plugin, so this works from an ordinary terminal.
 
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, readlinkSync, statSync } from "node:fs";
-import { basename } from "node:path";
+import { existsSync, statSync } from "node:fs";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { toolbarOnScreen } from "./running.js";
 
 type CliProgram = Parameters<Parameters<OpenClawPluginApi["registerCli"]>[0]>[0]["program"];
 
-/** A toolbar somebody is looking at right now, and whether it came from this install. */
-function toolbarOnScreen(binary: string): { pid: number; thisCopy: boolean } | null {
-  // Asked of the process table rather than remembered, because the toolbar outlives the
-  // Gateway that started it: it is spawned detached so that closing one does not close
-  // the other, and a remembered pid would be a guess as soon as either restarts.
-  //
-  // Any colai-toolbar counts, not only this one. An update stages the new copy under a
-  // new directory while the copy from before it is still on screen, which is a state
-  // anybody who just ran `plugins install` is in — and "not running" would be a lie.
-  let older: number | null = null;
-  for (const entry of readdirSync("/proc")) {
-    const pid = Number(entry);
-    if (!Number.isInteger(pid)) {
-      continue;
-    }
-    let running: string;
-    try {
-      running = readlinkSync(`/proc/${pid}/exe`);
-    } catch {
-      // Somebody else's process, or one that ended mid-read. Neither is our answer.
-      continue;
-    }
-    if (running === binary) {
-      return { pid, thisCopy: true };
-    }
-    if (basename(running) === "colai-toolbar") {
-      older = pid;
-    }
-  }
-  return older === null ? null : { pid: older, thisCopy: false };
-}
-
 function megabytes(path: string): string {
-  return `${Math.round(statSync(path).size / 1_000_000)}MB`;
+  try {
+    return `${Math.round(statSync(path).size / 1_000_000)}MB`;
+  } catch {
+    // Raced an update that unlinked it. The size is a courtesy, not the answer.
+    return "size unknown";
+  }
 }
 
 /**

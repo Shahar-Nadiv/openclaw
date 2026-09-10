@@ -31,7 +31,6 @@ const ON_SCREEN: u32 = 0;
 /// way; an address is worth a quarter of a second and not a whole one.
 const BRIEFLY: std::time::Duration = std::time::Duration::from_millis(250);
 
-/// The a11y bus, whose address the session bus is asked for.
 /// The address of the page or folder a window is showing, if it will say.
 ///
 /// Asked only where there is an answer worth waiting for. A browser has a URL and a file

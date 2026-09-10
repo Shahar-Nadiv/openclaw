@@ -123,21 +123,25 @@ impl MarkShots {
     }
 
     /// The pictures for these marks, in the order asked for, skipping any already gone.
-    pub(crate) fn pick(
-        &self,
-        ids: &[String],
-    ) -> Result<Vec<(String, Vec<Vec<u8>>, i32, i32)>, String> {
+    /// The shots for these ids, each carrying the position it was asked for at.
+    ///
+    /// The position travels because a shot can have aged out — `SHOTS_KEPT` is forty and
+    /// `SHOTS_WEIGH` is 48 MB, and a handful of recordings evicts earlier marks that are
+    /// still ticked in the composer. Numbering the survivors instead would mean the
+    /// message says "2. Arrow (mark-2.png)" while `mark-2.png` is mark three's picture.
+    pub(crate) fn pick(&self, ids: &[String]) -> Result<Vec<Picked>, String> {
         let held = self.held()?;
         Ok(ids
             .iter()
-            .filter_map(|id| held.iter().find(|shot| &shot.id == id))
-            .map(|shot| {
-                (
-                    shot.id.clone(),
-                    shot.frames.clone(),
-                    shot.width,
-                    shot.height,
-                )
+            .enumerate()
+            .filter_map(|(asked_at, id)| {
+                held.iter().find(|shot| &shot.id == id).map(|shot| Picked {
+                    asked_at,
+                    id: shot.id.clone(),
+                    frames: shot.frames.clone(),
+                    width: shot.width,
+                    height: shot.height,
+                })
             })
             .collect())
     }
@@ -374,6 +378,22 @@ fn draw_mark(
     within: &[(f64, f64)],
     accent: &str,
 ) -> Result<(), String> {
+    /*
+     * Nothing to draw on is not a failure, it is nothing to draw.
+     *
+     * Every arm below reaches for `within[0]`, and the box and ellipse arms for
+     * `within[1]`. This runs inside a closure GTK calls across an `extern "C"` boundary,
+     * where an index panic does not unwind into a `Result` — it aborts, and the whole
+     * toolbar leaves the screen mid-gesture. So the shapes that need two points are only
+     * attempted when there are two.
+     */
+    let enough = match drawn {
+        "box" | "ellipse" => within.len() >= 2,
+        _ => !within.is_empty(),
+    };
+    if !enough {
+        return Ok(());
+    }
     let (red, green, blue) = colour_of(accent);
     let trace = |ink: &gdk::cairo::Context| match drawn {
         "box" => {
@@ -502,8 +522,28 @@ const SHEET_LABEL: f64 = 22.0;
 
 /// A run of frames, laid out as one numbered picture, for whoever is sending it.
 #[cfg(target_os = "linux")]
-pub(crate) fn contact_sheet(frames: &[Vec<u8>], accent: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn contact_sheet(frames: &[Vec<u8>], accent: &str) -> Result<Sheet, String> {
     sheet_of(frames, accent)
+}
+
+/// One mark's pictures, and where it sat in the list that asked for them.
+pub(crate) struct Picked {
+    pub asked_at: usize,
+    pub id: String,
+    pub frames: Vec<Vec<u8>>,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// A contact sheet and the size it came out at.
+///
+/// The size travels with it because the attachment needs it. It used to be sent as
+/// `(0, 0)` — a real picture described as having no dimensions, which is the kind of
+/// sentinel that reads as "unknown" to everything downstream.
+pub(crate) struct Sheet {
+    pub png: Vec<u8>,
+    pub width: i32,
+    pub height: i32,
 }
 
 /// A run of frames, laid out as one numbered picture.
@@ -512,7 +552,7 @@ pub(crate) fn contact_sheet(frames: &[Vec<u8>], accent: &str) -> Result<Vec<u8>,
 /// left to right and top row first, which is the order the message states rather than
 /// the order anybody should have to infer.
 #[cfg(target_os = "linux")]
-fn sheet_of(frames: &[Vec<u8>], accent: &str) -> Result<Vec<u8>, String> {
+fn sheet_of(frames: &[Vec<u8>], accent: &str) -> Result<Sheet, String> {
     use gdk::cairo;
     use gdk::prelude::*;
 
@@ -560,7 +600,11 @@ fn sheet_of(frames: &[Vec<u8>], accent: &str) -> Result<Vec<u8>, String> {
 
     let sheet = gdk::pixbuf_get_from_surface(&surface, 0, 0, surface.width(), surface.height())
         .ok_or_else(|| "Could not read the sheet back.".to_string())?;
-    encode(&sheet)
+    Ok(Sheet {
+        width: sheet.width(),
+        height: sheet.height(),
+        png: encode(&sheet)?,
+    })
 }
 
 /// How a run of frames is laid out, before anything is drawn.

@@ -70,7 +70,13 @@ const OUTLINE_ROOM: f64 = 12.0;
 const CONTEXT_SHARE: f64 = 0.14;
 /// The least context worth taking, whatever the display is.
 const CONTEXT_LEAST: f64 = 140.0;
-/// The widest edge a thumbnail is allowed, which is all the page needs to show a row.
+
+/// Which pixels a mark is about.
+///
+/// A region is its own rectangle, grown by `OUTLINE_ROOM` so the outline drawn on it is
+/// not clipped by the crop's own edge. A point or a stroke has no rectangle, so it takes
+/// a share of the screen around it — enough that the picture says where it is, which a
+/// tight crop of one pixel does not.
 pub(crate) fn crop_for(mark: &Mark, width: i32, height: i32) -> Option<Crop> {
     if width <= 0 || height <= 0 {
         return None;
@@ -177,15 +183,14 @@ pub(crate) fn drawn_as(mark: &Mark) -> Option<&'static str> {
         Some("ellipse") => Some("ellipse"),
         Some(_) => Some("box"),
         None if mark.points.len() > 1 => Some("stroke"),
+        // A pin is drawn at a point, so a mark with no points is not a pin — it is
+        // nothing to draw. Returning one anyway sent the drawing code looking for a
+        // point that was not there, inside a callback that GTK calls across an
+        // `extern "C"` boundary, where a panic is an abort and the whole toolbar goes.
+        None if mark.points.is_empty() => None,
         None => Some("pin"),
     }
 }
-
-/// The pictures taken for a mark, waiting to be sent.
-///
-/// A run rather than one image, because a still cannot show a bug that is about
-/// movement — a panel that flickers, a layout that settles wrong, a spinner that never
-/// stops. Most marks are a run of one, which is the same thing said shortly.
 
 #[cfg(test)]
 mod tests {

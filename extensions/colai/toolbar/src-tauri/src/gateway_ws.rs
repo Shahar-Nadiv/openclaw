@@ -10,18 +10,15 @@ use rustls::{ClientConfig, DigitallySignedStruct, Error as RustlsError, Signatur
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use std::fmt;
 use std::io::ErrorKind;
 #[cfg(any(target_os = "linux", test))]
-use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
 #[cfg(any(target_os = "linux", test))]
-use tauri::Url;
-use tauri::{AppHandle, Emitter, Manager, Webview};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tokio_tungstenite::{
@@ -30,7 +27,7 @@ use tokio_tungstenite::{
 use uuid::Uuid;
 
 const AGENT_KIND_CLIENT_CAPABILITY: &str = "agent-kind";
-const GATEWAY_STATE_EVENT: &str = "quickchat:gateway-state";
+const GATEWAY_STATE_EVENT: &str = "colai:gateway";
 /// What the toolbar hears when a session it is watching says something.
 const REPLY_EVENT: &str = "colai:reply";
 const GATEWAY_DEVICE_IDENTITY_FILE: &str = "quickchat-gateway-device.json";
@@ -197,7 +194,6 @@ fn pinned_tls_connector(expected: [u8; 32]) -> Result<Connector, String> {
 pub(crate) struct GatewayAgentIdentity {
     pub name: Option<String>,
     pub emoji: Option<String>,
-    pub avatar_url: Option<String>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -677,11 +673,55 @@ pub(crate) struct CronAdd {
     pub agent_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_key: Option<String>,
-    pub schedule: Value,
+    pub schedule: CronSchedule,
     /// `main` posts into the agent's own timeline; `isolated` runs a turn of its own.
-    pub session_target: String,
-    pub wake_mode: String,
-    pub payload: Value,
+    pub session_target: CronSessionTarget,
+    pub wake_mode: CronWakeMode,
+    pub payload: CronPayload,
+}
+
+/// When a job runs.
+///
+/// Closed, and typed, because this crosses in from the WebView and comes back out as
+/// persistent state on somebody's Gateway. It used to be a bare `serde_json::Value`
+/// forwarded verbatim — the widest untyped hole in the whole IPC surface, next door to
+/// commands that are careful about every field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum CronSchedule {
+    /// Once, at a moment.
+    At { at: String },
+    /// On a cron expression, in a named zone or the Gateway's own.
+    Cron {
+        expr: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tz: Option<String>,
+    },
+    /// On an interval.
+    Every { every_ms: u64 },
+}
+
+/// Whether a run joins the agent's own timeline or gets one of its own.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum CronSessionTarget {
+    Main,
+    Isolated,
+}
+
+/// Whether a due job wakes the agent now or waits for the next heartbeat.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum CronWakeMode {
+    Now,
+    Heartbeat,
+}
+
+/// What a run does. One kind today; the tag is what lets there be another.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum CronPayload {
+    AgentTurn { message: String },
 }
 
 /// What came back, as much of it as is worth saying.
@@ -768,15 +808,6 @@ pub(crate) struct ChatSendResult {
     pub(crate) run_id: String,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PluginSurfaceRefreshResponse {
-    plugin_surface_urls: Option<HashMap<String, String>>,
-}
-
-
-
-
 enum GatewayRequest {
     /// Which models this agent could answer with, and what each one can be asked for.
     ChatMetadata {
@@ -820,9 +851,6 @@ enum GatewayRequest {
         session_key: Option<String>,
     },
     ChatSend(ChatSendParams),
-    RefreshCanvasSurface {
-        observed_url: Option<String>,
-    },
 }
 
 enum GatewayResponse {
@@ -838,7 +866,8 @@ enum GatewayResponse {
     ToolOutput(ToolAnswer),
     Rewound(Rewound),
     ChatSend(ChatSendAck),
-    CanvasSurface(Option<String>),
+    /// It worked and there is nothing to read. A request whose whole answer is "yes".
+    Done,
 }
 
 enum DriverCommand {
@@ -951,26 +980,17 @@ impl RequestFailure {
     }
 }
 
-#[derive(Clone, Default)]
-struct CanvasSurfaceState {
-    generation: u64,
-    url: Option<String>,
-}
-
 struct GatewayClientInner {
     config: Mutex<Option<GatewayWsConfig>>,
     config_generation: AtomicU64,
     commands: Mutex<Option<mpsc::Sender<DriverCommand>>>,
     agents_cache: Mutex<Option<CachedAgents>>,
     identity: Mutex<Option<GatewayDeviceIdentityStore>>,
-    canvas_surface: Mutex<CanvasSurfaceState>,
     /// What the Gateway said this connection may do, from the last handshake.
     scopes: Mutex<Vec<String>>,
-    user_accent: Mutex<Option<String>>,
     connection_notice: Mutex<Option<String>>,
     connection_state: AtomicU64,
     reconnect_paused: AtomicBool,
-    sleep_cycle_depth: AtomicU64,
     running: AtomicBool,
 }
 
@@ -989,12 +1009,9 @@ impl GatewayClient {
                 scopes: Mutex::new(Vec::new()),
                 agents_cache: Mutex::new(None),
                 identity: Mutex::new(None),
-                canvas_surface: Mutex::new(CanvasSurfaceState::default()),
-                user_accent: Mutex::new(None),
                 connection_notice: Mutex::new(None),
                 connection_state: AtomicU64::new(GatewayConnectionState::Down as u64),
                 reconnect_paused: AtomicBool::new(false),
-                sleep_cycle_depth: AtomicU64::new(0),
                 running: AtomicBool::new(false),
             }),
         }
@@ -1011,34 +1028,7 @@ impl GatewayClient {
             .agents_cache
             .lock()
             .expect("gateway agents cache mutex poisoned") = None;
-        let generation = self.inner.config_generation.fetch_add(1, Ordering::SeqCst) + 1;
-        self.set_canvas_surface_url(generation, None);
-        self.inner.reconnect_paused.store(false, Ordering::SeqCst);
-        self.set_connection_state(app, GatewayConnectionState::Down, None);
-        if let Some(commands) = self
-            .inner
-            .commands
-            .lock()
-            .expect("gateway command mutex poisoned")
-            .as_ref()
-        {
-            let _ = commands.try_send(DriverCommand::Reconfigure);
-        }
-    }
-
-    pub fn clear_configuration(&self, app: &AppHandle) {
-        *self
-            .inner
-            .config
-            .lock()
-            .expect("gateway config mutex poisoned") = None;
-        *self
-            .inner
-            .agents_cache
-            .lock()
-            .expect("gateway agents cache mutex poisoned") = None;
-        let generation = self.inner.config_generation.fetch_add(1, Ordering::SeqCst) + 1;
-        self.set_canvas_surface_url(generation, None);
+        self.inner.config_generation.fetch_add(1, Ordering::SeqCst);
         self.inner.reconnect_paused.store(false, Ordering::SeqCst);
         self.set_connection_state(app, GatewayConnectionState::Down, None);
         if let Some(commands) = self
@@ -1066,26 +1056,6 @@ impl GatewayClient {
         tauri::async_runtime::spawn(async move {
             client.run_driver(app, receiver).await;
         });
-    }
-
-    pub fn emit_current_state(&self, webview: &Webview) -> Result<(), String> {
-        let notice = self
-            .inner
-            .connection_notice
-            .lock()
-            .map_err(|_| "Gateway connection notice is unavailable.".to_string())?
-            .clone();
-        webview
-            .emit(
-                GATEWAY_STATE_EVENT,
-                GatewayStateEvent::new(
-                    self.connection_state(),
-                    notice,
-                    self.canvas_surface_url(),
-                    self.user_accent(),
-                ),
-            )
-            .map_err(|error| format!("Could not report Gateway connectivity: {error}"))
     }
 
     /// The models this agent could answer with.
@@ -1338,98 +1308,6 @@ impl GatewayClient {
         })
     }
 
-    pub async fn chat_send(
-        &self,
-        message: String,
-        selected_agent_id: &str,
-        scope: &str,
-        main_key: &str,
-        idempotency_key: &str,
-    ) -> Result<ChatSendResult, String> {
-        let target = routing_target(scope, selected_agent_id, main_key);
-        let response = self
-            .request(GatewayRequest::ChatSend(ChatSendParams {
-                session_key: target.session_key.clone(),
-                agent_id: target.agent_id.clone(),
-                message,
-                idempotency_key: idempotency_key.to_string(),
-                attachments: Vec::new(),
-            }))
-            .await?;
-        let GatewayResponse::ChatSend(ack) = response else {
-            return Err("Gateway returned the wrong response for chat.send.".to_string());
-        };
-        classify_chat_ack(&ack)?;
-        Ok(ChatSendResult {
-            target,
-            run_id: ack.run_id,
-        })
-    }
-
-    pub async fn refresh_canvas_surface(&self) -> Result<Option<String>, String> {
-        let observed = self.canvas_surface_state();
-        if observed.url.is_none() {
-            return Ok(None);
-        }
-        if self.inner.config_generation.load(Ordering::SeqCst) != observed.generation {
-            return Err("Gateway Canvas surface generation changed before refresh.".to_string());
-        }
-        let response = self
-            .request(GatewayRequest::RefreshCanvasSurface {
-                observed_url: observed.url.clone(),
-            })
-            .await?;
-        let GatewayResponse::CanvasSurface(refreshed) = response else {
-            return Err(
-                "Gateway returned the wrong response for plugin.surface.refresh.".to_string(),
-            );
-        };
-        let Some(refreshed) = refreshed else {
-            return Err("Gateway did not return a refreshed Canvas surface.".to_string());
-        };
-        let mut current = self
-            .inner
-            .canvas_surface
-            .lock()
-            .map_err(|_| "Gateway Canvas surface state is unavailable.".to_string())?;
-        if self.inner.config_generation.load(Ordering::SeqCst) != observed.generation
-            || current.generation != observed.generation
-            || current.url != observed.url
-        {
-            return Err("Gateway Canvas surface changed during refresh.".to_string());
-        }
-        current.url = Some(refreshed.clone());
-        Ok(Some(refreshed))
-    }
-
-
-
-    #[cfg(target_os = "linux")]
-    pub fn route_token(&self) -> Option<String> {
-        self.inner
-            .config
-            .lock()
-            .expect("gateway config mutex poisoned")
-            .as_ref()
-            .map(|config| config.ws_url.clone())
-    }
-
-    #[cfg(target_os = "linux")]
-    pub fn is_loopback_route(&self) -> bool {
-        self.loopback_route_token().is_some()
-    }
-
-    #[cfg(target_os = "linux")]
-    pub fn loopback_route_token(&self) -> Option<String> {
-        self.inner
-            .config
-            .lock()
-            .expect("gateway config mutex poisoned")
-            .as_ref()
-            .map(|config| config.ws_url.clone())
-            .filter(|route| is_loopback_ws_url(route))
-    }
-
     pub fn resume_reconnect(&self) {
         if let Some(commands) = self
             .inner
@@ -1448,29 +1326,6 @@ impl GatewayClient {
         }
     }
 
-    #[cfg(any(target_os = "linux", test))]
-    pub(crate) fn begin_sleep_cycle(&self) {
-        self.inner.sleep_cycle_depth.fetch_add(1, Ordering::SeqCst);
-    }
-
-    #[cfg(any(target_os = "linux", test))]
-    pub(crate) fn end_sleep_cycle(&self) {
-        // Depth, not a boolean: an older wake task ending late must not park the
-        // driver while a newer sleep cycle is still active. Saturate at zero so
-        // an unbalanced end can never wrap into a permanently active driver.
-        let _ = self.inner.sleep_cycle_depth.fetch_update(
-            Ordering::SeqCst,
-            Ordering::SeqCst,
-            |depth| depth.checked_sub(1),
-        );
-    }
-
-    #[cfg(target_os = "linux")]
-    async fn wait_for_sleep_connection(&self) {
-        while !self.is_connected() {
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    }
 
     async fn request(&self, request: GatewayRequest) -> Result<GatewayResponse, String> {
         self.request_with_budget(request, None).await
@@ -1509,10 +1364,7 @@ impl GatewayClient {
     async fn run_driver(&self, app: AppHandle, mut receiver: mpsc::Receiver<DriverCommand>) {
         let mut reconnect_attempt = 0_u32;
         loop {
-            if !driver_should_run(
-                gateway_surface_open(&app),
-                self.inner.sleep_cycle_depth.load(Ordering::SeqCst) > 0,
-            ) {
+            if !gateway_surface_open(&app) {
                 self.inner.reconnect_paused.store(false, Ordering::SeqCst);
                 self.set_connection_state(&app, GatewayConnectionState::Down, None);
                 tokio::time::sleep(DRIVER_TICK).await;
@@ -1586,10 +1438,7 @@ impl GatewayClient {
             if connection_result.is_ok() {
                 reconnect_attempt = 1;
             }
-            if !driver_should_run(
-                gateway_surface_open(&app),
-                self.inner.sleep_cycle_depth.load(Ordering::SeqCst) > 0,
-            ) {
+            if !gateway_surface_open(&app) {
                 continue;
             }
             let delay = reconnect_backoff(reconnect_attempt);
@@ -1660,38 +1509,24 @@ impl GatewayClient {
         if let Ok(mut held) = self.inner.scopes.lock() {
             *held = hello.scopes.clone();
         }
-        self.set_canvas_surface_url(
-            generation,
-            gated_canvas_surface_url(hello.canvas_surface_url, inline_widgets_available),
-        );
-
         let agents = request_agents_list(&mut socket, REQUEST_TIMEOUT, &dispatch).await?;
-        let accent = request_gateway_accent(&mut socket, &dispatch).await?;
         if self.inner.config_generation.load(Ordering::SeqCst) != generation {
             return Ok(());
         }
         self.cache_agents(agents);
-        self.set_user_accent(generation, accent);
         self.set_connection_state(app, GatewayConnectionState::Up, None);
         let mut last_gateway_activity = Instant::now();
 
         loop {
             if self.inner.config_generation.load(Ordering::SeqCst) != generation
-                || !driver_should_run(
-                    gateway_surface_open(app),
-                    self.inner.sleep_cycle_depth.load(Ordering::SeqCst) > 0,
-                )
+                || !gateway_surface_open(app)
             {
                 return Ok(());
             }
             if config_changed.swap(false, Ordering::SeqCst) {
-                let accent = request_gateway_accent(&mut socket, &dispatch).await?;
-                if self.inner.config_generation.load(Ordering::SeqCst) != generation {
-                    return Ok(());
-                }
-                if self.set_user_accent(generation, accent) {
-                    self.emit_connection_state(app, GatewayConnectionState::Up, None);
-                }
+                // The Gateway's config moved under us. Nothing here reads it any more —
+                // the accent is the page's own CSS and the canvas surface is gone — but
+                // the flag still has to be cleared, and the moment is still activity.
                 last_gateway_activity = Instant::now();
             }
             tokio::select! {
@@ -1821,50 +1656,6 @@ impl GatewayClient {
             .unwrap_or_default()
     }
 
-    fn set_canvas_surface_url(&self, generation: u64, url: Option<String>) {
-        let mut surface = self
-            .inner
-            .canvas_surface
-            .lock()
-            .expect("gateway canvas surface mutex poisoned");
-        if self.inner.config_generation.load(Ordering::SeqCst) == generation {
-            *surface = CanvasSurfaceState { generation, url };
-        }
-    }
-
-    fn canvas_surface_state(&self) -> CanvasSurfaceState {
-        self.inner
-            .canvas_surface
-            .lock()
-            .expect("gateway canvas surface mutex poisoned")
-            .clone()
-    }
-
-    fn canvas_surface_url(&self) -> Option<String> {
-        self.canvas_surface_state().url
-    }
-
-    fn set_user_accent(&self, generation: u64, accent: Option<String>) -> bool {
-        let mut current = self
-            .inner
-            .user_accent
-            .lock()
-            .expect("gateway user accent mutex poisoned");
-        if self.inner.config_generation.load(Ordering::SeqCst) != generation || *current == accent {
-            return false;
-        }
-        *current = accent;
-        true
-    }
-
-    fn user_accent(&self) -> Option<String> {
-        self.inner
-            .user_accent
-            .lock()
-            .expect("gateway user accent mutex poisoned")
-            .clone()
-    }
-
     fn is_connected(&self) -> bool {
         self.connection_state() == GatewayConnectionState::Up
     }
@@ -1885,8 +1676,6 @@ impl GatewayClient {
                 .agents_cache
                 .lock()
                 .expect("gateway agents cache mutex poisoned") = None;
-            self.set_canvas_surface_url(self.inner.config_generation.load(Ordering::SeqCst), None);
-            self.set_user_accent(self.inner.config_generation.load(Ordering::SeqCst), None);
         }
         let notice_changed = {
             let mut current = self
@@ -1921,35 +1710,29 @@ impl GatewayClient {
         let _ = app.emit_to(
             crate::colai::OVERLAY_LABEL,
             GATEWAY_STATE_EVENT,
-            GatewayStateEvent::new(state, notice, self.canvas_surface_url(), self.user_accent()),
+            GatewayStateEvent::new(state, notice),
         );
     }
 }
 
+/// What the page is told when the connection changes.
+///
+/// The notice is the Gateway's own words where it has any; the page has a sentence per
+/// state for when it does not. Nothing else travels — this used to carry a canvas
+/// surface URL and a user accent that no page ever read.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GatewayStateEvent {
     state: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     notice: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    canvas_surface_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    accent: Option<String>,
 }
 
 impl GatewayStateEvent {
-    fn new(
-        state: GatewayConnectionState,
-        notice: Option<String>,
-        canvas_surface_url: Option<String>,
-        accent: Option<String>,
-    ) -> Self {
+    fn new(state: GatewayConnectionState, notice: Option<String>) -> Self {
         Self {
             state: state.event_name(),
             notice,
-            canvas_surface_url,
-            accent,
         }
     }
 }
@@ -1966,34 +1749,17 @@ fn reject_disconnected_command(command: DriverCommand) {
 /// messages through it and the toolbar asks it who can receive a region. Gating on Quick
 /// Chat alone left the toolbar permanently reporting an unreachable Gateway while the
 /// dashboard behind it was connected.
+/// Whether there is anything on screen that would use a Gateway.
+///
+/// The overlay is made on the first summon and kept from then on, so this is false only
+/// before the toolbar has ever been shown — a copy started by `openclaw colai hide`, for
+/// instance. There is nothing to answer to until there is, and the driver idles.
+///
+/// This used to ask the same question twice and `||` the answers together, which was what
+/// remained of the desktop app's `quickchat || colai` test after Quick Chat was left
+/// behind.
 fn gateway_surface_open(app: &AppHandle) -> bool {
     app.get_webview_window(crate::colai::OVERLAY_LABEL).is_some()
-        || app
-            .get_webview_window(crate::colai::OVERLAY_LABEL)
-            .is_some()
-}
-
-#[cfg(any(target_os = "linux", test))]
-fn is_loopback_ws_url(raw: &str) -> bool {
-    let Ok(url) = Url::parse(raw) else {
-        return false;
-    };
-    if !matches!(url.scheme(), "ws" | "wss") {
-        return false;
-    }
-    url.host_str().is_some_and(|host| {
-        host.eq_ignore_ascii_case("localhost")
-            || host
-                .trim_matches(['[', ']'])
-                .parse::<IpAddr>()
-                .is_ok_and(|address| address.is_loopback())
-    })
-}
-
-fn driver_should_run(surface_open: bool, sleep_active: bool) -> bool {
-    // Sleep cycles temporarily activate the driver; outside that narrow window the
-    // connection lives exactly as long as a surface that needs it.
-    surface_open || sleep_active
 }
 
 fn routing_target(scope: &str, selected_agent_id: &str, main_key: &str) -> ChatRoutingTarget {
@@ -2266,7 +2032,7 @@ where
             };
             request_on_socket(socket, method, json!({ "key": key }), budget, dispatch)
                 .await
-                .map(|_| GatewayResponse::CanvasSurface(None))
+                .map(|_| GatewayResponse::Done)
         }
         GatewayRequest::StartHere(asked) => {
             let params = serde_json::to_value(asked).map_err(|error| {
@@ -2282,7 +2048,7 @@ where
                 dispatch,
             )
             .await
-            .map(|_| GatewayResponse::CanvasSurface(None))
+            .map(|_| GatewayResponse::Done)
         }
         GatewayRequest::SessionsCatalogContinue(locator) => {
             let params = serde_json::to_value(locator).map_err(|error| {
@@ -2352,7 +2118,7 @@ where
             dispatch,
         )
         .await
-        .map(|_| GatewayResponse::CanvasSurface(None)),
+        .map(|_| GatewayResponse::Done),
         GatewayRequest::ChatHistory { key, limit } => {
             let payload = request_on_socket(
                 socket,
@@ -2430,27 +2196,7 @@ where
                     RequestFailure::transport(format!("Invalid chat.send response: {error}"))
                 })
         }
-        GatewayRequest::RefreshCanvasSurface { observed_url } => {
-            let mut params = json!({ "surface": "canvas" });
-            if let Some(observed_url) = observed_url {
-                params["observedUrl"] = Value::String(observed_url);
-            }
-            let payload =
-                request_on_socket(socket, "plugin.surface.refresh", params, budget, dispatch)
-                    .await?;
-            let response: PluginSurfaceRefreshResponse =
-                serde_json::from_value(payload).map_err(|error| {
-                    RequestFailure::transport(format!(
-                        "Invalid plugin.surface.refresh response: {error}"
-                    ))
-                })?;
-            let canvas = response
-                .plugin_surface_urls
-                .and_then(|urls| urls.get("canvas").cloned())
-                .map(|url| url.trim().to_string())
-                .filter(|url| !url.is_empty());
-            Ok(GatewayResponse::CanvasSurface(canvas))
-        }
+
     }
 }
 
@@ -2504,64 +2250,20 @@ where
     })
 }
 
-async fn request_gateway_accent<F>(
-    socket: &mut GatewaySocket,
-    dispatch: &F,
-) -> Result<Option<String>, RequestFailure>
-where
-    F: Fn(&Value),
-{
-    let config =
-        request_on_socket(socket, "config.get", json!({}), REQUEST_TIMEOUT, dispatch).await?;
-    Ok(gateway_user_accent(&config))
-}
-
-fn gateway_user_accent(config: &Value) -> Option<String> {
-    [
-        config.pointer("/config/ui/prefs/accent"),
-        config.pointer("/config/ui/seamColor"),
-    ]
-    .into_iter()
-    .flatten()
-    .filter_map(Value::as_str)
-    .find(|value| {
-        value.len() == 7
-            && value.starts_with('#')
-            && value.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit)
-    })
-    .map(str::to_ascii_lowercase)
-}
-
 struct ValidatedHello {
     device_token: Option<String>,
     tick_watch_timeout: Duration,
-    canvas_surface_url: Option<String>,
     scopes: Vec<String>,
 }
 
 impl ValidatedHello {
-    fn new(
-        device_token: Option<String>,
-        tick_watch_timeout: Duration,
-        canvas_surface_url: Option<String>,
-        scopes: Vec<String>,
-    ) -> Self {
+    fn new(device_token: Option<String>, tick_watch_timeout: Duration, scopes: Vec<String>) -> Self {
         Self {
             scopes,
             device_token,
             tick_watch_timeout,
-            canvas_surface_url,
         }
     }
-}
-
-fn gated_canvas_surface_url(
-    canvas_surface_url: Option<String>,
-    inline_widgets_available: bool,
-) -> Option<String> {
-    inline_widgets_available
-        .then_some(canvas_surface_url)
-        .flatten()
 }
 
 fn validate_hello(payload: Value) -> Result<ValidatedHello, String> {
@@ -2578,7 +2280,6 @@ fn validate_hello(payload: Value) -> Result<ValidatedHello, String> {
         features: HelloFeatures,
         auth: HelloAuth,
         policy: Option<HelloPolicy>,
-        plugin_surface_urls: Option<HashMap<String, String>>,
     }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -2622,15 +2323,9 @@ fn validate_hello(payload: Value) -> Result<ValidatedHello, String> {
         .max(1);
     let issued_device_auth = hello.auth.device_token;
     let scopes = hello.auth.scopes;
-    let canvas_surface_url = hello
-        .plugin_surface_urls
-        .and_then(|surface_urls| surface_urls.get("canvas").cloned())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
     Ok(ValidatedHello::new(
         issued_device_auth,
         Duration::from_millis(tick_interval_ms).saturating_mul(2),
-        canvas_surface_url,
         scopes,
     ))
 }
@@ -2782,35 +2477,6 @@ fn dispatch_session_message<R: tauri::Runtime>(app: &AppHandle<R>, frame: &Value
 mod tests {
     use super::*;
 
-    #[test]
-    fn sleep_cycle_runs_driver_without_quick_chat() {
-        let client = GatewayClient::new();
-        let sleep_active =
-            |client: &GatewayClient| client.inner.sleep_cycle_depth.load(Ordering::SeqCst) > 0;
-        assert!(!driver_should_run(false, false));
-        assert!(driver_should_run(true, false));
-        client.begin_sleep_cycle();
-        assert!(driver_should_run(false, sleep_active(&client)));
-        client.end_sleep_cycle();
-        assert!(!driver_should_run(false, sleep_active(&client)));
-    }
-
-    #[test]
-    fn late_wake_end_does_not_park_a_newer_sleep_cycle() {
-        let client = GatewayClient::new();
-        let sleep_active =
-            |client: &GatewayClient| client.inner.sleep_cycle_depth.load(Ordering::SeqCst) > 0;
-        client.begin_sleep_cycle(); // cycle 1 sleeps
-        client.begin_sleep_cycle(); // cycle 2 sleeps before cycle 1's wake task ends
-        client.end_sleep_cycle(); // cycle 1's wake ends late
-        assert!(driver_should_run(false, sleep_active(&client)));
-        client.end_sleep_cycle();
-        assert!(!driver_should_run(false, sleep_active(&client)));
-        // An unbalanced extra end saturates at zero instead of wrapping.
-        client.end_sleep_cycle();
-        assert!(!driver_should_run(false, sleep_active(&client)));
-    }
-
     #[tokio::test]
     async fn budgeted_driver_request_releases_the_serial_queue() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -2927,13 +2593,6 @@ mod tests {
         assert_eq!(result.default_id, "main");
         assert_eq!(result.main_key, "main");
         assert_eq!(result.scope, "per-sender");
-        assert_eq!(
-            result.agents[0]
-                .identity
-                .as_ref()
-                .and_then(|identity| identity.avatar_url.as_deref()),
-            Some("data:image/png;base64,AA==")
-        );
     }
 
     #[test]
@@ -3324,102 +2983,24 @@ mod tests {
 
         assert_eq!(hello.device_token.as_deref(), Some("test-device-token"));
         assert_eq!(hello.tick_watch_timeout, Duration::from_millis(2_500));
-        assert_eq!(
-            hello.canvas_surface_url.as_deref(),
-            Some("https://gateway.example/__openclaw__/cap/fixture-capability")
-        );
-        assert_eq!(
-            gated_canvas_surface_url(hello.canvas_surface_url.clone(), true),
-            hello.canvas_surface_url
-        );
-        assert_eq!(
-            gated_canvas_surface_url(hello.canvas_surface_url, false),
-            None
-        );
     }
 
     #[test]
-    fn plugin_surface_refresh_response_decodes_canvas_url() {
-        let response: PluginSurfaceRefreshResponse = serde_json::from_value(json!({
-            "pluginSurfaceUrls": {
-                "canvas": "https://gateway.example/__openclaw__/cap/refreshed-capability"
-            }
-        }))
-        .expect("refresh response");
-
-        assert_eq!(
-            response
-                .plugin_surface_urls
-                .and_then(|urls| urls.get("canvas").cloned())
-                .as_deref(),
-            Some("https://gateway.example/__openclaw__/cap/refreshed-capability")
-        );
-    }
-
-    #[test]
-    fn gateway_user_accent_prefers_valid_user_preferences() {
-        for (config, expected) in [
-            (
-                json!({ "config": { "ui": { "prefs": { "accent": "#ABC123" }, "seamColor": "#654321" } } }),
-                Some("#abc123"),
-            ),
-            (
-                json!({ "config": { "ui": { "prefs": { "accent": "invalid" }, "seamColor": "#654321" } } }),
-                Some("#654321"),
-            ),
-            (
-                json!({ "config": { "ui": { "prefs": { "accent": "abc123" }, "seamColor": "#12345" } } }),
-                None,
-            ),
-            (
-                json!({ "config": { "ui": { "prefs": { "accent": "#12345g" }, "seamColor": " #654321" } } }),
-                None,
-            ),
-            (json!({ "config": {} }), None),
-        ] {
-            assert_eq!(gateway_user_accent(&config).as_deref(), expected);
-        }
-    }
-
-    #[test]
-    fn sleep_gateway_routes_are_loopback_only() {
-        for route in [
-            "ws://localhost:18789",
-            "ws://127.0.0.1:18789",
-            "wss://[::1]:18789",
-        ] {
-            assert!(
-                is_loopback_ws_url(route),
-                "expected loopback route: {route}"
-            );
-        }
-        for route in [
-            "ws://192.168.1.10:18789",
-            "wss://gateway.example:18789",
-            "https://127.0.0.1:18789",
-            "not a URL",
-        ] {
-            assert!(!is_loopback_ws_url(route), "expected remote route: {route}");
-        }
-    }
-
-
-    #[test]
-    fn gateway_state_event_carries_canvas_surface_in_camel_case() {
-        let event = serde_json::to_value(GatewayStateEvent::new(
-            GatewayConnectionState::Up,
-            None,
-            Some("https://gateway.example/__openclaw__/cap/fixture-capability".to_string()),
-            Some("#abc123".to_string()),
+    fn gateway_state_event_says_the_state_and_the_gateway_s_own_words() {
+        // The page shows the notice when there is one and its own sentence when there is
+        // not, so both shapes have to survive serialisation.
+        let spoken = serde_json::to_value(GatewayStateEvent::new(
+            GatewayConnectionState::PairingRequired,
+            Some("Pair this device first.".to_string()),
         ))
         .expect("serialize gateway state");
+        assert_eq!(spoken["state"], "pairing-required");
+        assert_eq!(spoken["notice"], "Pair this device first.");
 
-        assert_eq!(
-            event["canvasSurfaceUrl"],
-            "https://gateway.example/__openclaw__/cap/fixture-capability"
-        );
-        assert_eq!(event["accent"], "#abc123");
-        assert!(event.get("canvas_surface_url").is_none());
+        let silent = serde_json::to_value(GatewayStateEvent::new(GatewayConnectionState::Up, None))
+            .expect("serialize gateway state");
+        assert_eq!(silent["state"], "up");
+        assert!(silent.get("notice").is_none());
     }
 
     #[test]
@@ -3517,7 +3098,7 @@ mod tests {
                 Some("Gateway requires a credential — open the dashboard on the gateway host")
             );
             assert_eq!(
-                serde_json::to_value(GatewayStateEvent::new(state, notice, None, None))
+                serde_json::to_value(GatewayStateEvent::new(state, notice))
                     .expect("serialize credential-required state"),
                 json!({
                     "state": "credential-required",

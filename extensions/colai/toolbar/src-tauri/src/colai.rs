@@ -462,16 +462,8 @@ fn remembered_front() -> Option<Front> {
     LAST_FRONT.lock().ok()?.clone()
 }
 
-/// The application's name, from the second half of WM_CLASS.
-///
-/// WM_CLASS is a pair — instance then class — and the class is the one that names the
-/// program. Firefox reports `"Navigator", "firefox_firefox"`, where the first half is
-/// the *kind of window* and would put "Navigator" in front of somebody who has never
-/// heard the word. `firefox_firefox` is one word said twice; it is said once here,
-/// because that string is an implementation's choice and "Firefox" is what the program
-/// is called.
-#[cfg(target_os = "linux")]
 /// The process behind a window, from what `xprop` already reported.
+#[cfg(target_os = "linux")]
 fn pid_of(said: &str) -> Option<u32> {
     said.lines()
         .find(|line| line.starts_with("_NET_WM_PID"))
@@ -758,6 +750,20 @@ pub(crate) fn colai_summon(app: AppHandle) -> Result<(), String> {
         .show()
         .map_err(|error| format!("Could not show the overlay: {error}"))?;
     tray_says_toolbar(&app, true);
+    /*
+     * And try the Gateway again, if it had given up.
+     *
+     * A refused pairing or a missing credential parks the driver until something tells it
+     * to retry, and in the desktop app that something was reopening Quick Chat. There is
+     * no Quick Chat here, so nothing ever did — an operator who reset their state left the
+     * toolbar disconnected for the rest of the session with no way back but killing it.
+     *
+     * Somebody summoning the toolbar is the closest thing to "try again" this program
+     * has, and it costs nothing when the driver is not parked.
+     */
+    if let Some(gateway) = app.try_state::<crate::gateway_ws::GatewayClient>() {
+        gateway.resume_paused_reconnect();
+    }
     Ok(())
 }
 
@@ -850,30 +856,6 @@ pub(crate) async fn colai_open_settings(app: AppHandle) -> Result<(), String> {
         .map_err(|error| format!("Could not open OpenClaw: {error}"))
 }
 
-/// Which edges of this monitor the desktop's own chrome is using.
-///
-/// Two sources, because one is not enough.
-///
-/// **The work area** is the honest, portable one. Every panel that plays by the rules
-/// publishes a strut, the window manager folds those into `_NET_WORKAREA`, and GDK hands
-/// the result back per monitor. That catches GNOME's top bar, and it catches KDE, XFCE
-/// and anything else without Colai knowing they exist.
-///
-/// **The dock is the exception**, and it is the one that prompted this. Ubuntu's dock
-/// runs with `intellihide`, which means it reserves nothing at all — the work area is
-/// the full width of the monitor while the dock sits visibly on top of it. Nothing in
-/// EWMH describes it. So when the extension is configured, its own settings are asked
-/// instead.
-///
-/// That second source is an approximation and is written down as one: the width comes
-/// out as the icon size plus padding, and the padding is Dash to Dock's business, not a
-/// published contract. Measured here, 48px icons gave a 66px band. It is close enough
-/// that the rail clears the dock, and wrong in the safe direction if the theme changes —
-/// a slightly wider reservation costs a few pixels of screen, a narrower one puts the
-/// toolbar back underneath.
-///
-/// The real answer is to measure the obstruction from Colai's own capture of the screen
-/// once the screen service exists, and stop asking the desktop about itself.
 /// One screen, in the overlay's own coordinates, with what the desktop keeps of it.
 ///
 /// Local rather than absolute, because the page thinks in its own window and a second
@@ -901,9 +883,27 @@ pub(crate) struct ScreenSpan {
 pub(crate) fn colai_screens(app: AppHandle) -> Vec<ScreenSpan> {
     #[cfg(target_os = "linux")]
     {
-        app.get_webview_window(OVERLAY_LABEL)
-            .and_then(|window| screen_spans(&window))
-            .unwrap_or_default()
+        let Some(window) = app.get_webview_window(OVERLAY_LABEL) else {
+            return Vec::new();
+        };
+        /*
+         * Re-covering the desk before answering.
+         *
+         * The overlay is sized to the union of the monitors when it is made, and nothing
+         * told it when a monitor arrived or left. Plug in a second display and the new
+         * screen had no overlay over it — every tool stopped working over there, which
+         * reads as a broken toolbar, and the only recovery was Escape then summon, which
+         * nobody would guess.
+         *
+         * Here rather than on a GDK signal because this is the question that gets asked
+         * whenever the answer might have changed: the page calls it on every render that
+         * needs a screen. It is cheap, and it fails quietly — a resize that does not take
+         * leaves the overlay where it was, which is where it already is.
+         */
+        if let Err(trouble) = cover_everything(&window) {
+            eprintln!("[colai] could not re-cover the desktop: {trouble}");
+        }
+        screen_spans(&window).unwrap_or_default()
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -944,6 +944,30 @@ fn screen_spans(window: &WebviewWindow) -> Option<Vec<ScreenSpan>> {
 
 /// Add the dock's band on the edge it lives on, when it reserves nothing itself.
 #[cfg(target_os = "linux")]
+/// Which edges of this monitor the desktop's own chrome is using.
+///
+/// Two sources, because one is not enough.
+///
+/// **The work area** is the honest, portable one. Every panel that plays by the rules
+/// publishes a strut, the window manager folds those into `_NET_WORKAREA`, and GDK hands
+/// the result back per monitor. That catches GNOME's top bar, and it catches KDE, XFCE
+/// and anything else without Colai knowing they exist.
+///
+/// **The dock is the exception**, and it is the one that prompted this. Ubuntu's dock
+/// runs with `intellihide`, which means it reserves nothing at all — the work area is
+/// the full width of the monitor while the dock sits visibly on top of it. Nothing in
+/// EWMH describes it. So when the extension is configured, its own settings are asked
+/// instead.
+///
+/// That second source is an approximation and is written down as one: the width comes
+/// out as the icon size plus padding, and the padding is Dash to Dock's business, not a
+/// published contract. Measured here, 48px icons gave a 66px band. It is close enough
+/// that the rail clears the dock, and wrong in the safe direction if the theme changes —
+/// a slightly wider reservation costs a few pixels of screen, a narrower one puts the
+/// toolbar back underneath.
+///
+/// The real answer is to measure the obstruction from Colai's own capture of the screen
+/// once the screen service exists, and stop asking the desktop about itself.
 fn widen_for_dock(mut reserved: Reserved) -> Reserved {
     let Some(position) = gsetting("org.gnome.shell.extensions.dash-to-dock", "dock-position")
     else {

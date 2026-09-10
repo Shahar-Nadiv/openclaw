@@ -20,6 +20,13 @@
  * set it on this page, so every use quietly fell through to a hard-coded coral.
  */
 :root {
+  /* How long a key takes to fold away, in one place.
+     The page re-measures the clickable region every frame while the rail is changing
+     size and stops when it believes the motion has — so it needs this number too, and it
+     reads it from here rather than restating it. Two spellings of one duration is how the
+     toolbar ends up answering the pointer where a button used to be. */
+  --fold-time: 220ms;
+
   --accent: #ff5c5c;
   --accent-hover: #ff7070;
   --accent-foreground: #fafafa;
@@ -169,9 +176,9 @@ body {
   margin: 0 4px;
   background: rgb(255 255 255 / 12%);
   transition:
-    width 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    height 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    margin 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    width var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
+    height var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
+    margin var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
     opacity 110ms ease-in;
 }
 /*
@@ -258,12 +265,12 @@ body {
   visibility: visible;
   transform: none;
   transition:
-    max-width 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    max-height 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    min-width 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    padding 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    margin 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    transform 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    max-width var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
+    max-height var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
+    min-width var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
+    padding var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
+    margin var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
+    transform var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
     opacity 200ms ease-out,
     background 160ms ease-out,
     color 160ms ease-out,
@@ -279,14 +286,14 @@ body {
   overflow: hidden;
   transform: scale(0.7);
   transition:
-    max-width 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    max-height 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    min-width 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    padding 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    margin 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    transform 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    max-width var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
+    max-height var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
+    min-width var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
+    padding var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
+    margin var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
+    transform var(--fold-time) cubic-bezier(0.4, 0, 0.2, 1),
     opacity 110ms ease-in,
-    visibility 0s linear 220ms;
+    visibility 0s linear var(--fold-time);
 }
 /* The gap runs along the rail, so which margin cancels it depends on which way the
    rail is lying. */

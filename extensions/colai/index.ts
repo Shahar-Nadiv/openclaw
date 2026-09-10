@@ -10,12 +10,13 @@
 // starts the service if it is not up yet. Somebody who runs `openclaw plugins install`
 // should get a toolbar, not a form.
 
-import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildPluginConfigSchema, definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { z } from "zod";
+import { notWhatWasBuilt } from "./src/digest.js";
+import { Toolbar } from "./src/toolbar-process.js";
 
 /**
  * The package root, whichever file is running.
@@ -64,6 +65,17 @@ const configSchema = buildPluginConfigSchema(ColaiConfigSchema);
  * The two `target/` paths are for working on the toolbar itself, where `cargo build`
  * has just put one there and staging it first would only add a copy.
  */
+/**
+ * Where the toolbar writes what it has to say.
+ *
+ * Beside OpenClaw's own state rather than in the package, because a plugin directory is
+ * replaced wholesale on update and a log that disappears when you upgrade is a log that
+ * is never there when it is wanted.
+ */
+function logFile(stateDir: string): string {
+  return join(stateDir, "logs", "colai-toolbar.log");
+}
+
 function toolbarBinary(): string | null {
   const paths = [
     join(here, "bin/colai-toolbar"),
@@ -106,7 +118,7 @@ export default definePluginEntry({
       },
     );
 
-    let toolbar: ChildProcess | null = null;
+    const toolbar = new Toolbar();
 
     api.registerService({
       id: "colai-toolbar",
@@ -128,33 +140,19 @@ export default definePluginEntry({
         const binary = toolbarBinary();
         if (!binary) {
           ctx.logger.warn(
-            "colai: the toolbar has not been built. Run `openclaw doctor` to see what is missing.",
+            "colai: the toolbar was not installed. Reinstall the plugin: `openclaw plugins install @colai/toolbar --force`.",
           );
           return;
         }
-        // Detached and unwatched: this is a window somebody looks at for hours, not a
-        // worker, and its output belongs in its own log rather than the Gateway's.
-        toolbar = spawn(binary, [], { detached: true, stdio: "ignore" });
-        toolbar.unref();
-        toolbar.once("exit", (code, signal) => {
-          // Only worth a line when it was not asked to go.
-          if (signal !== "SIGTERM") {
-            ctx.logger.warn(`colai: the toolbar exited (${signal ?? code}).`);
-          }
-          toolbar = null;
-        });
-        ctx.logger.info("colai: toolbar started.");
+        const swapped = notWhatWasBuilt(binary);
+        if (swapped) {
+          ctx.logger.error(`colai: ${swapped}`);
+          return;
+        }
+        toolbar.start(binary, logFile(ctx.stateDir), ctx.logger);
       },
       stop() {
-        // The toolbar is detached, so it outlives this process unless it is told not to.
-        if (toolbar?.pid) {
-          try {
-            process.kill(toolbar.pid, "SIGTERM");
-          } catch {
-            // Already gone, which is the outcome this wanted.
-          }
-        }
-        toolbar = null;
+        return toolbar.stop();
       },
     });
   },

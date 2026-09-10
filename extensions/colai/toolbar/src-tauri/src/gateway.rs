@@ -18,46 +18,7 @@ pub struct GatewaySnapshot {
     pub detail: Option<String>,
 }
 
-impl GatewaySnapshot {
-    pub fn unconfigured() -> Self {
-        Self {
-            phase: "unconfigured",
-            installed: false,
-            running: false,
-            reachable: false,
-            status: "Setup required".to_string(),
-            detail: Some("Choose where your OpenClaw Gateway should run.".to_string()),
-        }
-    }
 
-    pub fn missing_cli() -> Self {
-        Self {
-            phase: "missingCli",
-            installed: false,
-            running: false,
-            reachable: false,
-            status: "CLI required".to_string(),
-            detail: Some("Install the OpenClaw CLI to continue.".to_string()),
-        }
-    }
-
-    pub fn reconnecting(detail: impl Into<String>) -> Self {
-        Self {
-            phase: "reconnecting",
-            installed: true,
-            running: false,
-            reachable: false,
-            status: "Reconnecting".to_string(),
-            detail: Some(detail.into()),
-        }
-    }
-}
-
-pub struct ReadyGateway {
-    pub snapshot: GatewaySnapshot,
-    pub dashboard_url: String,
-    pub gateway_ws: GatewayWsConfig,
-}
 
 // Mirrors the JSON emitted by `src/cli/daemon-cli/status.print.ts`: service
 // state establishes installation/runtime, while rpc.ok establishes reachability.
@@ -166,10 +127,17 @@ pub fn status(cli: &OpenClawCli) -> Result<GatewaySnapshot, String> {
     })
 }
 
-pub fn ensure_ready(cli: &OpenClawCli) -> Result<ReadyGateway, String> {
+/// Bring the Gateway up if it is not, and come back with what the socket needs.
+///
+/// Only the socket. This used to return a Control UI address as well, which meant every
+/// toolbar launch asked `openclaw dashboard` for one — and that call mints a fresh
+/// ten-minute one-time operator grant. Nothing read the address, so every start left a
+/// live, unredeemed, operator-grade grant in the Gateway's token store for no reason.
+/// The claw mints its own when somebody actually presses it.
+pub fn ensure_ready(cli: &OpenClawCli) -> Result<GatewayWsConfig, String> {
     let mut snapshot = status(cli)?;
     if snapshot.reachable {
-        return dashboard(cli, snapshot);
+        return socket(cli);
     }
 
     if !snapshot.installed {
@@ -180,8 +148,8 @@ pub fn ensure_ready(cli: &OpenClawCli) -> Result<ReadyGateway, String> {
         run_service_command(cli, "start")?;
     }
 
-    snapshot = wait_until_reachable(cli)?;
-    dashboard(cli, snapshot)
+    wait_until_reachable(cli)?;
+    socket(cli)
 }
 
 fn wait_until_reachable(cli: &OpenClawCli) -> Result<GatewaySnapshot, String> {
@@ -200,7 +168,28 @@ fn wait_until_reachable(cli: &OpenClawCli) -> Result<GatewaySnapshot, String> {
         .unwrap_or_else(|| "Gateway did not become reachable.".to_string()))
 }
 
-pub fn dashboard(cli: &OpenClawCli, snapshot: GatewaySnapshot) -> Result<ReadyGateway, String> {
+/// Where the Gateway's socket is, and what it takes to be let in.
+fn socket(cli: &OpenClawCli) -> Result<GatewayWsConfig, String> {
+    let response = ask_dashboard(cli)?;
+    // The shared-credential URL, not the browser one: the browser's carries a one-time
+    // pairing grant that must be spent by a browser, and this connection is not one.
+    let shared_auth_url = response
+        .url
+        .ok_or_else(|| "Dashboard response did not include a URL.".to_string())?;
+    let ws_url = response
+        .ws_url
+        .ok_or_else(|| "Dashboard response did not include a WebSocket URL.".to_string())?;
+    let token = dashboard_token(&shared_auth_url)?;
+    Ok(GatewayWsConfig::new(
+        ws_url,
+        token,
+        response.gateway_password,
+        response.tls_fingerprint,
+    ))
+}
+
+/// Ask the CLI where OpenClaw is, in the one shape both callers need.
+fn ask_dashboard(cli: &OpenClawCli) -> Result<DashboardResponse, String> {
     // CLIs released before `dashboard --json` reject the flag without JSON output;
     // surface an upgrade path instead of a raw parse error.
     let (response, output) =
@@ -218,27 +207,7 @@ pub fn dashboard(cli: &OpenClawCli, snapshot: GatewaySnapshot) -> Result<ReadyGa
             Err(error) => return Err(error.to_string()),
         };
     if response.ok && output.status.success() {
-        // The browser owns the one-time pairing grant; Quick Chat keeps the
-        // legacy URL's shared credential and must never consume that grant.
-        let shared_auth_url = response
-            .url
-            .ok_or_else(|| "Dashboard response did not include a URL.".to_string())?;
-        let ws_url = response
-            .ws_url
-            .ok_or_else(|| "Dashboard response did not include a WebSocket URL.".to_string())?;
-        let token = dashboard_token(&shared_auth_url)?;
-        return Ok(ReadyGateway {
-            snapshot,
-            dashboard_url: response
-                .browser_url
-                .ok_or_else(unsupported_dashboard_integration)?,
-            gateway_ws: GatewayWsConfig::new(
-                ws_url,
-                token,
-                response.gateway_password,
-                response.tls_fingerprint,
-            ),
-        });
+        return Ok(response);
     }
     Err(response
         .reason
@@ -252,21 +221,9 @@ pub fn dashboard(cli: &OpenClawCli, snapshot: GatewaySnapshot) -> Result<ReadyGa
 /// connect page instead of on OpenClaw. Nobody should be asked to connect to their own
 /// Gateway, so the cost of asking the CLI again is the right cost.
 pub fn browser_url(cli: &OpenClawCli) -> Result<String, String> {
-    let (response, output) = cli
-        .json::<DashboardResponse, _, _>(["dashboard", "--json", "--no-open"])
-        .map_err(|error| match error {
-            crate::cli::CliError::InvalidJson(_) => unsupported_dashboard_integration(),
-            crate::cli::CliError::CommandFailed(message) if message.contains("\"--json\"") => {
-                unsupported_dashboard_integration()
-            }
-            other => other.to_string(),
-        })?;
-    if !response.ok || !output.status.success() {
-        return Err(response
-            .reason
-            .unwrap_or_else(|| "Dashboard is not ready.".to_string()));
-    }
-    response.browser_url.ok_or_else(unsupported_dashboard_integration)
+    ask_dashboard(cli)?
+        .browser_url
+        .ok_or_else(unsupported_dashboard_integration)
 }
 
 fn unsupported_dashboard_integration() -> String {
