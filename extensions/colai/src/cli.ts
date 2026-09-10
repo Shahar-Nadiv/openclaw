@@ -1,13 +1,21 @@
-// `openclaw colai` — is the toolbar there, and is it on screen?
+// `openclaw colai` — show the toolbar, put it away, or say where it stands.
 //
-// This is where the question is answered, rather than in a doctor check, because doctor
-// cannot ask it. `registerBundledHealthChecks` names the five bundled plugins that
-// contribute doctor checks and there is no seam for an installed one, so a health check
-// registered here is only ever registered inside the Gateway process — which is not the
-// process `openclaw doctor` runs in. A check nobody can run is worse than no check.
+// `toggle` is the whole control surface. The toolbar has no tray of its own and cannot
+// put an entry in OpenClaw's — that menu is compiled into OpenClaw's desktop app and has
+// no seam for a plugin, and this plugin does not change OpenClaw. So the control is a
+// command, which anything can run: a terminal, a launcher, a keyboard shortcut.
 //
+// Reaching the running toolbar costs nothing here. It refuses to run twice, and a second
+// launch hands its arguments to the copy already on screen — so "tell the toolbar
+// something" and "start the toolbar" are the same command, and there is no socket, port
+// or protocol between them.
+//
+// Status lives here rather than in a doctor check because doctor cannot ask:
+// `registerBundledHealthChecks` names five bundled plugins and has no seam for an
+// installed one, and a plugin's `register` does not run in the doctor process at all.
 // A plugin's own command does load the plugin, so this works from an ordinary terminal.
 
+import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readlinkSync, statSync } from "node:fs";
 import { basename } from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
@@ -50,19 +58,55 @@ function megabytes(path: string): string {
   return `${Math.round(statSync(path).size / 1_000_000)}MB`;
 }
 
+/**
+ * Hand one word to the toolbar, starting it if it is not up.
+ *
+ * Detached and unwaited, because this returns a menu to the person who opened it: the
+ * toolbar outlives the command that spoke to it, and holding the terminal until a window
+ * closes would be the wrong shape for both callers.
+ */
+function tellTheToolbar(binary: string, word: "show" | "hide" | "toggle"): void {
+  spawn(binary, [word], { detached: true, stdio: "ignore" }).unref();
+}
+
 export function registerColaiCli(program: CliProgram, toolbarBinary: () => string | null): void {
-  program
-    .command("colai")
-    .description("Show whether the colai toolbar is installed and on screen")
+  const colai = program.command("colai").description("Show the colai toolbar, or put it away");
+
+  /** Every subcommand needs the binary, and none of them can do anything without it. */
+  const theToolbar = (): string | null => {
+    const binary = toolbarBinary();
+    if (binary && existsSync(binary)) {
+      return binary;
+    }
+    console.error("The colai toolbar is not installed.");
+    console.error("The package ships it already built, so this means the install did not finish.");
+    console.error("Reinstall it: openclaw plugins install @colai/toolbar --force");
+    process.exitCode = 1;
+    return null;
+  };
+
+  for (const [word, description] of [
+    ["show", "Put the toolbar on screen"],
+    ["hide", "Take the toolbar off screen"],
+    ["toggle", "Put the toolbar on screen, or take it off"],
+  ] as const) {
+    colai
+      .command(word)
+      .description(description)
+      .action(() => {
+        const binary = theToolbar();
+        if (binary) {
+          tellTheToolbar(binary, word);
+        }
+      });
+  }
+
+  colai
+    .command("status", { isDefault: true })
+    .description("Show whether the toolbar is installed and on screen")
     .action(() => {
-      const binary = toolbarBinary();
-      if (!binary || !existsSync(binary)) {
-        console.error("The colai toolbar is not installed.");
-        console.error(
-          "The package ships it already built, so this means the install did not finish.",
-        );
-        console.error("Reinstall it: openclaw plugins install @colai/toolbar --force");
-        process.exitCode = 1;
+      const binary = theToolbar();
+      if (!binary) {
         return;
       }
       console.log(`Toolbar: ${binary} (${megabytes(binary)})`);
@@ -78,10 +122,7 @@ export function registerColaiCli(program: CliProgram, toolbarBinary: () => strin
       const found = toolbarOnScreen(binary);
       if (found === null) {
         console.log("Running: no.");
-        console.log("It opens with OpenClaw. Start it: openclaw gateway restart");
-        console.log(
-          "Or leave it closed for good: openclaw config set plugins.entries.colai.config.autostart false",
-        );
+        console.log("Put it on screen: openclaw colai show");
         return;
       }
       if (!found.thisCopy) {
@@ -92,6 +133,6 @@ export function registerColaiCli(program: CliProgram, toolbarBinary: () => strin
         return;
       }
       console.log(`Running: yes (pid ${found.pid}).`);
-      console.log("Put it away or bring it back from the colai icon in the system tray.");
+      console.log("Put it away with: openclaw colai hide");
     });
 }

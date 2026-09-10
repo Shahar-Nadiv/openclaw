@@ -727,6 +727,28 @@ pub(crate) fn colai_take_keyboard(app: AppHandle) -> Result<(), String> {
         .map_err(|error| format!("Could not reach the keyboard: {error}"))
 }
 
+/// What a command line asked the toolbar to do.
+///
+/// The same words arrive two ways and mean the same thing both times: on the arguments
+/// this process started with, and through `tauri-plugin-single-instance` when a second
+/// copy is run while one is already up. `openclaw colai toggle` is the second case, and
+/// the first is what happens when nothing was running yet.
+pub(crate) fn asked_for(app: &AppHandle, args: &[String]) -> Result<(), String> {
+    let asked = args.iter().rev().find_map(|word| match word.as_str() {
+        "show" | "--show" => Some("show"),
+        "hide" | "--hide" => Some("hide"),
+        "toggle" | "--toggle" => Some("toggle"),
+        _ => None,
+    });
+    // Nothing said is a request for the toolbar. Being run at all is the ask — from the
+    // plugin at startup, or from somebody who typed the binary's name.
+    match asked.unwrap_or("show") {
+        "hide" => colai_release(app.clone()),
+        "toggle" if toolbar_is_showing(app) => colai_release(app.clone()),
+        _ => colai_summon(app.clone()),
+    }
+}
+
 /// Somebody asked for the toolbar.
 #[tauri::command]
 pub(crate) fn colai_summon(app: AppHandle) -> Result<(), String> {
@@ -735,19 +757,7 @@ pub(crate) fn colai_summon(app: AppHandle) -> Result<(), String> {
     window
         .show()
         .map_err(|error| format!("Could not show the overlay: {error}"))?;
-    tray_says_toolbar(&app, true);
     Ok(())
-}
-
-/// Tell the tray whether the toolbar is on screen.
-///
-/// Showing and hiding are the only two things that move it, and both report here —
-/// Escape reaches the second without the menu being involved, so a tray that learned
-/// only from its own clicks would be wrong the first time anybody pressed it.
-fn tray_says_toolbar(app: &AppHandle, showing: bool) {
-    if let Some(tray) = app.try_state::<crate::tray::Tray>() {
-        tray.says_toolbar(showing);
-    }
 }
 
 /// Whether the toolbar is on screen right now.
@@ -775,50 +785,53 @@ pub(crate) fn colai_release(app: AppHandle) -> Result<(), String> {
             *held = None;
         }
     }
-    tray_says_toolbar(&app, false);
     Ok(())
 }
 
-/// Where the Control UI is, once the Gateway has said.
+/// The CLI that knows where OpenClaw is.
 ///
-/// Kept from the moment the connection is configured, because that is the only moment
-/// anybody knows it: the URL comes back from the `openclaw` CLI along with the socket and
-/// the token, and asking again later would mean asking the CLI again.
+/// The address is not kept, only the way to ask for it. The Control UI's address carries
+/// a one-time grant that the browser spends on arrival, so a remembered one works once
+/// and then drops somebody on a connect page — which is exactly what nobody installing a
+/// toolbar should ever be asked to do.
 #[derive(Default)]
-pub(crate) struct ControlUi(std::sync::Mutex<Option<String>>);
+pub(crate) struct ControlUi(std::sync::Mutex<Option<crate::cli::OpenClawCli>>);
 
 impl ControlUi {
-    pub(crate) fn found(&self, url: String) {
+    pub(crate) fn found(&self, cli: crate::cli::OpenClawCli) {
         if let Ok(mut held) = self.0.lock() {
-            *held = Some(url);
+            *held = Some(cli);
         }
     }
 
-    fn url(&self) -> Option<String> {
+    fn cli(&self) -> Option<crate::cli::OpenClawCli> {
         self.0.lock().ok().and_then(|held| held.clone())
     }
 }
 
-/// OpenClaw itself, opened in a browser.
+/// OpenClaw itself, opened in a browser and already signed in.
 ///
 /// This used to show the desktop app's own window, because the toolbar lived inside that
-/// app and Colai's settings page *was* that window. Standing alone there is no such
+/// app and colai's settings page *was* that window. Standing alone there is no such
 /// window and pressing the claw said so — "There is no main window to show" — which is
 /// true and useless.
-///
-/// The Control UI is the thing somebody wanted, and the Gateway named it at connection.
 ///
 /// It answers even when it cannot help. The claw is the one control that survives the
 /// rail being put away, so a press on it that does nothing at all is the toolbar looking
 /// broken at the moment it has least to show for itself.
 #[tauri::command]
-pub(crate) fn colai_open_settings(app: AppHandle) -> Result<(), String> {
-    let Some(url) = app.state::<ControlUi>().url() else {
+pub(crate) async fn colai_open_settings(app: AppHandle) -> Result<(), String> {
+    let Some(cli) = app.state::<ControlUi>().cli() else {
         return Err(
             "No Gateway yet, so there is nowhere to open. Start OpenClaw and try again."
                 .to_string(),
         );
     };
+    // Off the UI thread: this runs the `openclaw` CLI, which takes most of a second, and
+    // the rail must not freeze while somebody waits for a browser.
+    let url = tauri::async_runtime::spawn_blocking(move || crate::gateway::browser_url(&cli))
+        .await
+        .map_err(|error| format!("Could not ask OpenClaw where it is: {error}"))??;
     tauri_plugin_opener::OpenerExt::opener(&app)
         .open_url(url, None::<&str>)
         .map_err(|error| format!("Could not open OpenClaw: {error}"))

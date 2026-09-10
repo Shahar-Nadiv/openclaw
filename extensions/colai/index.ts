@@ -87,11 +87,9 @@ export default definePluginEntry({
     }
     const autostart = parsed.data.autostart ?? true;
 
-    // `openclaw colai` says whether the toolbar is there and whether it is on screen.
-    // It is a command rather than a doctor check because doctor cannot ask: core names
-    // the five bundled plugins that contribute health checks and has no seam for an
-    // installed one, so a check registered here would only exist inside the Gateway —
-    // which is not the process `openclaw doctor` runs in.
+    // `openclaw colai show|hide|toggle|status` — the whole control surface outside the
+    // toolbar's own window, and the only one a plugin can offer without changing
+    // OpenClaw. Anything can run a command: a terminal, a launcher, a shortcut.
     api.registerCli(
       async ({ program }) => {
         const { registerColaiCli } = await import("./src/cli.js");
@@ -101,8 +99,8 @@ export default definePluginEntry({
         descriptors: [
           {
             name: "colai",
-            description: "Show whether the colai toolbar is installed and on screen",
-            hasSubcommands: false,
+            description: "Show the colai toolbar, or put it away",
+            hasSubcommands: true,
           },
         ],
       },

@@ -245,6 +245,30 @@ pub fn dashboard(cli: &OpenClawCli, snapshot: GatewaySnapshot) -> Result<ReadyGa
         .unwrap_or_else(|| "Dashboard is not ready.".to_string()))
 }
 
+/// A Control UI address that will let somebody straight in.
+///
+/// Asked for every time rather than kept, because the grant in it is one-time: the
+/// browser spends it on arrival, and a second visit to the same address lands on the
+/// connect page instead of on OpenClaw. Nobody should be asked to connect to their own
+/// Gateway, so the cost of asking the CLI again is the right cost.
+pub fn browser_url(cli: &OpenClawCli) -> Result<String, String> {
+    let (response, output) = cli
+        .json::<DashboardResponse, _, _>(["dashboard", "--json", "--no-open"])
+        .map_err(|error| match error {
+            crate::cli::CliError::InvalidJson(_) => unsupported_dashboard_integration(),
+            crate::cli::CliError::CommandFailed(message) if message.contains("\"--json\"") => {
+                unsupported_dashboard_integration()
+            }
+            other => other.to_string(),
+        })?;
+    if !response.ok || !output.status.success() {
+        return Err(response
+            .reason
+            .unwrap_or_else(|| "Dashboard is not ready.".to_string()));
+    }
+    response.browser_url.ok_or_else(unsupported_dashboard_integration)
+}
+
 fn unsupported_dashboard_integration() -> String {
     "The installed OpenClaw CLI does not support the desktop dashboard integration. \
      Choose the Beta or Development release channel and install again, or wait for \

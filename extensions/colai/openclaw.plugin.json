@@ -5,8 +5,8 @@
   "cliCommands": [
     {
       "name": "colai",
-      "description": "Show whether the colai toolbar is installed and on screen",
-      "hasSubcommands": false
+      "description": "Show the colai toolbar, or put it away",
+      "hasSubcommands": true
     }
   ],
   "activation": {

@@ -9,10 +9,14 @@
 // `gateway_device_identity` came across from the desktop app, trimmed to what the
 // toolbar calls. See the header on `gateway_ws.rs`.
 //
-// What it does not need is most of that app — Quick Chat, the updater, the installer,
-// discovery, sleep handling. Fourteen thousand lines the toolbar never called. The tray
-// it does need, because the toolbar can be put away from its own keyboard and there is
-// no other window left to bring it back.
+// What it does not need is most of that app — the tray, Quick Chat, the updater, the
+// installer, discovery, sleep handling. Fourteen thousand lines the toolbar never called.
+//
+// The tray is the one that is genuinely missing. The toolbar can be put away from its own
+// keyboard and has no other window to bring it back, and it cannot add an entry to
+// OpenClaw's tray — that menu is compiled into OpenClaw's desktop app, with no seam for a
+// plugin, and this plugin does not change OpenClaw. So the way back is a command:
+// `openclaw colai show`, which lands here through the single-instance handoff.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -30,7 +34,6 @@ mod colai_send;
 mod gateway;
 mod gateway_device_identity;
 mod gateway_ws;
-mod tray;
 
 use tauri::Manager;
 
@@ -38,8 +41,13 @@ fn main() {
     tauri::Builder::default()
         // One toolbar. A second copy hands its arguments to the first and exits, which is
         // also what stops a plugin that starts it twice from putting two on the screen.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            let _ = colai::colai_summon(app.clone());
+        //
+        // That handoff is also how anything outside this process reaches it. `openclaw
+        // colai toggle` runs this binary again with an argument, and what arrives here is
+        // the argument rather than a second window — which is why the toolbar needs no
+        // socket, no port and nothing listening.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            let _ = colai::asked_for(app, &args);
         }))
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -48,19 +56,12 @@ fn main() {
             app.manage(colai::ControlUi::default());
             app.manage(colai_capture::MarkShots::default());
 
-            // The tray, before the overlay, so the first summon has something to tick.
-            // Not fatal: a desktop with no tray is still a desktop with a toolbar on it,
-            // and the only thing lost is the way back after Escape.
-            match tray::build(app) {
-                Ok(tray) => {
-                    app.manage(tray);
-                }
-                Err(trouble) => eprintln!("[colai] no tray: {trouble}"),
-            }
-
             // The overlay, straight away: this program is the toolbar, so there is
-            // nothing to wait for and nowhere else to be.
-            if let Err(trouble) = colai::colai_summon(app.handle().clone()) {
+            // nothing to wait for and nowhere else to be. Unless the very command that
+            // started it said otherwise — being launched by `colai hide` should leave the
+            // screen alone rather than flash a toolbar and take it away again.
+            let asked: Vec<String> = std::env::args().collect();
+            if let Err(trouble) = colai::asked_for(app.handle(), &asked) {
                 eprintln!("[colai] could not open the toolbar: {trouble}");
             }
 
@@ -86,11 +87,10 @@ fn main() {
                 };
                 match gateway::ensure_ready(&found) {
                     Ok(ready) => {
-                        // Where OpenClaw itself lives, kept for the claw to open. Said
-                        // once, here, because this is the only moment it is known.
-                        handle
-                            .state::<colai::ControlUi>()
-                            .found(ready.dashboard_url.clone());
+                        // How to ask where OpenClaw is, kept for the claw. The address
+                        // itself is not: it carries a one-time grant, so the claw asks
+                        // again on every press rather than replaying a spent one.
+                        handle.state::<colai::ControlUi>().found(found.clone());
                         handle
                             .state::<gateway_ws::GatewayClient>()
                             .configure(&handle, ready.gateway_ws.clone());
