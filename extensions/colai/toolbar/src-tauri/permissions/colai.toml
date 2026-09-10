@@ -27,6 +27,7 @@ commands.allow = [
   "colai_unwatch",
   "colai_stop",
   "colai_points",
+  "colai_said",
   "colai_rewind",
   "colai_start_here",
   "colai_automate",

@@ -165,6 +165,7 @@ fn main() {
             colai_receivers::colai_threads,
             colai_send::colai_automate,
             colai_send::colai_points,
+            colai_send::colai_said,
             colai_send::colai_rewind,
             colai_send::colai_send,
             colai_send::colai_start_here,

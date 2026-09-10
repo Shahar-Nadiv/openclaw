@@ -637,3 +637,119 @@ function flyToWork(marks) {
     run.finished.then(drop, drop);
   }
 }
+
+/*
+ * The work outlives the toolbar.
+ *
+ * Everything the Work panel shows used to live in `state.history` and nowhere else, so
+ * restarting the toolbar — an update, a Gateway restart, a reboot — emptied it. What
+ * somebody sent this morning was gone, and the panel opened on "nothing yet" over a day's
+ * work.
+ *
+ * Two halves, because the two facts have different owners. What was *sent* is this
+ * toolbar's own knowledge — which marks, which words, to whom — and nothing else records
+ * it, so it is remembered here. What came *back* belongs to the Gateway, which has the
+ * transcript and kept receiving while the toolbar was not running, so it is asked for
+ * rather than stored. Storing the answers too would mean a panel confidently showing a
+ * conversation that had moved on without it.
+ */
+const WORK_REMEMBERED = "colai.toolbar.work";
+
+/**
+ * How much is kept.
+ *
+ * The panel is a record of recent work, not an archive: the Gateway is the archive, and
+ * a hundred entries is already more than anybody scrolls. It also bounds what goes into
+ * `localStorage`, which is a few megabytes for the whole origin and shared with where
+ * the rail was put.
+ */
+const WORK_KEPT = 100;
+
+/** What survives a restart: what was sent, never what came back. */
+function rememberWork() {
+  try {
+    window.localStorage.setItem(
+      WORK_REMEMBERED,
+      JSON.stringify(
+        state.history.slice(0, WORK_KEPT).map((entry) => ({
+          at: entry.at,
+          who: entry.who,
+          sessionKey: entry.sessionKey,
+          said: entry.said,
+          count: entry.count,
+          marks: entry.marks,
+          blocked: entry.blocked,
+        })),
+      ),
+    );
+  } catch {
+    // A full or refusing store is not a reason to stop working. The panel keeps what it
+    // has for this session, and the Gateway still has the conversations either way.
+  }
+}
+
+/** What was sent before this toolbar started, as far as it recorded it. */
+function recallWork() {
+  let kept;
+  try {
+    kept = JSON.parse(window.localStorage.getItem(WORK_REMEMBERED) || "[]");
+  } catch {
+    return;
+  }
+  if (!Array.isArray(kept)) return;
+  state.history = kept
+    .filter((entry) => entry && typeof entry.said === "string")
+    .map((entry) => ({
+      at: Number(entry.at) || Date.now(),
+      who: typeof entry.who === "string" ? entry.who : "?",
+      sessionKey: typeof entry.sessionKey === "string" ? entry.sessionKey : null,
+      said: entry.said,
+      count: Number(entry.count) || 0,
+      marks: Array.isArray(entry.marks) ? entry.marks.filter((m) => typeof m === "string") : [],
+      blocked: typeof entry.blocked === "string" ? entry.blocked : undefined,
+      // Filled from the Gateway a moment later. Not remembered: the conversation went on
+      // without this toolbar, and a stored answer would be a stale one shown as current.
+      answer: null,
+    }));
+}
+
+/**
+ * And what the agents said back, from the Gateway that was listening.
+ *
+ * One ask per conversation, not per entry: several sends to the same agent share a
+ * session, and asking once per entry would be the same transcript fetched four times.
+ * Failures are quiet — a conversation the Gateway will not talk about leaves an entry
+ * showing what was sent, which is what it showed a moment ago anyway.
+ */
+async function catchUpOnWork() {
+  const keys = [...new Set(state.history.map((entry) => entry.sessionKey).filter(Boolean))];
+  for (const sessionKey of keys) {
+    let turns;
+    try {
+      turns = await invoke("colai_said", { sessionKey });
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(turns) || turns.length === 0) continue;
+    for (const entry of state.history) {
+      if (entry.sessionKey !== sessionKey || entry.answer) continue;
+      /*
+       * The turns after the prompt this entry is about.
+       *
+       * Matched on time rather than on the words: the same question asked twice is two
+       * entries with one text, and the Gateway's own ordering is what tells them apart.
+       * An entry with no timestamp to match on takes the whole conversation, which is
+       * the honest answer to "I do not know which part of this was yours".
+       */
+      const after = turns.filter((turn) => !turn.mine && (!entry.at || (turn.at ?? 0) >= entry.at));
+      if (after.length === 0) continue;
+      entry.answer = {
+        sessionKey,
+        who: entry.who,
+        turns: after.map((turn) => ({ said: turn.said, mine: false })),
+        open: false,
+      };
+    }
+  }
+  render();
+}

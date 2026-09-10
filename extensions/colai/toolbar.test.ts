@@ -233,7 +233,7 @@ type ToolbarHelpers = {
     front: InFront | null,
     look?: { tool?: string },
   ) => boolean;
-  entrySaid: (entry: { said?: string; shots?: unknown[] }) => string;
+  entrySaid: (entry: { said?: string; count?: number }) => string;
   asDrawn: (mark: Held, front: InFront | null, screen: Size) => Held;
   unchosen: (
     marks: { tool: string; design?: string; source?: string; fromLibrary?: Chosen | null }[],
@@ -2630,13 +2630,17 @@ describe("the work leaves the screen", () => {
   });
 
   test("a sent piece of work is called by its words, or by what went", () => {
-    expect(entrySaid({ said: "  the gap under the  header ", shots: [null] })).toBe(
+    expect(entrySaid({ said: "  the gap under the  header ", count: 1 })).toBe(
       "the gap under the header",
     );
     // A send with no note is a send whose whole content is the pictures, and that is
     // what it is called — not an empty line somebody has to hover to identify.
-    expect(entrySaid({ said: "", shots: [null, null] })).toBe("2 marks");
-    expect(entrySaid({ shots: [null] })).toBe("1 mark");
+    //
+    // A count, not the pictures: the entry used to carry an array of thumbnails that
+    // nothing read but this line's `.length`, and those thumbnails are what made the
+    // record too big to keep across a restart.
+    expect(entrySaid({ said: "", count: 2 })).toBe("2 marks");
+    expect(entrySaid({ count: 1 })).toBe("1 mark");
     expect(entrySaid({})).toContain("nothing marked");
   });
 });
@@ -4733,5 +4737,67 @@ describe("the way back when the toolbar is put away", () => {
   test("no tray is not no toolbar", () => {
     // A desktop without a tray still has a screen to draw on. Only the way back is lost.
     expect(main).toContain('eprintln!("[colai] no tray: {trouble}")');
+  });
+});
+
+describe("the work outlives the toolbar", () => {
+  const dir = new URL("./toolbar/ui/", import.meta.url);
+  const work = readFileSync(new URL("toolbar-work.js", dir), "utf8");
+  const send = readFileSync(new URL("toolbar-send.js", dir), "utf8");
+  const page = readFileSync(new URL("toolbar.js", dir), "utf8");
+
+  test("what was sent is remembered, and what came back is not", () => {
+    /*
+     * Two facts with two owners. What was sent — which marks, which words, to whom — is
+     * this toolbar's own knowledge and nothing else records it, so it is kept here. What
+     * came back belongs to the Gateway, which held the transcript and went on receiving
+     * while the toolbar was not running; storing that too would mean a panel confidently
+     * showing a conversation that had moved on without it.
+     */
+    const remembered = work.slice(work.indexOf("function rememberWork"));
+    const kept = remembered.slice(0, remembered.indexOf("\n}"));
+    for (const field of ["at", "who", "sessionKey", "said", "count", "marks", "blocked"]) {
+      expect(kept, `${field} is what the panel shows`).toContain(`${field}:`);
+    }
+    expect(kept, "an answer stored is an answer that goes stale").not.toContain("answer:");
+    expect(kept, "the pictures are far too big to keep, and nothing reads them").not.toContain(
+      "shots",
+    );
+  });
+
+  test("it is written when the record changes, not when the screen redraws", () => {
+    // A restart between the send and the next frame is exactly what this exists for.
+    expect(send).toContain("rememberWork()");
+  });
+
+  test("the panel opens on the work, then fills in the answers", () => {
+    // Recalled before anything is drawn, so it opens on a day's work rather than on
+    // "nothing yet"; the round trip per conversation happens after.
+    const start = page.indexOf("recallWork()");
+    const catchUp = page.indexOf("catchUpOnWork()");
+    expect(start).toBeGreaterThan(-1);
+    expect(catchUp).toBeGreaterThan(start);
+  });
+
+  test("one ask per conversation, not one per entry", () => {
+    // Several sends to the same agent share a session, and asking per entry would fetch
+    // the same transcript four times.
+    const catchUp = work.slice(work.indexOf("async function catchUpOnWork"));
+    expect(catchUp).toContain("new Set(");
+    expect(catchUp).toContain('invoke("colai_said"');
+  });
+
+  test("rewind still only offers the prompts", () => {
+    /*
+     * `colai_said` and `colai_points` read the same transcript, and it now carries both
+     * halves of the conversation. Rewinding to an answer would discard the prompt that
+     * produced it and leave the conversation asking a question nobody had asked.
+     */
+    const rust = readFileSync(
+      new URL("./toolbar/src-tauri/src/colai_send.rs", import.meta.url),
+      "utf8",
+    );
+    const points = rust.slice(rust.indexOf("pub(crate) async fn colai_points"));
+    expect(points.slice(0, points.indexOf("\n}"))).toContain("filter(|point| point.mine)");
   });
 });

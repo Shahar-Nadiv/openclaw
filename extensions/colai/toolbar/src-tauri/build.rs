@@ -21,6 +21,7 @@ fn main() {
         "colai_points",
         "colai_release",
         "colai_rewind",
+        "colai_said",
         "colai_screens",
         "colai_search_files",
         "colai_send",

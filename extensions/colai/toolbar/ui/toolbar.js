@@ -753,6 +753,9 @@ async function start() {
   listenForDrops();
   listenForDrag();
   recall();
+  // What was sent from this toolbar before it was last closed. Read before anything is
+  // drawn, so the panel opens on a day's work rather than on "nothing yet".
+  recallWork();
   place();
 
   await learnFront();
@@ -839,6 +842,10 @@ async function start() {
     state.trouble = said.notice || GATEWAY_TROUBLE[said.state] || GATEWAY_TROUBLE.down;
     render();
   }).catch(() => {});
+
+  // And what the agents said back while it was not running. After the listeners, because
+  // this is a round trip per conversation and nothing else should wait on it.
+  void catchUpOnWork();
 
   void loadWho();
   // And what every agent is doing, from now until the window closes.

@@ -152,12 +152,13 @@ async function sendMarks(ids) {
         who: state.receiving.name || who.id,
         sessionKey: null,
         said: state.text,
-        shots: going.map((mark) => mark.thumb || null),
+        count: going.length,
         answer: null,
         blocked: refused.says,
       },
       ...state.history,
     ];
+    rememberWork();
     render();
     return;
   }
@@ -169,10 +170,9 @@ async function sendMarks(ids) {
     render();
     return;
   }
-  // Held before anything is dispatched: the words and the pictures are cleared the
-  // moment the send lands, and the record of what was sent is assembled after that.
+  // Held before anything is dispatched: the words are cleared the moment the send lands,
+  // and the record of what was sent is assembled after that.
   const said = state.text;
-  const shots = going.map((mark) => mark.thumb || null);
   state.sending = true;
   render();
   try {
@@ -283,7 +283,10 @@ async function sendMarks(ids) {
         who: named,
         sessionKey: sent.sessionKey,
         said,
-        shots,
+        // How many went, so the panel can say "3 marks" for a send with no words. The
+        // pictures themselves used to be kept here and nothing ever read them — a pile
+        // of data URLs held for a number.
+        count: going.length,
         // Named, so the panel can say `region` `arrow` rather than showing two grey
         // squares. Taken here because this is the last moment the marks still exist.
         marks: going.map((mark) => labelOf(mark)).filter(Boolean),
@@ -291,6 +294,9 @@ async function sendMarks(ids) {
       },
       ...state.history,
     ];
+    // Written now rather than on the next render: this is the moment the record changes,
+    // and a restart between here and the next frame is exactly what it exists for.
+    rememberWork();
     state.trouble = sent.watching
       ? null
       : `Sent, but the reply will only be in ${state.receiving.name || who.id} — colai could not listen for it here.`;

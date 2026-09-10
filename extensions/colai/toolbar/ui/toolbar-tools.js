@@ -444,7 +444,9 @@ function ontoScreen(box, at, screen) {
 function entrySaid(entry) {
   const words = (entry.said || "").trim().replace(/\s+/g, " ");
   if (words) return words;
-  const many = entry.shots ? entry.shots.length : 0;
+  // How many, not the pictures. This used to count an array of thumbnails the entry kept
+  // for no other purpose — a pile of data URLs held so that this line could say "3".
+  const many = Number(entry.count) || 0;
   if (many) return counted(many, "mark");
   return "Sent with nothing marked";
 }

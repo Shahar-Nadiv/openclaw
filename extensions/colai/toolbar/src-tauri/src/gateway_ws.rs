@@ -435,13 +435,20 @@ pub(crate) struct CatalogContinueResult {
     pub session_key: String,
 }
 
-/// A place in a conversation somebody could go back to.
+/// One turn of a conversation, as the Gateway recorded it.
+///
+/// Both halves, because two surfaces want this list and they want different parts of it:
+/// rewind offers to go back to a prompt, so it takes the ones that are `mine`; the Work
+/// panel is showing a conversation, and a conversation with the answers taken out is a
+/// list of things somebody said into a void.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Point {
     pub id: String,
     pub said: String,
     pub at: Option<i64>,
+    /// Whether this is something the operator said, rather than something answered back.
+    pub mine: bool,
 }
 
 /// What comes back from a rewind: the words that were in the composer at that point.
@@ -472,12 +479,13 @@ fn points_in(payload: &Value) -> Vec<Point> {
             // A page carries the message itself; a delta wraps it in an envelope.
             let inner = row.get("message").unwrap_or(row);
             let meta = inner.get("__openclaw");
-            if inner
+            let role = inner
                 .get("role")
                 .and_then(Value::as_str)
-                .unwrap_or_default()
-                != "user"
-            {
+                .unwrap_or_default();
+            // Everything a person or an agent actually said. Tool calls and system
+            // scaffolding are not turns of a conversation and read as noise in a panel.
+            if role != "user" && role != "assistant" {
                 return None;
             }
             let id = meta
@@ -490,6 +498,7 @@ fn points_in(payload: &Value) -> Vec<Point> {
                 return None;
             }
             Some(Point {
+                mine: role == "user",
                 said: said_in(inner).unwrap_or_default(),
                 at: meta
                     .and_then(|meta| meta.get("recordTimestampMs"))
@@ -2808,12 +2817,27 @@ mod tests {
     }
 
     #[test]
-    fn a_page_gives_up_the_prompts_and_the_ids_rewind_takes() {
+    fn a_page_gives_up_both_halves_of_the_conversation_and_says_which_is_which() {
+        /*
+         * Both, tagged. Two surfaces read this list and want different parts of it: the
+         * Work panel is showing a conversation, and a conversation with the answers taken
+         * out is a list of things somebody said into a void; rewind takes only the ones
+         * that are `mine`, because rewinding to an answer would discard the prompt that
+         * produced it.
+         */
         let points = points_in(&a_page());
-        assert_eq!(points.len(), 1, "only the prompt, not the answer");
-        assert_eq!(points[0].id, "9c720ea7-a79d-46fe-845a-0552b181818d");
-        assert_eq!(points[0].said, "ok go on to the next stage");
-        assert_eq!(points[0].at, Some(1_788_695_901_361));
+        assert_eq!(points.len(), 2, "the prompt and the answer");
+
+        let asked = points.iter().find(|point| point.mine).expect("a prompt");
+        assert_eq!(asked.id, "9c720ea7-a79d-46fe-845a-0552b181818d");
+        assert_eq!(asked.said, "ok go on to the next stage");
+        assert_eq!(asked.at, Some(1_788_695_901_361));
+
+        assert_eq!(
+            points.iter().filter(|point| !point.mine).count(),
+            1,
+            "and the answer, marked as not the operator's"
+        );
     }
 
     #[test]
@@ -2827,6 +2851,7 @@ mod tests {
         assert_eq!(points.len(), 1);
         assert_eq!(points[0].id, "e1");
         assert_eq!(points[0].said, "fix the header gap");
+        assert!(points[0].mine);
     }
 
     #[test]
@@ -2837,6 +2862,13 @@ mod tests {
         assert!(points_in(&json!({"messages": []})).is_empty());
         // An entry with no id cannot be rewound to, so it is not offered.
         assert!(points_in(&json!({"messages": [{"role": "user", "content": "hello"}]})).is_empty());
+        // Tool calls and scaffolding are not turns of a conversation.
+        assert!(points_in(&json!({"messages": [{
+            "role": "tool",
+            "content": "{}",
+            "__openclaw": {"id": "t1"}
+        }]}))
+        .is_empty());
         // Input the Gateway is holding is not yet a turn to go back to.
         assert!(points_in(&json!({"messages": [{
             "role": "user",

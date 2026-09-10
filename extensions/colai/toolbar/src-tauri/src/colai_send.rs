@@ -321,8 +321,32 @@ pub(crate) async fn colai_automate(
 }
 
 /// Where a conversation could be taken back to.
+///
+/// Only what the operator said. An answer is not somewhere to go back to — rewinding to
+/// one would discard the prompt that produced it and leave the conversation asking a
+/// question nobody had asked.
 #[tauri::command]
 pub(crate) async fn colai_points(
+    gateway: State<'_, GatewayClient>,
+    session_key: String,
+) -> Result<Vec<Point>, String> {
+    Ok(gateway
+        .chat_history(&session_key, POINTS_AT_MOST)
+        .await?
+        .into_iter()
+        .filter(|point| point.mine)
+        .collect())
+}
+
+/// What was said in a conversation, both halves of it.
+///
+/// The Work panel keeps its own record of what was sent from this toolbar, and that
+/// record survives a restart — but the answers do not, because they arrive long after
+/// the send and often while the toolbar is not running. This is where they come back
+/// from: the Gateway has the transcript, so the panel asks for it rather than being the
+/// only thing that ever knew.
+#[tauri::command]
+pub(crate) async fn colai_said(
     gateway: State<'_, GatewayClient>,
     session_key: String,
 ) -> Result<Vec<Point>, String> {
