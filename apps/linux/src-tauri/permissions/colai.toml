@@ -35,6 +35,7 @@ commands.allow = [
   "colai_describe_files",
   "colai_at_work",
   "colai_models",
+  "colai_git_read",
   "colai_in_front",
   "colai_library_search",
   "colai_libraries",
