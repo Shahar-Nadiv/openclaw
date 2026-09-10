@@ -376,6 +376,176 @@ function modePick() {
   return box;
 }
 
+/** The model currently chosen, out of whatever the Gateway last said there were. */
+function modelNow() {
+  const known = state.models || [];
+  return known.find((one) => one.id === state.model) || null;
+}
+
+/**
+ * How this will be answered: which model, and how hard it should think.
+ *
+ * A row of its own under the field. Files and Schedule are a different question — what
+ * else could happen to this message — and folding these in beside them would make one
+ * row of six unrelated controls.
+ */
+function answeredHow() {
+  const row = document.createElement("div");
+  row.className = "answer-how";
+
+  const chosen = modelNow();
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "mode-key model-key";
+  open.setAttribute("aria-haspopup", "true");
+  open.setAttribute("aria-expanded", "false");
+  const named = document.createElement("span");
+  named.className = "model-key-name";
+  // Before anything has been asked for, the name of the model is not known — and saying
+  // "Default" would be a claim about which one that is.
+  named.textContent = chosen ? chosen.name : state.model || "Model";
+  open.title = chosen ? `${chosen.name} · ${chosen.provider}` : "Choose the model";
+  const mark = document.createElement("span");
+  mark.className = "caret";
+  mark.textContent = "▾";
+  open.append(named, mark);
+
+  const menu = document.createElement("div");
+  menu.className = "ask-menu model-menu";
+  menu.hidden = true;
+
+  const shut = () => {
+    menu.hidden = true;
+    open.setAttribute("aria-expanded", "false");
+  };
+  const fill = () => {
+    menu.replaceChildren();
+    if (state.modelsTrouble) {
+      const said = document.createElement("p");
+      said.className = "menu-empty";
+      said.textContent = state.modelsTrouble;
+      menu.append(said);
+      return;
+    }
+    if (!state.models) {
+      const said = document.createElement("p");
+      said.className = "menu-empty";
+      said.textContent = "Asking…";
+      menu.append(said);
+      return;
+    }
+    if (state.models.length === 0) {
+      const said = document.createElement("p");
+      said.className = "menu-empty";
+      said.textContent = "No models. Sign in to a provider in OpenClaw.";
+      menu.append(said);
+      return;
+    }
+    for (const model of state.models) {
+      const one = document.createElement("button");
+      one.type = "button";
+      one.className = "ask-menu-row";
+      one.dataset.on = String(model.id === state.model);
+      // Shown and disabled rather than left out. A model missing because nobody has
+      // signed in is something to go and fix; one absent from the list is something
+      // somebody concludes this toolbar cannot do.
+      one.disabled = model.available === false;
+      const name = document.createElement("span");
+      name.className = "ask-menu-name";
+      name.textContent = model.name;
+      const says = document.createElement("span");
+      says.className = "ask-menu-says";
+      says.textContent =
+        model.available === false
+          ? `${model.provider} — ${model.whyNot || "not available"}`
+          : model.provider;
+      one.title = says.textContent;
+      one.append(name, says);
+      one.addEventListener("click", () => {
+        state.model = model.id;
+        // The effort belonged to the old model's stops. Kept only if the new one offers
+        // it too; otherwise its own default, which is the honest answer to "what now".
+        const stops = effortStops(model).map((level) => level.id);
+        if (!stops.includes(state.effort || "")) state.effort = null;
+        remember();
+        render();
+      });
+      menu.append(one);
+    }
+  };
+
+  open.addEventListener("click", () => {
+    menu.hidden = !menu.hidden;
+    open.setAttribute("aria-expanded", String(!menu.hidden));
+    if (menu.hidden) return;
+    fill();
+    // Asked when it opens, not kept warm: a catalogue held in the background is one
+    // that is quietly wrong the moment somebody signs into a provider.
+    void loadModels().then(fill);
+  });
+  menu.addEventListener("focusout", (event) => {
+    if (!row.contains(event.relatedTarget)) shut();
+  });
+  open.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") shut();
+  });
+
+  const holder = document.createElement("div");
+  holder.className = "mode-pick";
+  holder.append(open, menu);
+  row.append(holder);
+
+  const stops = effortStops(chosen);
+  if (stops.length > 1) {
+    const effort = document.createElement("label");
+    effort.className = "effort";
+    const said = document.createElement("span");
+    said.className = "effort-said";
+    const bar = document.createElement("input");
+    bar.type = "range";
+    bar.className = "effort-bar";
+    bar.min = "0";
+    bar.max = String(stops.length - 1);
+    bar.step = "1";
+    const at = Math.max(0, effortAt(chosen, state.effort));
+    bar.value = String(at);
+    said.textContent = stops[at].label;
+    bar.setAttribute("aria-label", "How hard to think");
+    bar.setAttribute("aria-valuetext", stops[at].label);
+    bar.addEventListener("input", () => {
+      const level = stops[Number(bar.value)] || stops[0];
+      // Not a render: this redraws the whole panel and would take the slider out from
+      // under the hand that is dragging it. Only the word beside it moves.
+      said.textContent = level.label;
+      bar.setAttribute("aria-valuetext", level.label);
+    });
+    bar.addEventListener("change", () => {
+      const level = stops[Number(bar.value)] || stops[0];
+      state.effort = level.id;
+      remember();
+    });
+    effort.append(bar, said);
+    row.append(effort);
+  }
+
+  return row;
+}
+
+/** Ask the Gateway which models this receiver could answer with. */
+async function loadModels() {
+  try {
+    const found = await invoke("colai_models", {
+      agentId: state.receiving.kind === "agent" ? state.receiving.id : null,
+    });
+    state.models = Array.isArray(found) ? found : [];
+    state.modelsTrouble = null;
+  } catch (trouble) {
+    // Left as it was rather than emptied: a Gateway that cannot be asked is not the same
+    // as a Gateway with no models, and blanking the list would say it was.
+    state.modelsTrouble = String(trouble || "Could not ask which models there are.");
+  }
+}
+
 /**
  * Send.
  *
@@ -1210,6 +1380,8 @@ function drawComposer(into) {
   // The two rarest things this message can do, on a line of their own. In the send row
   // they cost the receiver's name its last four characters, and a name shortened to make
   // room for "Schedule…" is the wrong thing to have shortened.
+  rows.push(answeredHow());
+
   const extras = document.createElement("div");
   extras.className = "compose-more";
   extras.append(fileAdd(), later);

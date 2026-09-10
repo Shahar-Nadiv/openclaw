@@ -127,6 +127,20 @@ pub(crate) async fn colai_sessions(
         .collect())
 }
 
+/// Which models this agent could answer with.
+///
+/// Asked when the picker opens rather than kept warm. The same rule the conversations
+/// menu already follows: the answer only matters when somebody is looking at it, and a
+/// catalogue held in the background is a catalogue that is quietly wrong the moment
+/// somebody signs into a provider.
+#[tauri::command]
+pub(crate) async fn colai_models(
+    gateway: tauri::State<'_, crate::gateway_ws::GatewayClient>,
+    agent_id: Option<String>,
+) -> Result<Vec<crate::gateway_ws::ModelChoice>, String> {
+    gateway.models_for(agent_id).await
+}
+
 /// What every agent on this Gateway is doing, for the light on the toolbar.
 ///
 /// Deliberately not scoped to the conversation somebody is on. The whole point is the

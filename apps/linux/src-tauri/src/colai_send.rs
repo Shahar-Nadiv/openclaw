@@ -52,6 +52,13 @@ pub(crate) struct Sent {
     /// thinking about it — the worst of both, since the answer did arrive, just
     /// somewhere else.
     pub watching: bool,
+    /// Why the model or the effort did not take, when they did not.
+    ///
+    /// The commonest reason is the ordinary one: a first send to an agent has no
+    /// conversation yet, so there was nothing to set it on. Said rather than swallowed —
+    /// a setting that appears to have applied and did not is how somebody spends an hour
+    /// wondering why the answers look the same.
+    pub settings_trouble: Option<String>,
 }
 
 /// Send the marked work to whoever was chosen.
@@ -71,6 +78,10 @@ pub(crate) async fn colai_send(
     // who was agreeing with a suggestion.
     mark_ids: Option<Vec<String>>,
     files: Option<Vec<String>>,
+    // How this conversation should answer, when somebody has chosen. Optional both
+    // ways: nobody choosing is not the same as choosing the default.
+    model: Option<String>,
+    thinking_level: Option<String>,
 ) -> Result<Sent, String> {
     let message = message.trim().to_string();
     if message.is_empty() {
@@ -78,6 +89,33 @@ pub(crate) async fn colai_send(
     }
     let mark_ids = mark_ids.unwrap_or_default();
     let target = resolve(&gateway, &receiver).await?;
+
+    /*
+     * How this should be answered, before it is asked.
+     *
+     * Model and effort are settings on the conversation rather than fields on a message,
+     * so they are applied to the conversation this is about to go to. Only when one is
+     * set: an unset pair is somebody who has not chosen, not somebody choosing "default".
+     *
+     * A send to an agent with no conversation yet has nothing to patch and this fails.
+     * The message still goes — sending is what was asked for — and the failure is carried
+     * back rather than swallowed, because a setting that silently did not apply is worse
+     * than one that visibly did not. The next send lands it, the conversation now existing.
+     */
+    let mut settings_trouble = None;
+    if model.is_some() || thinking_level.is_some() {
+        if let Err(trouble) = gateway
+            .set_answering(
+                &target.session_key,
+                target.agent_id.clone(),
+                model,
+                thinking_level,
+            )
+            .await
+        {
+            settings_trouble = Some(trouble);
+        }
+    }
     let mut attachments = attach(
         &shots,
         &mark_ids,
@@ -128,6 +166,7 @@ pub(crate) async fn colai_send(
         pictures,
         carried,
         watching,
+        settings_trouble,
     })
 }
 

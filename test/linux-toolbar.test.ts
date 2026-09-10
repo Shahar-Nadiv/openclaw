@@ -38,6 +38,17 @@ type Reserved = { top: number; right: number; bottom: number; left: number };
 type Screen = { x: number; y: number; width: number; height: number; reserved?: Reserved };
 type Surface = { app: string; connector: string | null } | null;
 
+/** One model the toolbar could answer with, as `chat.metadata` describes it. */
+type Model = {
+  id: string;
+  name: string;
+  provider: string;
+  available?: boolean;
+  whyNot?: string;
+  levels?: { id: string; label: string }[];
+  levelDefault?: string | null;
+};
+
 type ToolbarHelpers = {
   TOOLS: Record<string, { label: string; writes: boolean }>;
   DRAWS: Record<string, string>;
@@ -123,6 +134,9 @@ type ToolbarHelpers = {
     }
   >;
   GIT_FIRST: string;
+  MODE_FIRST: string;
+  effortStops: (model: Model | null) => { id: string; label: string }[];
+  effortAt: (model: Model | null, chosen: string | null) => number;
   gitKindOf: (mark: { git?: string } | null) => string;
   repoFor: (where: Front | null) => string | null;
   isCommitting: (marks: { tool?: string; git?: string }[]) => boolean;
@@ -340,7 +354,7 @@ type Chosen = {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, GITS, GIT_FIRST, gitKindOf, repoFor, isCommitting, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, GITS, GIT_FIRST, gitKindOf, repoFor, isCommitting, MODE_FIRST, effortStops, effortAt, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
   context,
 );
 const {
@@ -371,6 +385,9 @@ const {
   gitKindOf,
   repoFor,
   isCommitting,
+  MODE_FIRST,
+  effortStops,
+  effortAt,
   labelOf,
   homeOf,
   WHOLE_DISPLAY,
@@ -4116,5 +4133,122 @@ describe("git, as six things one key can mean", () => {
     // And it is not one of the tools where a click means the whole display: a click is
     // the gesture that says *this*, and the whole desktop is not a repository.
     expect(WHOLE_DISPLAY).not.toContain("git");
+  });
+});
+
+describe("how the next send will be answered", () => {
+  const opus: Model = {
+    id: "anthropic/claude-opus-5",
+    name: "Claude Opus 5",
+    provider: "anthropic",
+    available: true,
+    levels: [
+      { id: "off", label: "Off" },
+      { id: "low", label: "Low" },
+      { id: "medium", label: "Medium" },
+      { id: "high", label: "High" },
+    ],
+    levelDefault: "medium",
+  };
+  const plain: Model = { id: "openai/gpt", name: "GPT", provider: "openai", levels: [] };
+
+  test("the efforts on offer are the model's own, not a list kept here", () => {
+    /*
+     * Which levels exist is the provider's answer and differs between models. A fixed
+     * list would be wrong the first time one of them changed — the slider would offer an
+     * effort the model ignores, which looks exactly like the slider not working.
+     */
+    expect(effortStops(opus).map((level) => level.id)).toEqual(["off", "low", "medium", "high"]);
+    // A model that does not think in levels gets no stops, and the composer draws no
+    // slider at all: an empty one is a control lying about having a choice.
+    expect(effortStops(plain)).toEqual([]);
+    expect(effortStops(null)).toEqual([]);
+    // A level with no id is not a stop somebody could be moved to.
+    expect(effortStops({ ...plain, levels: [{ id: "", label: "Nowhere" }] })).toEqual([]);
+  });
+
+  test("the handle starts where the model says, not at the left", () => {
+    /*
+     * Nothing chosen means the model's own default. Falling back to the leftmost stop
+     * would read as "off" on every model whose first level is off — the toolbar quietly
+     * turning thinking down on a model somebody just picked.
+     */
+    expect(effortAt(opus, null)).toBe(2);
+    expect(effortAt(opus, "high")).toBe(3);
+    // A remembered effort the model has never heard of: its first stop, not -1, which a
+    // range input reads as the leftmost anyway.
+    expect(effortAt(opus, "ultra")).toBe(0);
+    // Nothing to sit on at all.
+    expect(effortAt(plain, "high")).toBe(-1);
+    expect(effortAt({ ...opus, levelDefault: null }, null)).toBe(0);
+  });
+
+  test("a fresh toolbar builds, and an unreadable mode still plans", () => {
+    /*
+     * Two different questions that were the same value. The default is what a fresh
+     * toolbar offers, and most sends are asking for the change rather than a description
+     * of it. The fallback is what an unreadable mode means, and that stays cautious: a
+     * corrupted value should not start editing.
+     */
+    expect(MODE_FIRST).toBe("build");
+    expect(MODES[MODE_FIRST]?.label).toBe("Build");
+
+    const page = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
+    expect(page, "the toolbar starts in the default").toContain("mode: MODE_FIRST");
+
+    const tools = readFileSync(
+      new URL("../apps/linux/ui/toolbar-tools.js", import.meta.url),
+      "utf8",
+    );
+    expect(tools, "and an unknown mode is still read as Plan").toContain(
+      "MODES[mode] || MODES.plan",
+    );
+  });
+
+  test("switching model does not carry an effort the new one cannot do", () => {
+    // Every model has its own stops, so a remembered "high" is meaningless on a model
+    // that only knows off and low. Dropped rather than sent, because sending it is how a
+    // setting silently does nothing.
+    const compose = readFileSync(
+      new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+      "utf8",
+    );
+    expect(compose).toMatch(
+      /if \(!stops\.includes\(state\.effort \|\| ""\)\) state\.effort = null/,
+    );
+    // And the slider is only drawn when there is a choice to make.
+    expect(compose).toMatch(/if \(stops\.length > 1\)/);
+    // Dragging it must not redraw the panel out from under the hand doing the dragging.
+    const dragging = compose.slice(compose.indexOf('bar.addEventListener("input"'));
+    expect(dragging.slice(0, 320)).not.toContain("render()");
+  });
+
+  test("a model that cannot be used is shown and refused, never hidden", () => {
+    // A model missing because nobody has signed in is something to go and fix. One
+    // absent from the list is something somebody concludes this toolbar cannot do.
+    const compose = readFileSync(
+      new URL("../apps/linux/ui/toolbar-compose.js", import.meta.url),
+      "utf8",
+    );
+    expect(compose).toContain("one.disabled = model.available === false");
+    expect(compose, "and it says why").toContain("model.whyNot");
+    // The catalogue is asked for when the picker opens rather than kept warm.
+    expect(compose).toContain("void loadModels()");
+  });
+
+  test("a setting that did not take is said out loud", () => {
+    /*
+     * The commonest reason is the ordinary one: a first send to an agent has no
+     * conversation yet to set a model on. The message still goes — sending is what was
+     * asked for — but a setting that appears to have applied and did not is how somebody
+     * spends an hour wondering why the answers look the same.
+     */
+    const send = readFileSync(new URL("../apps/linux/ui/toolbar-send.js", import.meta.url), "utf8");
+    expect(send).toContain("sent.settingsTrouble");
+    expect(send).toContain("state.trouble");
+    // And both travel with every send, because this may be the first one with a
+    // conversation to hold them.
+    expect(send).toContain("model: state.model");
+    expect(send).toContain("thinkingLevel: state.effort");
   });
 });

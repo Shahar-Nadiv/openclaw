@@ -132,6 +132,14 @@ const state = {
   // Which git command the next git mark is asking for. Chosen on the menu, and
   // changeable on the mark afterwards, exactly as the design kind is.
   gitKind: GIT_FIRST,
+  // How the next send should be answered. Both are settings on the conversation rather
+  // than fields on a message, so they are applied to whoever receives it — and they
+  // stick, because somebody who picked a model meant it for more than one send.
+  model: null,
+  effort: null,
+  // The catalogue, asked for when the picker opens rather than kept warm.
+  models: null,
+  modelsTrouble: null,
   // Whether the exact tools are folded shut. Open to begin with — the rail is what
   // this toolbar is, and a first look at it should be the whole thing. Remembered with
   // the dock, because it is the same kind of fact: how somebody wants this to sit.
@@ -149,7 +157,7 @@ const state = {
   // The project the window in front belongs to, when that is obvious.
   inFront: null,
   // What the next send is for, and anything else somebody wants to say with it.
-  mode: "plan",
+  mode: MODE_FIRST,
   text: "",
   // Conversations held elsewhere that have already been agreed to. Continuing one hands
   // it to the Gateway, which is a real change of ownership, so it is asked once and then

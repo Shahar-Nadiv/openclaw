@@ -1476,6 +1476,7 @@ fn main() {
         colai_send::colai_automate,
         colai_files::colai_describe_files,
         colai_receivers::colai_at_work,
+        colai_receivers::colai_models,
         colai_attach::colai_in_front,
         colai_library::colai_library_search,
         colai_library::colai_libraries,

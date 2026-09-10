@@ -180,6 +180,11 @@ async function sendMarks(ids) {
       // must agree or the message names files that were never sent.
       sheets: going.filter(sheeted).map((mark) => mark.id),
       accent: accentNow(),
+      // How this conversation should answer. Sent every time rather than once: the
+      // conversation is the thing that holds them, and this may be the first send that
+      // has one to hold them on.
+      model: state.model,
+      thinkingLevel: state.effort,
       // Only the ones that travel. What is named rather than carried is already in the
       // message as a path, and sending it twice would mean encoding a gigabyte to say
       // something the sentence above it already said.
@@ -187,6 +192,14 @@ async function sendMarks(ids) {
         .filter((file) => file.carried)
         .map((file) => file.path),
     });
+    // The message went; the settings on the conversation may not have. Said rather than
+    // swallowed — the commonest reason is the ordinary one, a first send to an agent that
+    // had no conversation yet to set them on, and the next send lands them. A setting
+    // that appears to have applied and did not is how somebody spends an hour wondering
+    // why the answers look the same.
+    if (sent.settingsTrouble) {
+      state.trouble = `Sent, but the model and effort did not take: ${sent.settingsTrouble}`;
+    }
     if (who.kind === "thread") {
       state.adopted = [...state.adopted, who.id];
       // Adopting a thread is what gives it a Gateway session, and a session is the only

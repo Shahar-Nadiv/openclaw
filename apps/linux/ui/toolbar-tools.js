@@ -112,6 +112,37 @@ const GITS = {
 /** The one a fresh toolbar offers, because it is the commonest thing to want. */
 const GIT_FIRST = "add";
 
+/**
+ * The efforts a model offers, and which of them is chosen.
+ *
+ * From the model rather than from a list held here. Which levels exist is the provider's
+ * answer, it differs between models, and a fixed list would be wrong the first time one
+ * of them changed — the slider would offer an effort the model ignores, which looks
+ * exactly like the slider not working.
+ *
+ * A model with no levels gets no slider at all. An empty one is a control lying about
+ * having a choice.
+ */
+function effortStops(model) {
+  const levels = (model && model.levels) || [];
+  return levels.filter((level) => level && level.id);
+}
+
+/**
+ * Where the slider sits for a chosen effort.
+ *
+ * The model's own default when nothing is chosen, and the first stop when it does not
+ * name one — never -1, which a range input reads as the leftmost stop anyway and would
+ * silently mean "off" on a model whose first level is off.
+ */
+function effortAt(model, chosen) {
+  const stops = effortStops(model);
+  if (stops.length === 0) return -1;
+  const wanted = chosen || (model && model.levelDefault) || "";
+  const at = stops.findIndex((level) => level.id === wanted);
+  return at >= 0 ? at : 0;
+}
+
 /** Which command a git mark is asking for, defaulted rather than trusted. */
 function gitKindOf(mark) {
   const id = (mark && mark.git) || GIT_FIRST;
@@ -160,6 +191,18 @@ const MODES = {
   },
   build: { label: "Build", says: "Make this change." },
 };
+
+/**
+ * What a fresh toolbar offers.
+ *
+ * Build, because most sends are asking for the change rather than for a description of
+ * it, and a toolbar that starts in Plan makes the commonest thing take an extra click.
+ *
+ * Not the same as the fallback. Where `MODES[mode] || MODES.plan` appears, that is what
+ * an unreadable mode means, and it stays Plan on purpose: a corrupted value should do
+ * the cautious thing rather than start editing.
+ */
+const MODE_FIRST = "build";
 
 /**
  * What a design mark is asking for.

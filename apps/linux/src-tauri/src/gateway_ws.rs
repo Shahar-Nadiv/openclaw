@@ -245,6 +245,106 @@ pub(crate) struct GatewaySessionSummary {
     pub updated_at: Option<i64>,
 }
 
+/// One model the toolbar could answer with.
+///
+/// Only what the page draws. The Gateway's own entry carries a great deal more — context
+/// windows, fallbacks, runtime bindings — and carrying it through would mean this struct
+/// changing every time any of that did.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ModelChoice {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    /// Whether it can actually be used right now, and why not when it cannot.
+    ///
+    /// Shown rather than hidden. A model missing because nobody has signed in is
+    /// something to go and fix; a model that is simply absent from the list is something
+    /// somebody concludes this toolbar cannot do.
+    pub available: bool,
+    pub why_not: Option<String>,
+    /// The efforts this model offers, in the order it offers them.
+    ///
+    /// From the model rather than from a list held here: which levels exist is the
+    /// provider's answer and it changes without asking us.
+    pub levels: Vec<ModelLevel>,
+    pub level_default: Option<String>,
+}
+
+/// One stop on the effort slider.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ModelLevel {
+    pub id: String,
+    pub label: String,
+}
+
+/// Read the models out of a `chat.metadata` reply, keeping only what is drawn.
+fn models_in(payload: &Value) -> Vec<ModelChoice> {
+    payload
+        .get("models")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    let id = row.get("id").and_then(Value::as_str)?.trim();
+                    if id.is_empty() {
+                        return None;
+                    }
+                    let named = |key: &str| {
+                        row.get(key)
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|said| !said.is_empty())
+                            .map(str::to_string)
+                    };
+                    Some(ModelChoice {
+                        id: id.to_string(),
+                        // A model with no display name is named by its id, which is
+                        // still something somebody can recognise.
+                        name: named("name").unwrap_or_else(|| id.to_string()),
+                        provider: named("provider").unwrap_or_default(),
+                        // Absent means usable: the field is only sent when there is
+                        // something to say, and treating silence as "unavailable" would
+                        // empty the list on every Gateway that does not send it.
+                        available: row
+                            .get("available")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(true),
+                        why_not: named("unavailableReason"),
+                        levels: row
+                            .get("thinkingLevels")
+                            .and_then(Value::as_array)
+                            .map(|levels| {
+                                levels
+                                    .iter()
+                                    .filter_map(|level| {
+                                        let id = level.get("id").and_then(Value::as_str)?.trim();
+                                        if id.is_empty() {
+                                            return None;
+                                        }
+                                        let label = level
+                                            .get("label")
+                                            .and_then(Value::as_str)
+                                            .map(str::trim)
+                                            .filter(|said| !said.is_empty())
+                                            .unwrap_or(id);
+                                        Some(ModelLevel {
+                                            id: id.to_string(),
+                                            label: label.to_string(),
+                                        })
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                        level_default: named("thinkingDefault"),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// What every agent on this Gateway adds up to, for something that can only say one
 /// thing at a time.
 ///
@@ -707,6 +807,17 @@ struct SuspendResumeResponse {
 }
 
 enum GatewayRequest {
+    /// Which models this agent could answer with, and what each one can be asked for.
+    ChatMetadata {
+        agent_id: Option<String>,
+    },
+    /// A per-conversation setting, changed. Only the two the toolbar offers.
+    SessionsPatch {
+        key: String,
+        agent_id: Option<String>,
+        model: Option<String>,
+        thinking_level: Option<String>,
+    },
     AgentsList,
     SessionsList,
     SessionsCatalogList,
@@ -752,6 +863,8 @@ enum GatewayRequest {
 }
 
 enum GatewayResponse {
+    Models(Vec<ModelChoice>),
+    Patched,
     AgentsList(AgentsListResult),
     SessionsList(SessionsListResult),
     SessionsCatalogList(SessionsCatalogListResult),
@@ -1014,6 +1127,39 @@ impl GatewayClient {
                 ),
             )
             .map_err(|error| format!("Could not report Gateway connectivity: {error}"))
+    }
+
+    /// The models this agent could answer with.
+    ///
+    /// Each one carries its own thinking levels, so which efforts are on offer is the
+    /// model's answer rather than a list held here that would drift the first time a
+    /// provider changed one.
+    pub async fn models_for(&self, agent_id: Option<String>) -> Result<Vec<ModelChoice>, String> {
+        match self.request(GatewayRequest::ChatMetadata { agent_id }).await? {
+            GatewayResponse::Models(models) => Ok(models),
+            _ => Err("The Gateway answered something else.".to_string()),
+        }
+    }
+
+    /// Set the model and the effort on one conversation.
+    ///
+    /// Both optional and both sent only when set: a patch that carried nulls would be
+    /// the toolbar clearing settings it was never asked about.
+    pub async fn set_answering(
+        &self,
+        key: &str,
+        agent_id: Option<String>,
+        model: Option<String>,
+        thinking_level: Option<String>,
+    ) -> Result<(), String> {
+        self.request(GatewayRequest::SessionsPatch {
+            key: key.to_string(),
+            agent_id,
+            model,
+            thinking_level,
+        })
+        .await
+        .map(|_| ())
     }
 
     pub async fn agents_list(&self) -> Result<AgentsListResult, String> {
@@ -2222,6 +2368,44 @@ where
                         "Invalid sessions.catalog.continue response: {error}"
                     ))
                 })
+        }
+        GatewayRequest::ChatMetadata { agent_id } => {
+            let mut params = serde_json::Map::new();
+            if let Some(agent) = agent_id {
+                params.insert("agentId".to_string(), Value::from(agent.clone()));
+            }
+            let payload = request_on_socket(
+                socket,
+                "chat.metadata",
+                Value::Object(params),
+                budget,
+                dispatch,
+            )
+            .await?;
+            Ok(GatewayResponse::Models(models_in(&payload)))
+        }
+        GatewayRequest::SessionsPatch {
+            key,
+            agent_id,
+            model,
+            thinking_level,
+        } => {
+            let mut params = serde_json::Map::new();
+            params.insert("key".to_string(), Value::from(key.clone()));
+            if let Some(agent) = agent_id {
+                params.insert("agentId".to_string(), Value::from(agent.clone()));
+            }
+            // Only what was asked for. A key present with a null is "clear this", which
+            // is a different instruction from "leave it alone".
+            if let Some(model) = model {
+                params.insert("model".to_string(), Value::from(model.clone()));
+            }
+            if let Some(level) = thinking_level {
+                params.insert("thinkingLevel".to_string(), Value::from(level.clone()));
+            }
+            request_on_socket(socket, "sessions.patch", Value::Object(params), budget, dispatch)
+                .await
+                .map(|_| GatewayResponse::Patched)
         }
         GatewayRequest::ChatAbort { key } => request_on_socket(
             socket,

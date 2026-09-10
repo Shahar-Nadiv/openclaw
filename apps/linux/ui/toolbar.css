@@ -2050,6 +2050,88 @@ body {
   background: var(--ok);
 }
 
+/*
+ * How this will be answered: which model, and how hard it thinks.
+ *
+ * Its own row, because these two are one question and the row below them — Files,
+ * Schedule — is a different one. The model takes what it needs and the slider takes the
+ * rest, so a long model name shortens the slider rather than pushing it off the card.
+ */
+.answer-how {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.model-key {
+  min-width: 0;
+}
+.model-key-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Wider than the mode's menu: a model is named by a phrase and a provider, where a mode
+   is named by a word. */
+.model-menu {
+  width: 268px;
+}
+/* A menu with nothing in it still has to say why. */
+.menu-empty {
+  margin: 0;
+  padding: 7px 8px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.effort {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 auto;
+  min-width: 96px;
+}
+/*
+ * The stops are the model's, so the track is drawn rather than ticked: a model with three
+ * efforts and one with five would otherwise need two different sets of marks, and the
+ * word beside it already says which stop the handle is on.
+ */
+.effort-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 16px;
+  margin: 0;
+  appearance: none;
+  background: none;
+  cursor: pointer;
+}
+.effort-bar::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+.effort-bar::-webkit-slider-thumb {
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.effort-bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.effort-said {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  /* Wide enough for the longest level, so the slider does not shorten as it is dragged. */
+  min-width: 44px;
+}
+
 /* Files and Schedule: what else could happen to this message, kept away from the row
    that sends it. Left-aligned and quiet — they are not the reason anybody is here. */
 .compose-more {
