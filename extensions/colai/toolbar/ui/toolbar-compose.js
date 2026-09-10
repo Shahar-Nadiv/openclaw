@@ -671,10 +671,13 @@ function askField(go) {
     }
     state.text = left.text;
     text.value = left.text;
+    // Set here rather than after the redraw, because the redraw is what reads it: the
+    // caret is noted off whatever holds it, and this box holds it until `render` runs.
+    // It used to be followed by a `text.focus()`, which by then was addressed to a box
+    // that had already been replaced and so put the cursor precisely nowhere.
     text.setSelectionRange(left.caret, left.caret);
     close();
     render();
-    text.focus();
   };
 
   const draw = () => {
