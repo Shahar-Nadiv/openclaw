@@ -3,7 +3,10 @@
   "name": "colai",
   "description": "Point at anything on screen and hand it to an agent.",
   "activation": {
-    "onStartup": true
+    "onStartup": true,
+    "onCommands": [
+      "doctor"
+    ]
   },
   "configSchema": {
     "type": "object",

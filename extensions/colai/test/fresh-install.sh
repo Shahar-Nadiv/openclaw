@@ -110,7 +110,7 @@ for variant in "${wanted[@]}"; do
         fi
         echo
         echo '--- uninstall'
-        openclaw plugins uninstall colai
+        openclaw plugins uninstall colai --force
         left=\$(find ~/.openclaw -name '*colai*' 2>/dev/null | head)
         if [ -n \"\$left\" ]; then echo 'LEFT BEHIND:'; echo \"\$left\"; exit 1; fi
         echo 'nothing left behind'
