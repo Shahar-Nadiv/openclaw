@@ -4651,6 +4651,24 @@ describe("the way back when the toolbar is put away", () => {
   const overlay = readFileSync(new URL("colai.rs", dir), "utf8");
   const main = readFileSync(new URL("main.rs", dir), "utf8");
 
+  test("the rail itself says how to put the toolbar away", () => {
+    /*
+     * Escape does it, and a double tap on the grip does it, and the tray does it — all
+     * three are things somebody has to already know. Without a control on the rail, a
+     * person with a sheet of glass over their desk has nothing on screen telling them
+     * how to lift it, which is exactly the report that produced this key.
+     */
+    const rail = readFileSync(new URL("./toolbar/ui/toolbar-rail.js", import.meta.url), "utf8");
+    expect(Object.keys(glyphsInTheRail()), "the key needs a face").toContain("away");
+    const drawn = rail.slice(rail.indexOf('key("away"'));
+    expect(drawn.slice(0, 300), "and it must be the same thing Escape does").toContain(
+      'invoke("colai_release")',
+    );
+    // On the rail, not in a menu: a way out that lives behind a caret is a way out
+    // somebody has to go looking for.
+    expect(rail).toContain("dividers[2].after(send, agents, stop, home, away)");
+  });
+
   test("the toolbar carries a tray icon of its own", () => {
     /*
      * Not in OpenClaw's tray, which is where it belongs and where it cannot go: that menu

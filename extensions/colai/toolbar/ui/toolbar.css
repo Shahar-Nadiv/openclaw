@@ -480,6 +480,16 @@ body {
   background: var(--danger);
 }
 
+/* The way out. Quiet until somebody reaches for it: it is always on the rail, and a
+   permanent bright × beside the working tools reads as a warning rather than an exit. */
+.away-key {
+  color: var(--muted);
+}
+.away-key:hover:not([disabled]) {
+  color: var(--text-strong);
+  background: rgb(255 255 255 / 8%);
+}
+
 .key:hover:not([disabled]):not([aria-pressed="true"]) {
   background: rgb(255 255 255 / 8%);
   color: var(--text-strong);
