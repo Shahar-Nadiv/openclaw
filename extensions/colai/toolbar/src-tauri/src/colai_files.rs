@@ -275,7 +275,13 @@ fn describe(path: &std::path::Path) -> Option<Chosen> {
 }
 
 /// How much a folder holds, to the depth worth walking.
-#[cfg(unix)]
+/// How big a dropped folder is, to a useful approximation.
+///
+/// One implementation, not two. There was a `cfg(not(unix))` arm returning `0`, which
+/// would have reported every dropped folder on Windows as empty — and nothing in the body
+/// below is unix-specific: it is `read_dir` and `DirEntry::metadata`, which both work
+/// everywhere. A second implementation that answers wrongly is worse than no second
+/// implementation at all.
 fn weigh(root: &std::path::Path) -> u64 {
     let mut total = 0u64;
     let mut seen = 0usize;
@@ -305,11 +311,6 @@ fn weigh(root: &std::path::Path) -> u64 {
         }
     }
     total
-}
-
-#[cfg(not(unix))]
-fn weigh(_root: &std::path::Path) -> u64 {
-    0
 }
 
 /// Directories never worth walking, because nothing in them is what somebody meant.

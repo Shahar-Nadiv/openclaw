@@ -4891,3 +4891,45 @@ describe("an empty work panel says which kind of empty it is", () => {
     expect(refused, "the claim about OpenClaw comes second").toBeLessThan(nothing);
   });
 });
+
+describe("a window the size of the desktop fails closed", () => {
+  const overlay = readFileSync(
+    new URL("./toolbar/src-tauri/src/colai.rs", import.meta.url),
+    "utf8",
+  );
+  const page = readFileSync(new URL("./toolbar/ui/toolbar.js", import.meta.url), "utf8");
+
+  test("the refusal is reachable on every platform", () => {
+    /*
+     * `apply_shape` refuses on any platform with no implementation, precisely so an
+     * overlay cannot go up catching every click. But the *call* that sets the initial
+     * "catch nothing" shape was itself `#[cfg(target_os = "linux")]` — so on Windows
+     * nothing asked, nothing refused, and the window went up transparent, always on top,
+     * spanning every display, swallowing the desktop with nothing on screen looking
+     * wrong. A refusal that cannot be reached is not a refusal.
+     */
+    const making = overlay.slice(overlay.indexOf("fn ensure_overlay"));
+    const setup = making.slice(0, making.indexOf("apply_shape(&window, &[])?;"));
+    const lastCfg = setup.lastIndexOf('#[cfg(target_os = "linux")]');
+    const lastStatement = setup.lastIndexOf(";");
+    expect(lastCfg < lastStatement, "the initial shape must not be behind a platform cfg").toBe(
+      true,
+    );
+    // And the non-Linux arm of `apply_shape` itself still says no rather than quietly
+    // succeeding — that refusal is the thing the reachable call above exists to trigger.
+    const refusing = overlay.slice(
+      overlay.indexOf('#[cfg(not(target_os = "linux"))]\nfn apply_shape('),
+    );
+    expect(refusing.slice(0, 600)).toContain("Err(");
+  });
+
+  test("a shape that did not take is never silent", () => {
+    // `void invoke(...)` meant the same failure was invisible from the page. And the
+    // remembered key is cleared, so the next render tries again rather than believing a
+    // shape that was never applied.
+    const shaping = page.slice(page.indexOf('invoke("colai_shape"'));
+    expect(shaping.slice(0, 400)).toContain(".catch(");
+    expect(shaping.slice(0, 400)).toContain("sayFailed(");
+    expect(shaping.slice(0, 400)).toContain('shaped = ""');
+  });
+});

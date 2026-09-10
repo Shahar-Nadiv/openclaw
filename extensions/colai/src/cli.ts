@@ -18,7 +18,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
-import { toolbarOnScreen } from "./running.js";
+import { toolbarOnScreen, whereabouts } from "./running.js";
 
 type CliProgram = Parameters<Parameters<OpenClawPluginApi["registerCli"]>[0]>[0]["program"];
 
@@ -38,8 +38,13 @@ function megabytes(path: string): string {
  * toolbar outlives the command that spoke to it, and holding the terminal until a window
  * closes would be the wrong shape for both callers.
  */
-function tellTheToolbar(binary: string, word: "show" | "hide" | "toggle"): void {
-  spawn(binary, [word], { detached: true, stdio: "ignore" }).unref();
+function tellTheToolbar(binary: string, word: "show" | "hide" | "toggle" | "quit"): void {
+  // The pidfile travels with every word, so a toolbar started from here records itself
+  // the same way one started by the plugin does.
+  spawn(binary, [word, "--pidfile", whereabouts()], {
+    detached: true,
+    stdio: "ignore",
+  }).unref();
 }
 
 export function registerColaiCli(program: CliProgram, toolbarBinary: () => string | null): void {
@@ -62,6 +67,7 @@ export function registerColaiCli(program: CliProgram, toolbarBinary: () => strin
     ["show", "Put the toolbar on screen"],
     ["hide", "Take the toolbar off screen"],
     ["toggle", "Put the toolbar on screen, or take it off"],
+    ["quit", "Close the toolbar entirely"],
   ] as const) {
     colai
       .command(word)
@@ -84,25 +90,18 @@ export function registerColaiCli(program: CliProgram, toolbarBinary: () => strin
       }
       console.log(`Toolbar: ${binary} (${megabytes(binary)})`);
 
-      if (!process.env.DISPLAY) {
-        // Said before the process table, because on a headless host "not running" is the
-        // correct outcome rather than a fault to chase.
+      // Asked only where it has an answer. A missing X display is the ordinary case on a
+      // Linux server; on a desktop that is not optional the question does not arise.
+      if (process.platform === "linux" && !process.env.DISPLAY) {
         console.log("Screen:  none — DISPLAY is not set, so there is nothing to draw on.");
         return;
       }
-      console.log(`Screen:  ${process.env.DISPLAY}`);
+      console.log(`Screen:  ${process.env.DISPLAY || process.platform}`);
 
-      const found = toolbarOnScreen(binary);
+      const found = toolbarOnScreen(whereabouts());
       if (found === null) {
         console.log("Running: no.");
         console.log("Put it on screen: openclaw colai show");
-        return;
-      }
-      if (!found.thisCopy) {
-        // The state anybody is in immediately after `plugins install`: the toolbar they
-        // can see is the one from before it.
-        console.log(`Running: an older copy (pid ${found.pid}).`);
-        console.log("Restart OpenClaw to pick this one up: openclaw gateway restart");
         return;
       }
       // Running is all this can honestly say. Whether the overlay is drawn right now is

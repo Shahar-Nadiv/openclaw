@@ -155,8 +155,13 @@ pub(crate) fn ensure_overlay(app: &AppHandle) -> Result<WebviewWindow, String> {
      * catching nothing and only ever claims what it has drawn. Failing closed is the
      * only safe direction for a window this size — the cost of being wrong the other way
      * is somebody's whole machine.
+     *
+     * And not behind a `cfg`. It was, and that quietly undid the whole paragraph above:
+     * `apply_shape` refuses on any platform that has no implementation yet, exactly so
+     * this cannot happen — but the *call* was Linux-only, so on Windows nothing asked,
+     * nothing refused, and the window went up catching every click on the desktop with
+     * nothing on screen looking wrong. The refusal has to be reachable to be a refusal.
      */
-    #[cfg(target_os = "linux")]
     apply_shape(&window, &[])?;
 
     /*
@@ -730,6 +735,7 @@ pub(crate) fn asked_for(app: &AppHandle, args: &[String]) -> Result<(), String> 
         "show" | "--show" => Some("show"),
         "hide" | "--hide" => Some("hide"),
         "toggle" | "--toggle" => Some("toggle"),
+        "quit" | "--quit" => Some("quit"),
         _ => None,
     });
     // Nothing said is a request for the toolbar. Being run at all is the ask — from the
@@ -737,6 +743,22 @@ pub(crate) fn asked_for(app: &AppHandle, args: &[String]) -> Result<(), String> 
     match asked.unwrap_or("show") {
         "hide" => colai_release(app.clone()),
         "toggle" if toolbar_is_showing(app) => colai_release(app.clone()),
+        /*
+         * Going, asked rather than signalled.
+         *
+         * The plugin used to stop the toolbar by sending SIGTERM to a pid it had found by
+         * reading `/proc`. Two problems with that, and the second is the one that matters:
+         * finding the pid was Linux-only, and on Windows Node maps SIGTERM to
+         * `TerminateProcess` — immediate, with no chance to put anything down.
+         *
+         * The toolbar already has one way for anything outside it to say something, and
+         * it works the same on every platform: run the binary again, and the copy on
+         * screen receives the word. So going is a word like the others.
+         */
+        "quit" => {
+            app.exit(0);
+            Ok(())
+        }
         _ => colai_summon(app.clone()),
     }
 }

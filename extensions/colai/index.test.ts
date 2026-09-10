@@ -3,15 +3,15 @@
 // Everything else about colai is checked by reading files. This is the one test that
 // runs `register`, because the failure it protects against — a plugin that installs,
 // loads, and quietly registers nothing — leaves no other trace.
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
 import { describe, expect, it as test } from "vitest";
 import colai from "./index.js";
 import { notWhatWasBuilt } from "./src/digest.js";
+import { toolbarOnScreen } from "./src/running.js";
 import { Toolbar } from "./src/toolbar-process.js";
 
 type Service = { id: string; start: (ctx: unknown) => void; stop?: (ctx: unknown) => void };
@@ -152,12 +152,15 @@ describe("what gets spawned is what was built", () => {
 
 describe("the toolbar's lifetime, against a real process", () => {
   /*
-   * The riskiest code in the plugin, and nothing exercised it: `start` was only ever
-   * tested on the two paths that return early, and `stop` only when nothing had been
-   * started. A stub binary is enough to prove the shape, and `Toolbar` takes the binary
-   * as an argument, so no seam had to be invented to reach it.
+   * The riskiest code in the plugin, and nothing exercised it before: `start` was only
+   * ever tested on the paths that return early, and `stop` only when nothing had started.
+   *
+   * Both directions go through the toolbar's own front door now — running the binary
+   * again hands the word to the copy already on screen. So a stub can play the toolbar by
+   * doing the two things the real one does: write its pid where it was told, and remove
+   * it when asked to go.
    */
-  const says = { info: () => {}, warn: () => {} };
+  const quiet = { info: () => {}, warn: () => {} };
   const said: string[] = [];
   const notes = {
     info: (line: string) => said.push(line),
@@ -165,32 +168,48 @@ describe("the toolbar's lifetime, against a real process", () => {
   };
 
   /**
-   * A stand-in that behaves like the toolbar in the one way this cares about: it starts,
-   * it stays up, and it goes when it is told to. It writes its own pid beside itself,
-   * because that is the only thing here that knows it.
+   * A stand-in that behaves like the toolbar in the ways this cares about: it records
+   * where it is, it stays up, and `quit` reaches it and takes it away.
    */
-  function aFakeToolbar(): string {
+  function aFakeToolbar(): { binary: string; pidfile: string } {
     const dir = mkdtempSync(join(tmpdir(), "colai-lifetime-"));
     const binary = join(dir, "colai-toolbar");
-    writeFileSync(binary, '#!/bin/sh\necho $$ > "$0.pid"\nsleep 120\n');
+    writeFileSync(
+      binary,
+      [
+        "#!/bin/sh",
+        'pidfile=""',
+        'word="show"',
+        "while [ $# -gt 0 ]; do",
+        '  case "$1" in',
+        '    --pidfile) pidfile="$2"; shift 2 ;;',
+        '    show|hide|toggle|quit) word="$1"; shift ;;',
+        "    *) shift ;;",
+        "  esac",
+        "done",
+        'up=""',
+        'if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then',
+        '  up="$(cat "$pidfile")"',
+        "fi",
+        // The single-instance handoff, which is the whole reason start and stop are the
+        // same mechanism: a second copy hands its word to the first and exits.
+        'if [ -n "$up" ]; then',
+        '  [ "$word" = "quit" ] && kill "$up" 2>/dev/null',
+        "  exit 0",
+        "fi",
+        // Nothing was up. `quit` has nothing to do; anything else becomes the toolbar.
+        '[ "$word" = "quit" ] && exit 0',
+        'echo $$ > "$pidfile"',
+        `trap 'rm -f "$pidfile"; kill $sleeper 2>/dev/null; exit 0' TERM INT`,
+        "sleep 120 &",
+        "sleeper=$!",
+        "wait $sleeper",
+        `rm -f "$pidfile"`,
+        "",
+      ].join("\n"),
+    );
     chmodSync(binary, 0o755);
-    return binary;
-  }
-
-  /** The pid the stub wrote, once it has got as far as writing it. */
-  async function itsPid(binary: string): Promise<number> {
-    for (let tries = 0; tries < 200; tries += 1) {
-      try {
-        const pid = Number(readFileSync(`${binary}.pid`, "utf8").trim());
-        if (pid) {
-          return pid;
-        }
-      } catch {
-        // Not yet.
-      }
-      await new Promise((soon) => setTimeout(soon, 10));
-    }
-    throw new Error("the stub toolbar never started");
+    return { binary, pidfile: join(dir, "colai-toolbar.pid") };
   }
 
   const alive = (pid: number): boolean => {
@@ -202,47 +221,61 @@ describe("the toolbar's lifetime, against a real process", () => {
     }
   };
 
+  const settle = (ms = 300) => new Promise((soon) => setTimeout(soon, ms));
+
   test("stop does not return until the toolbar has actually gone", async () => {
     /*
-     * The wait is the whole point. The toolbar holds a session-bus name until it exits,
-     * so a restart that spawns before then hands its arguments to the dying copy, that
-     * copy exits too, and nobody is left on screen — with "toolbar started" in the log.
+     * The wait is the point. The toolbar holds a single-instance lock until it exits, so
+     * a restart that spawns before then hands its arguments to the dying copy, that copy
+     * exits too, and nobody is left on screen — with "toolbar started" in the log.
      */
-    const binary = aFakeToolbar();
-    const toolbar = new Toolbar();
-    toolbar.start(binary, join(mkdtempSync(join(tmpdir(), "colai-log-")), "t.log"), says);
-    const pid = await itsPid(binary);
+    const { binary, pidfile } = aFakeToolbar();
+    const toolbar = new Toolbar(binary, pidfile);
+    toolbar.start(join(mkdtempSync(join(tmpdir(), "colai-log-")), "t.log"), quiet);
+    await settle();
+    const pid = Number(readFileSync(pidfile, "utf8").trim());
     expect(alive(pid), "it should be up").toBe(true);
 
     await toolbar.stop();
     expect(alive(pid), "stop returned while it was still running").toBe(false);
   });
 
-  test("a toolbar already on screen is adopted, and the adopter can stop it", async () => {
+  test("a toolbar already up is told to show itself, not spawned over", async () => {
     /*
      * A Gateway killed rather than stopped comes back to find its toolbar still running.
-     * Spawning over it would hand the arguments to that copy and exit, leaving nothing
-     * able to stop the toolbar somebody is looking at.
-     *
-     * A real executable, not the shell stub above: adoption reads `/proc/<pid>/exe`, and
-     * a script's `exe` is the interpreter. `sleep` copied under the toolbar's name is the
-     * smallest thing that answers that question the way the real binary does.
+     * Nothing has to recognise it: a second copy hands its word to the first and exits,
+     * which is why the adoption logic that used to live here is gone.
      */
-    const dir = mkdtempSync(join(tmpdir(), "colai-adopt-"));
-    const binary = join(dir, "colai-toolbar");
-    copyFileSync("/bin/sleep", binary);
-    const orphan = spawn(binary, ["120"], { detached: true, stdio: "ignore" });
-    orphan.unref();
-    await new Promise((soon) => setTimeout(soon, 150));
-    expect(alive(orphan.pid!), "the orphan should be up").toBe(true);
+    const { binary, pidfile } = aFakeToolbar();
+    const first = new Toolbar(binary, pidfile);
+    first.start(join(mkdtempSync(join(tmpdir(), "colai-log-")), "t.log"), quiet);
+    await settle();
+    const pid = Number(readFileSync(pidfile, "utf8").trim());
 
     said.length = 0;
-    const toolbar = new Toolbar();
-    toolbar.start(binary, join(mkdtempSync(join(tmpdir(), "colai-log-")), "t.log"), notes);
-    expect(said.join("\n")).toContain(`already running (pid ${orphan.pid})`);
+    const second = new Toolbar(binary, pidfile);
+    second.start(join(mkdtempSync(join(tmpdir(), "colai-log-")), "t.log"), notes);
+    expect(said.join("\n")).toContain(`already running (pid ${pid})`);
 
-    await toolbar.stop();
-    await new Promise((soon) => setTimeout(soon, 150));
-    expect(alive(orphan.pid!), "the adopter must be able to stop what it adopted").toBe(false);
+    await second.stop();
+    expect(alive(pid), "and the second one can still stop it").toBe(false);
+  });
+
+  test("stopping when nothing is up is not an error", async () => {
+    const { binary, pidfile } = aFakeToolbar();
+    await expect(new Toolbar(binary, pidfile).stop()).resolves.toBeUndefined();
+  });
+
+  test("a pidfile left by a crash does not count as a toolbar", () => {
+    // The file outlives a process that died without removing it, and the pid may since
+    // have been given to somebody else — which matters, because this used to decide what
+    // to stop.
+    const dir = mkdtempSync(join(tmpdir(), "colai-stale-"));
+    const pidfile = join(dir, "colai-toolbar.pid");
+    // A pid nothing can be running under.
+    writeFileSync(pidfile, "2147483646");
+    expect(toolbarOnScreen(pidfile)).toBeNull();
+    // And it is cleared, so the next look is a quick one.
+    expect(existsSync(pidfile)).toBe(false);
   });
 });

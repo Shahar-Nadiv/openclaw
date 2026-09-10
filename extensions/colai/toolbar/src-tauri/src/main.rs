@@ -35,6 +35,7 @@ mod gateway;
 mod gateway_device_identity;
 mod gateway_ws;
 mod tray;
+mod whereabouts;
 
 use std::time::Duration;
 use tauri::Manager;
@@ -88,6 +89,12 @@ fn main() {
             // started it said otherwise — being launched by `colai hide` should leave the
             // screen alone rather than flash a toolbar and take it away again.
             let asked: Vec<String> = std::env::args().collect();
+            // Where we are, for whoever started us. Written before the window, so a
+            // Gateway that restarts immediately still finds us. Removed on the way out,
+            // below, where the run loop ends.
+            if let Some(said) = whereabouts::asked_to_record(&asked) {
+                whereabouts::record(&said);
+            }
             if let Err(trouble) = colai::asked_for(app.handle(), &asked) {
                 eprintln!("[colai] could not open the toolbar: {trouble}");
             }
@@ -172,6 +179,18 @@ fn main() {
             colai_send::colai_stop,
             colai_send::colai_unwatch
         ])
-        .run(tauri::generate_context!())
-        .expect("colai failed to start");
+        .build(tauri::generate_context!())
+        .expect("colai failed to start")
+        .run(|app, event| {
+            // Said we have gone, at the one moment that is true for every way of going —
+            // the tray's Quit, `openclaw colai quit`, and a signal from a supervisor all
+            // end the run loop here.
+            if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(said) = whereabouts::asked_to_record(&std::env::args().collect::<Vec<_>>())
+                {
+                    whereabouts::forget(&said);
+                }
+                let _ = app;
+            }
+        });
 }

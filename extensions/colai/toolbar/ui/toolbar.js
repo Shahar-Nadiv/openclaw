@@ -526,7 +526,21 @@ function shape() {
   const key = JSON.stringify(rects);
   if (key === shaped) return;
   shaped = key;
-  void invoke("colai_shape", { rects });
+  /*
+   * A shape that did not take is a sheet of glass over somebody's desk.
+   *
+   * This was `void invoke(...)` with nothing catching it, which on a platform with no
+   * implementation means the overlay goes on swallowing every click while the page looks
+   * entirely normal — the one failure here that must never be quiet. Said, and the
+   * remembered key is cleared so the next render tries again rather than believing a
+   * shape that was never applied.
+   */
+  invoke("colai_shape", { rects }).catch((error) => {
+    shaped = "";
+    sayFailed(
+      `The toolbar could not claim its own shape — ${error && error.message ? error.message : String(error)}`,
+    );
+  });
 }
 
 /**

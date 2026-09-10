@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { buildPluginConfigSchema, definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { z } from "zod";
 import { notWhatWasBuilt } from "./src/digest.js";
+import { whereabouts } from "./src/running.js";
 import { Toolbar } from "./src/toolbar-process.js";
 
 /**
@@ -118,7 +119,8 @@ export default definePluginEntry({
       },
     );
 
-    const toolbar = new Toolbar();
+    /** The toolbar this service is responsible for, once it knows where its state lives. */
+    let toolbar: Toolbar | null = null;
 
     api.registerService({
       id: "colai-toolbar",
@@ -129,9 +131,15 @@ export default definePluginEntry({
           ctx.logger.info("colai: autostart is off, so the toolbar is not being started.");
           return;
         }
-        // The overlay is X11. Said rather than left to fail inside a window system that
-        // is not there — a plugin that dies on a headless host should say why.
-        if (!process.env.DISPLAY) {
+        /*
+         * Somewhere to draw.
+         *
+         * On Linux that means an X display, and its absence is the ordinary case on a
+         * server or in a container — said rather than left to fail inside a window system
+         * that is not there. On the platforms where a desktop is not optional, the
+         * question does not arise, so it is asked only where it has an answer.
+         */
+        if (process.platform === "linux" && !process.env.DISPLAY) {
           ctx.logger.warn(
             "colai: no DISPLAY, so there is no screen to draw on. The toolbar is not being started.",
           );
@@ -149,10 +157,11 @@ export default definePluginEntry({
           ctx.logger.error(`colai: ${swapped}`);
           return;
         }
-        toolbar.start(binary, logFile(ctx.stateDir), ctx.logger);
+        toolbar = new Toolbar(binary, whereabouts());
+        toolbar.start(logFile(ctx.stateDir), ctx.logger);
       },
       stop() {
-        return toolbar.stop();
+        return toolbar?.stop() ?? Promise.resolve();
       },
     });
   },
