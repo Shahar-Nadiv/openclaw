@@ -762,6 +762,11 @@ function askField(go) {
     if (menu.hidden) return;
     if (event.key === "Escape") {
       event.preventDefault();
+      // And no further. This listener is on the field, so the event goes on to reach the
+      // window — where Escape now closes the work panel this composer lives in. Shutting
+      // a suggestion list would have shut the whole panel around it and thrown away what
+      // was being typed.
+      event.stopPropagation();
       return close();
     }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -873,8 +878,13 @@ function bringFiles(brought) {
   state.files = [...state.files, ...chosen.filter((file) => !had.has(file.path))];
   // Opened, because a file dropped onto a closed toolbar has nowhere visible to land,
   // and something that vanishes on arrival reads as a drop that failed.
-  state.open = "send";
-  render();
+  //
+  // It said `state.open = "send"`, and there is no "send" flyout — the panels are shape,
+  // design, git, how, automate, row, points, draw, record and agents. So the comment
+  // above described exactly what did not happen: the file was accepted, nothing opened,
+  // and the drop looked like it had failed. The composer lives in the work panel, which
+  // is where the file now actually appears.
+  openWork();
 }
 
 /**
@@ -1027,7 +1037,10 @@ async function goBack(point) {
     state.open = null;
     state.points = null;
     if (back && back.editorText) state.text = back.editorText;
-    state.trouble = `${about.name} is back to just before “${(point.said || "that prompt").slice(0, 40)}”. The files are as they were.`;
+    say(
+      `${about.name} is back to just before “${(point.said || "that prompt").slice(0, 40)}”. The files are as they were.`,
+      "receipt",
+    );
     void loadWho();
   } catch (error) {
     state.trouble = rewindRefused(error, about.sessionKey);
@@ -1265,7 +1278,7 @@ async function createAutomation() {
     });
     if (who.kind === "thread") state.adopted = [...state.adopted, who.id];
     state.open = null;
-    state.trouble = `Automation created${made && made.name ? ` — ${made.name}` : ""}.`;
+    say(`Automation created${made && made.name ? ` — ${made.name}` : ""}.`, "receipt");
   } catch (error) {
     state.trouble = `Could not create that — ${error && error.message ? error.message : String(error)}`;
   } finally {

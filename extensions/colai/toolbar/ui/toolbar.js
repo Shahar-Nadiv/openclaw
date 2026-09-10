@@ -106,7 +106,9 @@ const state = {
   // The library window, while it is open, and which mark it will answer.
   library: null,
   // The Work window: what is waiting, what has been sent, and whether marks are drawn.
-  work: { open: false, filter: "all" },
+  // `scope` is how wide the work panel looks: "mine" is the receiver's conversations,
+  // which is what it has always shown, and "all" is everything colai knows about.
+  work: { open: false, filter: "all", scope: "mine" },
   // What has been sent, newest first. Kept for the session — surviving a restart is a
   // store, and a store is decided on purpose rather than in passing.
   history: [],
@@ -175,6 +177,9 @@ const state = {
   // What went wrong, when something did. Null the rest of the time, which is the rest
   // of the time.
   trouble: null,
+  // What kind of thing `trouble` is, and which words it was decided for. See `say`.
+  tone: "failure",
+  toneFor: null,
   // What has been sent and is still owed an answer, and the answers that have arrived.
   // Kept after the marks themselves are gone, because the point of an answer is that it
   // comes back to the place the question was asked about.
@@ -543,19 +548,72 @@ const GATEWAY_TROUBLE = {
 
 let saidLast = "";
 let fadingTrouble = null;
+/**
+ * Say one thing beside the rail, and say what kind of thing it is.
+ *
+ * Twenty-five places wrote to this strip, and it gave every one of them the same red
+ * border and the same five seconds: "Automation created" and "Could not send" were
+ * indistinguishable at a glance and equally forgettable. Which is backwards both ways. A
+ * receipt is the toolbar reading its own state back to somebody who already knows — it
+ * should be quiet and it should go. A failure is something they do not otherwise know,
+ * and giving it five seconds beside a rail that can be a metre from where they are
+ * looking means it may as well not have been said.
+ *
+ * So: receipts fade, failures wait to be dismissed or replaced. The tone belongs to the
+ * message rather than to the strip, so a receipt cannot inherit the tone of the failure
+ * before it — which is why it is remembered against the words it was set with.
+ */
+function say(said, tone = "failure") {
+  state.trouble = said;
+  state.tone = tone;
+  state.toneFor = said;
+}
+
 function drawTrouble() {
   const said = state.trouble || "";
+  // Anything set without going through `say` is a failure. That is the safe default:
+  // silently downgrading something nobody classified would hide exactly the messages
+  // this strip exists for.
+  const tone = said && state.toneFor === said ? state.tone || "failure" : "failure";
+
   el.trouble.hidden = !said;
-  el.trouble.textContent = said;
+  el.trouble.dataset.tone = tone;
+
+  if (said !== saidLast) {
+    const words = document.createElement("span");
+    words.className = "trouble-said";
+    words.textContent = said;
+    // A message that waits has to have a way out, or it is not a message, it is a
+    // permanent fixture on somebody's desktop.
+    if (tone === "failure" && said) {
+      const shut = document.createElement("button");
+      shut.type = "button";
+      shut.className = "trouble-shut";
+      shut.title = "Dismiss";
+      shut.setAttribute("aria-label", "Dismiss this message");
+      shut.textContent = "\u00d7";
+      shut.addEventListener("click", () => {
+        state.trouble = null;
+        render();
+      });
+      el.trouble.replaceChildren(words, shut);
+    } else {
+      el.trouble.replaceChildren(words);
+    }
+  }
+
   if (said === saidLast) return;
   saidLast = said;
   if (fadingTrouble !== null) clearTimeout(fadingTrouble);
-  fadingTrouble = said
-    ? setTimeout(() => {
-        state.trouble = null;
-        render();
-      }, TOAST_FOR)
-    : null;
+  // Only receipts are on a clock. A failure stays until it is dismissed or something
+  // else needs the strip.
+  fadingTrouble =
+    said && tone === "receipt"
+      ? setTimeout(() => {
+          state.trouble = null;
+          render();
+        }, TOAST_FOR)
+      : null;
 }
 
 /**
@@ -663,7 +721,16 @@ function listenForKeys() {
 }
 
 function onKey(event) {
-  // The library first: it opens over the popup and closes back to it, so Escape there
+  // A recording first, because it is the one thing here somebody has to wait out and the
+  // only state Escape could not reach. Fifteen seconds of countdown started by mistake
+  // had no way out but killing the toolbar. What was filmed so far is kept: this is
+  // "that is enough", not "that was a mistake".
+  if (event.key === "Escape" && state.recording) {
+    event.preventDefault();
+    void invoke("colai_cut_recording");
+    return;
+  }
+  // The library next: it opens over the popup and closes back to it, so Escape there
   // means "not this one" rather than "throw the mark away".
   if (event.key === "Escape" && state.library !== null) {
     closeLibrary();
@@ -673,11 +740,37 @@ function onKey(event) {
     cancelMark(state.popup);
     return;
   }
+  // The work panel is a panel like the others and closes like one. It did not: Escape
+  // fell straight past it to the line below, which silently changed the tool underneath
+  // somebody who was only trying to shut a window — and left the window open.
+  if (event.key === "Escape" && state.work.open) {
+    state.work.open = false;
+    render();
+    return;
+  }
   if (event.key === "Escape") {
     use("pointer");
     void invoke("colai_release");
     return;
   }
+
+  // Undo and redo, which the rail has offered since it had an undo key and which nothing
+  // implemented: every modifier was refused one line below, so the two shortcuts printed
+  // on the keys did nothing at all. Ctrl rather than Meta, because this is Linux and the
+  // keys now say Ctrl.
+  if (event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === "z") {
+    // Not while somebody is writing: Ctrl+Z in a text box is the box's own undo, and
+    // taking it would delete a mark instead of a word.
+    const writing = event.target;
+    if (writing && (writing.isContentEditable || /^(INPUT|TEXTAREA)$/.test(writing.tagName))) {
+      return;
+    }
+    event.preventDefault();
+    if (event.shiftKey) redo();
+    else undo();
+    return;
+  }
+
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   const target = event.target;
   // Never while somebody is writing: a single letter is a shortcut only when it is not

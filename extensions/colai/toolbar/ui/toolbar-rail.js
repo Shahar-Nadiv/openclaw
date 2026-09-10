@@ -145,7 +145,10 @@ function buildRail() {
   dividers[0].after(tools);
 
   const edits = document.createDocumentFragment();
-  edits.append(key("undo", "Undo · ⌘Z", "undo", undo), key("redo", "Redo · ⇧⌘Z", "redo", redo));
+  edits.append(
+    key("undo", "Undo · Ctrl Z", "undo", undo),
+    key("redo", "Redo · Ctrl Shift Z", "redo", redo),
+  );
   dividers[1].after(edits);
 
   // The exact tools, and the key that folds them out of the way.
@@ -203,7 +206,7 @@ function buildRail() {
   const home = document.createElement("button");
   home.type = "button";
   home.className = "key home-key";
-  home.title = "OpenClaw · ⌘,";
+  home.title = "OpenClaw";
   home.setAttribute("aria-label", "Open OpenClaw");
   home.innerHTML = openclawMark();
   home.addEventListener("click", () => invoke("colai_open_settings"));
@@ -343,7 +346,7 @@ async function stopReceiving() {
   }
   // Said, not assumed. A stop that produced no answer looks exactly like a stop that did
   // not happen, and somebody who pressed it needs to know which.
-  if (stopped.length) state.trouble = `Stopped ${stopped.join(", ")}.`;
+  if (stopped.length) say(`Stopped ${stopped.join(", ")}.`, "receipt");
   render();
 }
 

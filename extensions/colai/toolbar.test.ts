@@ -4884,6 +4884,114 @@ describe("the work panel is a view of OpenClaw's conversations", () => {
   const rail = readFileSync(new URL("toolbar-rail.js", dir), "utf8");
   const page = readFileSync(new URL("toolbar.js", dir), "utf8");
 
+  test("a receipt and a failure stop looking the same", () => {
+    /*
+     * Twenty-five places wrote to one strip, and it gave every one of them the same red
+     * border and the same five seconds. "Automation created" and "Could not send" were
+     * indistinguishable at a glance and equally forgettable — which is backwards both
+     * ways round. A receipt is the toolbar agreeing with something somebody just did, and
+     * should be quiet and go; a failure is news, and five seconds beside a rail that can
+     * be a metre from where they are looking may as well be nothing.
+     */
+    expect(page, "the tone belongs to the words").toContain("function say(said, tone");
+    expect(page, "and anything unclassified is treated as news").toContain('|| "failure"');
+    // Only receipts are on a clock.
+    const drawing = page.slice(page.indexOf("function drawTrouble"), page.indexOf("let shaped"));
+    expect(drawing).toContain('tone === "receipt"');
+    expect(drawing, "a message that waits has to offer a way out").toContain("trouble-shut");
+  });
+
+  test("Escape closes the work panel instead of changing the tool underneath it", () => {
+    // It fell straight through to `use("pointer")`, so shutting a window silently swapped
+    // the tool — and left the window open.
+    const keys = page.slice(page.indexOf("function onKey"), page.indexOf("/* ── start"));
+    const closes = keys.indexOf("state.work.open = false");
+    const pointer = keys.indexOf('use("pointer")');
+    expect(closes, "the panel is closed on Escape").toBeGreaterThan(-1);
+    expect(closes, "and before the tool is touched").toBeLessThan(pointer);
+  });
+
+  test("a recording can be ended early", () => {
+    // Fifteen seconds is a long time to watch a countdown you started by mistake, and
+    // there was no way out of it but killing the toolbar. What was filmed is kept: this
+    // is "that is enough", not "that was a mistake".
+    const keys = page.slice(page.indexOf("function onKey"), page.indexOf("/* ── start"));
+    expect(keys).toContain("colai_cut_recording");
+    const capture = readFileSync(
+      new URL("../src-tauri/src/colai_capture.rs", new URL("./toolbar/ui/", import.meta.url)),
+      "utf8",
+    );
+    expect(capture, "and the frames already taken survive it").toContain("CUT_SHORT");
+    expect(capture).toContain("break;");
+  });
+
+  test("a dropped file lands somewhere somebody can see", () => {
+    // `state.open = "send"` named a flyout that does not exist, under a comment saying it
+    // opened one so the file would not seem to vanish. The file did seem to vanish.
+    const compose = readFileSync(new URL("toolbar-compose.js", dir), "utf8");
+    const dropping = compose.slice(compose.indexOf("function bringFiles"));
+    expect(dropping, "the composer lives in the work panel").toContain("openWork()");
+    // In code, not in prose: the line above this one explains the bug by quoting it.
+    const code = compose
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
+      .join("\n");
+    expect(code, "and nothing still opens a panel that is not there").not.toContain(
+      'state.open = "send"',
+    );
+  });
+
+  test("the token for the quietest text is a colour", () => {
+    // `--muted-dim: var(--muted-dim)` is not a colour, so nine rules asked for it and got
+    // nothing — and nine of the quietest things on the surface came out at full strength.
+    const css = readFileSync(new URL("toolbar.css", dir), "utf8");
+    expect(css).not.toContain("--muted-dim: var(--muted-dim)");
+    expect(css).toMatch(/--muted-dim: #[0-9a-f]{6}/i);
+  });
+
+  test("choosing a different receiver narrows the panel, it does not empty it", () => {
+    /*
+     * The panel filtered the Gateway's list by whoever was receiving and then assigned the
+     * result over `state.history` — so the receiver dropdown was destructive. Switching
+     * agent did not narrow the list, it discarded the rest of it; picking a thread that
+     * had never been adopted discarded all of it. What came back afterwards was whatever
+     * the Gateway happened to still be listing, which is why the panel looked like it
+     * forgot things at random.
+     *
+     * The list is now kept whole and filtered where it is drawn.
+     */
+    const loading = work.slice(
+      work.indexOf("async function loadWork"),
+      work.indexOf("const STILL_NEW"),
+    );
+    expect(loading, "nothing about the receiver reaches the remembered list").not.toContain(
+      "whoseConversations()",
+    );
+    expect(work, "the view asks instead").toContain("function shownWork(");
+    // And the head's own counts describe what is on screen rather than what is held.
+    expect(work).toContain("workCountSaid(shownWork()");
+  });
+
+  test("the panel says how wide it is looking", () => {
+    // A filtered list that does not say it is filtered is indistinguishable from a list
+    // that has lost things — which is exactly how this read.
+    expect(work).toContain('["mine", "This agent"');
+    expect(work).toMatch(/\["all", `Everything/);
+    expect(page, "and the default is what it has always shown").toContain('scope: "mine"');
+  });
+
+  test("a refused send waits to be dismissed rather than expiring", () => {
+    /*
+     * A send that was refused has no session key by construction, so the Gateway can never
+     * list it and the "keep it while the list catches up" window always ran out. It is the
+     * one row with a Discard button — put there so somebody can dismiss it — and it was
+     * being dismissed for them after a minute.
+     */
+    const young = work.slice(work.indexOf("const listedKeys"), work.indexOf("const next ="));
+    expect(young).toContain("entry.blocked ||");
+    expect(young).toContain("STILL_NEW");
+  });
+
   test("the list comes from the Gateway, not from what this toolbar remembers", () => {
     /*
      * The first attempt at this had it the other way round: it remembered what colai had

@@ -176,6 +176,27 @@ pub(crate) struct Taken {
     pub seconds: f64,
 }
 
+/// Whether the recording running right now has been asked to stop.
+///
+/// A recording is the one thing this toolbar does that somebody has to wait out. Fifteen
+/// seconds is a long time to watch a countdown you started by mistake, and there was no
+/// way to end it: Escape reached a page that was mid-capture and could do nothing with
+/// it, so the only way out was to wait or to kill the toolbar.
+///
+/// One flag rather than a channel, because there is only ever one recording — the page
+/// makes itself invisible and blocks until the frames are in, so a second cannot start.
+static CUT_SHORT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Stop the recording that is running, keeping the frames it already has.
+///
+/// Not a cancel: what has been photographed is what somebody was recording, and throwing
+/// it away would make the button that ends a recording early indistinguishable from one
+/// that abandons it.
+#[tauri::command]
+pub(crate) fn colai_cut_recording() {
+    CUT_SHORT.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
 /// Photograph what a mark is about.
 ///
 /// The page makes itself invisible before calling this and visible again after, which is
@@ -232,8 +253,17 @@ pub(crate) async fn colai_capture_mark(
     // asked for: a capture wider than an agent will take is shrunk on the way out, and
     // telling the Gateway the region's size would describe an image nobody has.
     let mut sent = (crop.width, crop.height);
+    // Cleared here rather than when the recording ends, so a stop that arrives after the
+    // last frame cannot cut the next recording short before it has taken one.
+    CUT_SHORT.store(false, std::sync::atomic::Ordering::SeqCst);
     for taken in 0..wanted {
         if taken > 0 {
+            // Asked between frames, which is where the waiting is. At least one frame is
+            // always taken: a recording that returns nothing is a failure, and this is a
+            // person saying "that is enough", not "that was a mistake".
+            if CUT_SHORT.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
             tokio::time::sleep(every).await;
         }
         let (done, wait) = std::sync::mpsc::channel();

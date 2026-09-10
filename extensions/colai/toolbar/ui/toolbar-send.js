@@ -88,7 +88,7 @@ async function startHere() {
     // The marks stay. A new conversation has been opened with them, and until it is
     // listed among the receivers there is nothing here to send them to twice.
     state.open = null;
-    state.trouble = `Opened a new conversation in ${project.label}.`;
+    say(`Opened a new conversation in ${project.label}.`, "receipt");
   } catch (error) {
     state.trouble = `Could not start there — ${error && error.message ? error.message : String(error)}`;
   } finally {

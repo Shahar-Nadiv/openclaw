@@ -48,8 +48,13 @@
   --text: #bcbcc0;
   --muted: #8b8b94;
   /* One step below `--muted`, for a timestamp beside a name. The Control UI has no
-     token for it because it has no surface this dense. */
-  --muted-dim: var(--muted-dim);
+     token for it because it has no surface this dense.
+
+     It was `var(--muted-dim)` — itself — which is not a colour. Nine rules asked for it
+     and got nothing, so nine of the quietest things on the surface inherited whatever
+     was above them and came out at full strength: timestamps as loud as the names beside
+     them, which is the whole distinction this token exists to draw. */
+  --muted-dim: #6c6c75;
 
   --ok: #22c55e;
   --warn: #f59e0b;
@@ -2363,10 +2368,47 @@ body {
   border-radius: 8px;
   max-width: 420px;
   background: var(--chrome-strong);
-  border: 1px solid rgb(255 123 123 / 55%);
+  /* The quiet face, and the default. A receipt is the toolbar agreeing with something
+     somebody just did; it does not need a border the colour of an error. */
+  border: 1px solid rgb(255 255 255 / 14%);
   font-size: 11.5px;
   line-height: 1.45;
+  color: var(--text);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* And the face for news. Red is spent here rather than on everything, which is the only
+   way it means anything when it appears. */
+.trouble[data-tone="failure"] {
+  border-color: rgb(255 123 123 / 55%);
   color: var(--text-strong);
+}
+
+.trouble-said {
+  min-width: 0;
+}
+
+/* A message that waits until it is dismissed has to offer the dismissing. */
+.trouble-shut {
+  all: unset;
+  flex: none;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.trouble-shut:hover {
+  color: var(--text-strong);
+}
+
+.trouble-shut:focus-visible {
+  outline: 2px solid var(--accent-fill);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .rail-wrap[data-vertical="false"] .trouble {
   top: calc(100% + 8px);
@@ -2520,4 +2562,25 @@ body {
 .rail-wrap[data-catching="true"] .flyout-send {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ── keyboard focus, for the controls that threw it away ──────────────────────
+ *
+ * `all: unset` is used nineteen times in this file to take a button back to nothing, and
+ * it is thorough: the focus ring goes with everything else. Six controls were left with
+ * no visible focus at all, so a keyboard user could tab through the flyouts, the toasts
+ * and the composer's own menu with nothing on screen saying where they were.
+ *
+ * The ring matches `.key:focus-visible`, which kept its own — one shape for the whole
+ * surface rather than six that nearly agree.
+ */
+.row:focus-visible,
+.chip:focus-visible,
+.toast:focus-visible,
+.row-more:focus-visible,
+.file-drop:focus-visible,
+.ask-menu-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
 }

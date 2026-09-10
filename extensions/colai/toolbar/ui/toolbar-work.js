@@ -53,6 +53,13 @@ function openWork() {
   state.open = null;
   reachTheKeyboard();
   render();
+  // Into the box, because opening this panel is almost always the first half of writing
+  // in it. Nothing focused anything, so every visit began with a click somebody should
+  // not have had to make — and for a keyboard user, with a tab through the whole log.
+  //
+  // After the render that builds it: the field does not exist until then.
+  const write = el.work.querySelector(".work-write [data-field]");
+  if (write) write.focus({ preventScroll: true });
 }
 
 /**
@@ -110,8 +117,9 @@ function drawWork() {
 
   keepTime();
   const now = Date.now();
-  const waiting = needingYou(state.history, state.runs);
-  const shown = state.work.filter === "needs" ? waiting : state.history;
+  const here = shownWork();
+  const waiting = needingYou(here, state.runs);
+  const shown = state.work.filter === "needs" ? waiting : here;
 
   // Where in the list somebody had got to. `replaceChildren` builds a new scrolling
   // element at the top, so without this the panel throws you back to the first row every
@@ -147,7 +155,7 @@ function workHead(waiting) {
   name.textContent = "Work";
   const count = document.createElement("span");
   count.className = "work-count";
-  count.textContent = workCountSaid(state.history, state.runs);
+  count.textContent = workCountSaid(shownWork(), state.runs);
   title.append(name, count);
 
   // Two tabs, and only once there is something to filter to. A "Needs you · 0" tab is a
@@ -169,6 +177,35 @@ function workHead(waiting) {
         render();
       });
       tabs.append(tab);
+    }
+  }
+
+  /*
+   * How wide the panel is looking.
+   *
+   * The panel has always shown only the receiver's conversations and never said so, which
+   * is the difference between a filtered list and a list that has lost things. Two words
+   * settle it — and make the narrow view a choice somebody can see rather than a wall.
+   *
+   * Only worth showing once there is something outside the filter to look at.
+   */
+  const beyond = state.history.length - shownWork().length;
+  if (beyond > 0 || state.work.scope === "all") {
+    for (const [id, label, why] of [
+      ["mine", "This agent", "Only the conversations of whoever is receiving"],
+      ["all", `Everything · ${state.history.length}`, "Every conversation colai can see"],
+    ]) {
+      const pick = document.createElement("button");
+      pick.type = "button";
+      pick.className = "work-tab";
+      pick.dataset.on = String((state.work.scope || "mine") === id);
+      pick.title = why;
+      pick.textContent = label;
+      pick.addEventListener("click", () => {
+        state.work.scope = id;
+        render();
+      });
+      tabs.append(pick);
     }
   }
 
@@ -228,7 +265,7 @@ function workLog(shown, now) {
   const log = document.createElement("div");
   log.className = "work-log scrolls";
   if (shown.length === 0) {
-    log.append(state.history.length === 0 ? nothingYet() : saying("Nothing is waiting on you."));
+    log.append(shownWork().length === 0 ? nothingYet() : saying("Nothing is waiting on you."));
     return log;
   }
   for (const entry of shown) log.append(entryRow(entry, now));
@@ -617,7 +654,7 @@ async function stopOne(sessionKey) {
     await invoke("colai_stop", { sessionKey });
     // Said, not assumed. A stop that produced no answer looks exactly like a stop that
     // did not happen, and somebody who pressed it needs to know which.
-    state.trouble = `Stopped ${run ? run.who : "that run"}.`;
+    say(`Stopped ${run ? run.who : "that run"}.`, "receipt");
   } catch (error) {
     state.trouble = `Could not stop ${run ? run.who : "that run"} — ${error && error.message ? error.message : String(error)}`;
   }
@@ -796,42 +833,51 @@ async function loadWork() {
   if (!Array.isArray(sessions)) return;
 
   const known = new Map(state.history.map((entry) => [entry.sessionKey, entry]));
-  const mine = whoseConversations();
   const now = Date.now();
 
-  const listed = sessions
-    .filter((session) => mine(session))
-    .map((session) => {
-      const had = known.get(session.key);
-      // What colai did in this conversation, most recent first. Only the toolbar knows
-      // it: the Gateway has the words, not which region of a screen they were about.
-      const ours = ourOwnWork
-        .filter((one) => one.sessionKey === session.key)
-        .sort((a, b) => (b.at || 0) - (a.at || 0))[0];
-      return {
-        sessionKey: session.key,
-        agentId: session.agentId || null,
-        who: session.title,
-        at: session.at || (had && had.at) || now,
-        // The conversation's own last line. A send colai made says what colai said
-        // instead, because that is the thing somebody is looking for it by.
-        said: (ours && ours.said) || session.preview || "",
-        count: ours ? ours.count : 0,
-        marks: ours ? ours.marks : [],
-        blocked: ours ? ours.blocked : undefined,
-        mine: Boolean(ours) || Boolean(had && had.mine),
-        // From the same round trip, so a row can say "working" before its transcript has
-        // ever been fetched.
-        busy: Boolean(session.busy),
-        unread: Boolean(session.unread),
-        // Carried whole, and everything the person did to this panel lives in it. It used
-        // to be one field at a time, and the refresh dropped whichever one was added last
-        // — an open row shutting itself every few seconds.
-        view: (had && had.view) || freshView(),
-        failed: Boolean(had && had.failed),
-        answer: (had && had.answer) || null,
-      };
-    });
+  /*
+   * Everything, and filtered later.
+   *
+   * This used to filter here and then assign the result over `state.history`, which made
+   * the receiver dropdown destructive: choosing a different agent did not narrow the list,
+   * it threw the rest of it away, and choosing a thread that had never been adopted threw
+   * away all of it. What came back afterwards was only whatever the Gateway happened to
+   * still be listing.
+   *
+   * The panel is a view. `whoseConversations` is now something the view asks at draw
+   * time — see `shownWork` — and nothing about who is receiving reaches this list.
+   */
+  const listed = sessions.map((session) => {
+    const had = known.get(session.key);
+    // What colai did in this conversation, most recent first. Only the toolbar knows
+    // it: the Gateway has the words, not which region of a screen they were about.
+    const ours = ourOwnWork
+      .filter((one) => one.sessionKey === session.key)
+      .sort((a, b) => (b.at || 0) - (a.at || 0))[0];
+    return {
+      sessionKey: session.key,
+      agentId: session.agentId || null,
+      who: session.title,
+      at: session.at || (had && had.at) || now,
+      // The conversation's own last line. A send colai made says what colai said
+      // instead, because that is the thing somebody is looking for it by.
+      said: (ours && ours.said) || session.preview || "",
+      count: ours ? ours.count : 0,
+      marks: ours ? ours.marks : [],
+      blocked: ours ? ours.blocked : undefined,
+      mine: Boolean(ours) || Boolean(had && had.mine),
+      // From the same round trip, so a row can say "working" before its transcript has
+      // ever been fetched.
+      busy: Boolean(session.busy),
+      unread: Boolean(session.unread),
+      // Carried whole, and everything the person did to this panel lives in it. It used
+      // to be one field at a time, and the refresh dropped whichever one was added last
+      // — an open row shutting itself every few seconds.
+      view: (had && had.view) || freshView(),
+      failed: Boolean(had && had.failed),
+      answer: (had && had.answer) || null,
+    };
+  });
 
   /*
    * And what the Gateway has not caught up with.
@@ -843,7 +889,14 @@ async function loadWork() {
    */
   const listedKeys = new Set(listed.map((entry) => entry.sessionKey));
   const young = state.history.filter(
-    (entry) => !listedKeys.has(entry.sessionKey) && entry.mine && now - (entry.at || 0) < STILL_NEW,
+    (entry) =>
+      !listedKeys.has(entry.sessionKey) &&
+      entry.mine &&
+      // A refused send has no session key by construction, so the Gateway will never list
+      // it and this window would always run out. It is the one row with a Discard button,
+      // put there so somebody can dismiss it — and it was being dismissed for them after
+      // a minute, which is the code taking back what its own comment promised.
+      (entry.blocked || now - (entry.at || 0) < STILL_NEW),
   );
 
   const next = [...listed, ...young].sort((a, b) => (b.at || 0) - (a.at || 0));
@@ -862,6 +915,34 @@ async function loadWork() {
 
 /** How long an entry the Gateway has not listed is kept anyway. */
 const STILL_NEW = 60_000;
+
+/**
+ * The rows this panel is showing, out of everything it knows.
+ *
+ * Scope first, then the tab. "Mine" is what the panel has always shown and stays the
+ * default — the conversation you are pointed at is nearly always the one you mean — but
+ * it is now a thing somebody can widen rather than a wall they cannot see past.
+ */
+function shownWork() {
+  const everything = state.history;
+  const scoped =
+    state.work.scope === "all" ? everything : everything.filter(mineToShow(everything));
+  return scoped;
+}
+
+/**
+ * Which of the remembered rows belong to whoever is receiving.
+ *
+ * `whoseConversations` answers about a Gateway session; the panel holds its own rows, so
+ * this is the same question asked of those. A row colai itself created is always ours
+ * even before the Gateway agrees it exists, or a send would vanish for the seconds
+ * between making it and the list catching up.
+ */
+function mineToShow() {
+  const belongs = whoseConversations();
+  return (entry) =>
+    belongs({ key: entry.sessionKey, agentId: entry.agentId }) || Boolean(entry.blocked);
+}
 
 /** Everything the person did to this panel, as opposed to everything the Gateway said. */
 function freshView() {

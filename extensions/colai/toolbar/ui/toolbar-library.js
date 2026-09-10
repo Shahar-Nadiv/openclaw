@@ -35,6 +35,12 @@ function openLibrary(mark) {
   };
   state.open = null;
   render();
+  // The library exists to be searched, so the cursor starts in the search. It opened with
+  // focus nowhere, which for a panel whose whole content is a list of results meant the
+  // first keystroke went to the page — where, on this surface, a letter is a tool
+  // shortcut.
+  const find = el.library.querySelector(".library-find");
+  if (find) find.focus({ preventScroll: true });
   void lookInLibrary();
 }
 

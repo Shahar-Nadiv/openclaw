@@ -8,6 +8,7 @@ fn main() {
         "colai_at_work",
         "colai_automate",
         "colai_capture_mark",
+        "colai_cut_recording",
         "colai_describe_files",
         "colai_forget_marks",
         "colai_frontmost",

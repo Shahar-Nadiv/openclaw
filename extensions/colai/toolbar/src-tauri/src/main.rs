@@ -156,6 +156,7 @@ fn main() {
             colai_attach::colai_in_front,
             colai_capture::colai_capture_mark,
             colai_capture::colai_forget_marks,
+            colai_capture::colai_cut_recording,
             colai_files::colai_describe_files,
             colai_files::colai_pick_files,
             colai_files::colai_pick_folder,
