@@ -4647,6 +4647,32 @@ describe("what the plugin ships", () => {
     expect(existsSync(new URL("scripts/build-toolbar.mjs", dir))).toBe(true);
   });
 
+  test("drawing happens on the thread allowed to draw", () => {
+    /*
+     * Structural on purpose, and the one place in this file where that is the honest
+     * shape: the rule is "GDK is only touched from the main thread", and observing it
+     * needs a GTK main loop, a display and a real send. What can be checked is that the
+     * one path which broke it no longer names the drawing directly.
+     *
+     * It mattered more than a panic usually does. GDK does not decline when it is used
+     * from the wrong thread, it aborts the thread it is on — here a tokio worker inside
+     * the `colai_send` command. Tauri does not catch that across the command boundary, so
+     * the promise on the page never settled, its `finally` never ran, and `state.sending`
+     * stayed true for the life of the process: send one recording as a contact sheet, and
+     * Send never worked again until the toolbar was restarted.
+     */
+    const send = readFileSync(new URL("toolbar/src-tauri/src/colai_send.rs", dir), "utf8");
+
+    expect(send, "the sheet is drawn through the main thread").toContain("run_on_main_thread");
+    const helper = send.indexOf("fn sheet_on_the_main_thread");
+    expect(helper, "and there is one seam it goes through").toBeGreaterThan(-1);
+
+    // Every mention of the drawing outside that helper would be a way around it.
+    const direct = [...send.matchAll(/colai_capture::contact_sheet/g)].map((hit) => hit.index ?? 0);
+    expect(direct.length, "the drawing is named once").toBe(1);
+    expect(direct[0], "and only inside the helper").toBeGreaterThan(helper);
+  });
+
   test("npm refuses the machines the binary cannot run on", () => {
     /*
      * `bin/colai-toolbar` is one ELF for one architecture. Without `cpu`, npm installs it

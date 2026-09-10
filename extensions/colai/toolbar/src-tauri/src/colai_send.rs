@@ -13,7 +13,7 @@
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::colai_capture::MarkShots;
 use crate::gateway_ws::{
@@ -68,6 +68,9 @@ pub(crate) struct Sent {
 /// Send the marked work to whoever was chosen.
 #[tauri::command]
 pub(crate) async fn colai_send(
+    // Here to reach the main thread. Laying a recording out as one picture is drawing,
+    // and drawing may only happen there — see `attach`.
+    app: AppHandle,
     gateway: State<'_, GatewayClient>,
     shots: State<'_, MarkShots>,
     receiver: Receiver,
@@ -121,6 +124,7 @@ pub(crate) async fn colai_send(
         }
     }
     let (mut attachments, sheet_trouble) = attach(
+        &app,
         &shots,
         &mark_ids,
         &sheets.unwrap_or_default(),
@@ -219,6 +223,33 @@ async fn resolve(
     }
 }
 
+/// Lay a recording out as one picture, on the thread allowed to draw.
+///
+/// GDK may only be used from the thread that started it, and it does not decline when it
+/// is not: it aborts the process it is on. This runs inside `colai_send`, which is an
+/// async command and therefore on a tokio worker, so calling the drawing directly killed
+/// that worker mid-send. Tauri does not catch a panic across the command boundary, so the
+/// promise on the page never settled, its `finally` never ran, and `state.sending` stayed
+/// true for the life of the toolbar — one recording sent, and Send never worked again.
+///
+/// The frame capture beside it has always gone through here. Only the contact sheet did
+/// not, because it is assembled from bytes already in hand and did not look like drawing.
+#[cfg(target_os = "linux")]
+fn sheet_on_the_main_thread(
+    app: &AppHandle,
+    frames: &[Vec<u8>],
+    accent: &str,
+) -> Result<crate::colai_capture::Sheet, String> {
+    let (done, wait) = std::sync::mpsc::channel();
+    let (frames, accent) = (frames.to_vec(), accent.to_string());
+    app.run_on_main_thread(move || {
+        let _ = done.send(crate::colai_capture::contact_sheet(&frames, &accent));
+    })
+    .map_err(|error| format!("Could not reach the display: {error}"))?;
+    wait.recv()
+        .map_err(|_| "The display did not answer.".to_string())?
+}
+
 /// The pictures for these marks, named in the order the message describes them.
 ///
 /// The names matter: the message says "mark 2" and the agent has to be able to tell
@@ -226,6 +257,7 @@ async fn resolve(
 /// had; a recording numbers its frames after it, so a set of six is a sequence rather
 /// than six unrelated pictures of the same corner of a screen.
 fn attach(
+    app: &AppHandle,
     shots: &MarkShots,
     mark_ids: &[String],
     sheets: &[String],
@@ -254,7 +286,7 @@ fn attach(
         // sheet is a question about what somebody meant, and this end only knows bytes.
         if picked.frames.len() > 1 && sheets.contains(&picked.id) {
             #[cfg(target_os = "linux")]
-            match crate::colai_capture::contact_sheet(&picked.frames, accent) {
+            match sheet_on_the_main_thread(app, &picked.frames, accent) {
                 Ok(sheet) => {
                     carried.push(one(
                         sheet.png,

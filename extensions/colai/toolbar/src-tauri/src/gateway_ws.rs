@@ -997,6 +997,14 @@ struct GatewayClientInner {
     identity: Mutex<Option<GatewayDeviceIdentityStore>>,
     /// What the Gateway said this connection may do, from the last handshake.
     scopes: Mutex<Vec<String>>,
+    /// The sessions this toolbar is listening to.
+    ///
+    /// A subscription lives on the connection, not on the account, so every one of them
+    /// dies with the socket. Nothing here used to remember them, and the handshake replays
+    /// only `connect` and `agents.list` — so after any drop the toolbar stayed connected,
+    /// looked healthy, and never heard another word from any conversation. A Gateway
+    /// restart is ordinary; this made every one of them silently final.
+    watching: Mutex<std::collections::BTreeSet<String>>,
     connection_notice: Mutex<Option<String>>,
     connection_state: AtomicU64,
     reconnect_paused: AtomicBool,
@@ -1016,6 +1024,7 @@ impl GatewayClient {
                 config_generation: AtomicU64::new(0),
                 commands: Mutex::new(None),
                 scopes: Mutex::new(Vec::new()),
+                watching: Mutex::new(std::collections::BTreeSet::new()),
                 agents_cache: Mutex::new(None),
                 identity: Mutex::new(None),
                 connection_notice: Mutex::new(None),
@@ -1261,7 +1270,26 @@ impl GatewayClient {
             watching,
         })
         .await
-        .map(|_| ())
+        .map(|_| ())?;
+        // Written down only once the Gateway has agreed, so the set says what is actually
+        // subscribed rather than what was asked for.
+        if let Ok(mut held) = self.inner.watching.lock() {
+            if watching {
+                held.insert(key.to_string());
+            } else {
+                held.remove(key);
+            }
+        }
+        Ok(())
+    }
+
+    /// The sessions a fresh connection has to be told about again.
+    fn watched_sessions(&self) -> Vec<String> {
+        self.inner
+            .watching
+            .lock()
+            .map(|held| held.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Adopt a conversation held elsewhere, and learn the session key it now answers to.
@@ -1523,6 +1551,28 @@ impl GatewayClient {
             return Ok(());
         }
         self.cache_agents(agents);
+        // Every subscription this toolbar had went down with the last socket. Re-made
+        // here, before anyone is told the connection is up, so there is no window in
+        // which the page believes it is listening and is not.
+        //
+        // Failures are not fatal: a session that has since been deleted must not stop the
+        // rest from being restored, and one that cannot be re-watched is no worse off than
+        // it was a moment ago.
+        for key in self.watched_sessions() {
+            let asked = request_on_socket(
+                &mut socket,
+                "sessions.messages.subscribe",
+                json!({ "key": key }),
+                REQUEST_TIMEOUT,
+                &dispatch,
+            )
+            .await;
+            if asked.is_err() {
+                if let Ok(mut held) = self.inner.watching.lock() {
+                    held.remove(&key);
+                }
+            }
+        }
         self.set_connection_state(app, GatewayConnectionState::Up, None);
         let mut last_gateway_activity = Instant::now();
 
@@ -2485,6 +2535,47 @@ fn dispatch_session_message<R: tauri::Runtime>(app: &AppHandle<R>, frame: &Value
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A subscription belongs to a socket, so a new socket has to be told again.
+    ///
+    /// This is the half that can be tested without a Gateway: that the client remembers
+    /// what it is listening to, forgets what it has let go of, and hands a fresh
+    /// connection the list to re-make. `connect_and_serve` replays exactly this list.
+    #[test]
+    fn what_is_watched_survives_the_socket_that_carried_it() {
+        let client = GatewayClient::new();
+        assert!(
+            client.watched_sessions().is_empty(),
+            "nothing is watched before anything is watched"
+        );
+
+        // Recorded the way `watch_session` records it once the Gateway has agreed.
+        for key in ["agent:main:one", "agent:main:two"] {
+            client
+                .inner
+                .watching
+                .lock()
+                .expect("watch set")
+                .insert(key.to_string());
+        }
+        assert_eq!(
+            client.watched_sessions(),
+            vec!["agent:main:one".to_string(), "agent:main:two".to_string()],
+            "both are handed to the next connection"
+        );
+
+        client
+            .inner
+            .watching
+            .lock()
+            .expect("watch set")
+            .remove("agent:main:one");
+        assert_eq!(
+            client.watched_sessions(),
+            vec!["agent:main:two".to_string()],
+            "letting go of one does not resurrect it on the next connect"
+        );
+    }
 
     #[tokio::test]
     async fn budgeted_driver_request_releases_the_serial_queue() {
