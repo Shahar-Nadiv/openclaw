@@ -46,6 +46,14 @@ if [ ${#wanted[@]} -eq 0 ]; then
   wanted=(no-rust no-headers cold)
 fi
 
+# An installed plugin loads compiled JavaScript, not TypeScript — OpenClaw's install
+# validator says so plainly, and only a source checkout gets the TS fallback. So the
+# runtime output is built first, into `dist/`, which `files` then ships.
+repo="$(cd "$plugin/../.." && pwd)"
+echo "building the plugin runtime"
+(cd "$repo" && node --import ./scripts/tsx.mjs scripts/check-plugin-npm-runtime-builds.mts \
+  --package extensions/colai)
+
 # One tarball for every variant: exactly what `npm publish` would upload, and the only
 # thing any container is allowed to see of this repo.
 mkdir -p "$work"
@@ -86,18 +94,25 @@ for variant in "${wanted[@]}"; do
   if docker run --rm "${screen[@]+"${screen[@]}"}" \
       -v "$tarball:/work/$(basename "$tarball"):ro" \
       "$image" bash -euo pipefail -c "
-        openclaw plugins install 'npm-pack:/work/$(basename "$tarball")' --force
+        # --accept-capabilities because nothing in here can answer a prompt. A person
+        # installing this is shown the same surface and accepts it themselves.
+        openclaw plugins install 'npm-pack:/work/$(basename "$tarball")' --force --accept-capabilities
         echo
         echo '--- what doctor says'
-        openclaw doctor --severity info 2>&1 | grep -i colai || echo '(colai said nothing)'
+        openclaw doctor --severity info 2>&1 | grep -i colai || echo '(colai said nothing about itself)'
         echo
-        echo '--- what was installed'
-        find ~/.openclaw/extensions -maxdepth 3 -name 'colai*' -o -maxdepth 3 -name 'colai-toolbar' | head
+        echo '--- is the toolbar there'
+        binary=\$(find ~/.openclaw -type f -name colai-toolbar 2>/dev/null | head -1)
+        if [ -n \"\$binary\" ]; then
+          echo \"built: \$binary (\$(du -h \"\$binary\" | cut -f1))\"
+        else
+          echo 'NOT BUILT — no colai-toolbar anywhere under ~/.openclaw'
+        fi
         echo
         echo '--- uninstall'
-        openclaw plugins uninstall @colai/toolbar
-        left=\$(find ~/.openclaw -name '*colai*' | head)
-        if [ -n \"\$left\" ]; then echo \"LEFT BEHIND:\"; echo \"\$left\"; exit 1; fi
+        openclaw plugins uninstall colai
+        left=\$(find ~/.openclaw -name '*colai*' 2>/dev/null | head)
+        if [ -n \"\$left\" ]; then echo 'LEFT BEHIND:'; echo \"\$left\"; exit 1; fi
         echo 'nothing left behind'
       "; then
     took=$(( $(date +%s) - began ))

@@ -25,7 +25,28 @@ import { z } from "zod";
 
 const runFile = promisify(execFile);
 
-const here = dirname(fileURLToPath(import.meta.url));
+/**
+ * The package root, whichever file is running.
+ *
+ * In a checkout this module IS `index.ts` at the root; installed from npm it is
+ * `dist/index.js`, one level down. Everything below is addressed from the package —
+ * the toolbar's sources, the build script — so a `here` that means two different
+ * places depending on how the plugin was obtained is a plugin that works in
+ * development and points at nothing on anybody else's machine.
+ */
+function packageRoot(): string {
+  let at = dirname(fileURLToPath(import.meta.url));
+  while (!existsSync(join(at, "package.json"))) {
+    const up = dirname(at);
+    if (up === at) {
+      throw new Error("colai: could not find the plugin package root");
+    }
+    at = up;
+  }
+  return at;
+}
+
+const here = packageRoot();
 
 const ColaiConfigSchema = z.strictObject({
   /**

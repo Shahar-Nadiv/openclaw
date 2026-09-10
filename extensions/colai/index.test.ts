@@ -70,6 +70,21 @@ describe("the plugin OpenClaw loads", () => {
     }
   });
 
+  test("the doctor check finds its own build script", async () => {
+    /*
+     * `here` is the package root, and this module is `index.ts` at the root in a
+     * checkout but `dist/index.js` one level down when installed from npm. Resolving it
+     * from `import.meta.url` alone gives a plugin that works in development and points
+     * at nothing on anybody else's machine — the check would answer "could not check"
+     * on every installed copy.
+     */
+    registerColai();
+    const found = await getHealthCheck("colai/toolbar-built")?.detect(
+      {} as Parameters<NonNullable<ReturnType<typeof getHealthCheck>>["detect"]>[0],
+    );
+    expect(found?.some((finding) => finding.message.includes("could not check"))).toBe(false);
+  });
+
   test("stopping before anything started is not an error", () => {
     const { services, ctx } = registerColai({ autostart: false });
     expect(() => services[0]?.stop?.(ctx)).not.toThrow();

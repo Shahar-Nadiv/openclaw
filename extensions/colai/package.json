@@ -15,6 +15,7 @@
   ],
   "files": [
     "index.ts",
+    "dist/",
     "openclaw.plugin.json",
     "scripts/",
     "toolbar/ui/",
