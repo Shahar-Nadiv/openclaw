@@ -68,21 +68,40 @@ pub(crate) struct Showing {
 
 #[cfg(target_os = "linux")]
 async fn showing_at(x: i32, y: i32) -> Option<Showing> {
-    let bus = accessibility_bus().await.ok()?;
-    let root: Node = (
-        "org.a11y.atspi.Registry".to_string(),
-        OwnedObjectPath::try_from("/org/a11y/atspi/accessible/root").ok()?,
-    );
-    for app in children(&bus, &root).await.ok()? {
-        for window in children(&bus, &app).await.ok()? {
-            if !contains(&bus, &window, x, y).await {
-                continue;
-            }
-            let url = document_url(&bus, &window).await;
-            return Some(Showing { url });
+    // Twice at most: a kept connection can have died with the session's accessibility
+    // helper, and the cheapest proof that it is alive is asking it something. A second
+    // failure is the bus being genuinely absent, which is an answer.
+    match look_from(&kept_bus().await.ok()?, x, y).await {
+        Ok(seen) => seen,
+        Err(()) => {
+            forget_the_bus().await;
+            look_from(&kept_bus().await.ok()?, x, y).await.unwrap_or(None)
         }
     }
-    None
+}
+
+/// The walk itself, over whichever connection it was handed.
+///
+/// `Err` means the connection would not answer at all, which is the one case worth
+/// retrying. A walk that completes and finds nothing is `Ok(None)` — an answer.
+#[cfg(target_os = "linux")]
+async fn look_from(bus: &Connection, x: i32, y: i32) -> Result<Option<Showing>, ()> {
+    let root: Node = (
+        "org.a11y.atspi.Registry".to_string(),
+        OwnedObjectPath::try_from("/org/a11y/atspi/accessible/root").map_err(|_| ())?,
+    );
+    for app in children(bus, &root).await.map_err(|_| ())? {
+        // One application refusing to answer is that application's business, not a
+        // broken bus — it is skipped, and the rest are still asked.
+        for window in children(bus, &app).await.unwrap_or_default() {
+            if !contains(bus, &window, x, y).await {
+                continue;
+            }
+            let url = document_url(bus, &window).await;
+            return Ok(Some(Showing { url }));
+        }
+    }
+    Ok(None)
 }
 
 /// How far into a window to look for the thing that knows its own address.
@@ -118,6 +137,41 @@ async fn document_url(bus: &Connection, window: &Node) -> Option<String> {
         }
     }
     None
+}
+
+/// The accessibility connection, kept rather than rebuilt.
+///
+/// Every reading used to open two connections — the session bus, to be told the a11y
+/// bus's address, then the a11y bus itself — and drop them both. That is two handshakes
+/// for a question asked once per window, in front of somebody who is marking something.
+///
+/// Safe to hold by this module's own measurement, recorded in the header above: keeping
+/// a connection open does not wake applications that are not exposing themselves. It
+/// changes what the reading costs, not what it can see.
+#[cfg(target_os = "linux")]
+static A11Y: tokio::sync::Mutex<Option<Connection>> = tokio::sync::Mutex::const_new(None);
+
+/// The connection, opening one if there is not one already.
+///
+/// A dropped connection is ordinary — the accessibility bus goes away with the session's
+/// helper and comes back — so a dead one is replaced rather than being an error to
+/// report. Liveness is proven by asking it something, in `showing_at`, rather than by a
+/// separate question that would be one more round trip and could still race.
+#[cfg(target_os = "linux")]
+async fn kept_bus() -> Result<Connection, String> {
+    let mut held = A11Y.lock().await;
+    if let Some(bus) = held.as_ref() {
+        return Ok(bus.clone());
+    }
+    let fresh = accessibility_bus().await?;
+    *held = Some(fresh.clone());
+    Ok(fresh)
+}
+
+/// Drop the kept connection, so the next reading opens a new one.
+#[cfg(target_os = "linux")]
+async fn forget_the_bus() {
+    *A11Y.lock().await = None;
 }
 
 #[cfg(target_os = "linux")]

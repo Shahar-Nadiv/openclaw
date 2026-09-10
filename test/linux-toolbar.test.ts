@@ -237,6 +237,8 @@ type Front = {
   exe?: string;
   url?: string;
   folder?: string;
+  /** The document the window was opened with, read off its command line. */
+  opened?: string;
   at?: { x: number; y: number; width: number; height: number } | null;
 };
 type Place = { file?: string; project?: string; page?: string; path?: string };
@@ -1529,6 +1531,71 @@ describe("the address that travels with a mark", () => {
     const said = whereSaid(code).join("\n");
     expect(said).toContain("file toolbar-rail.js in colai (read from the title)");
     expect(said).not.toContain("/home/someone/Desktop/colai (read from the title)");
+  });
+
+  test("the document a window was opened with leads everything else", () => {
+    /*
+     * The strongest thing colai can know: an exact path, where the title gives a
+     * basename and the directory gives a folder. Measured on a real desktop — KiCad's
+     * window names its `.kicad_pro` on its command line while its title says only
+     * `quad-stepper-f7`. That is the difference between an agent opening a file and an
+     * agent going to look for one, which is several model round trips.
+     *
+     * Above the window line, because everything below it is a name or a guess.
+     */
+    const kicad: Front = {
+      app: "kicad",
+      id: "0x3",
+      title: "quad-stepper-f7 — KiCad 10.0",
+      cwd: "/home/someone/Documents/kicad/quad-stepper-f7",
+      opened: "/home/someone/Documents/kicad/quad-stepper-f7/quad-stepper-f7.kicad_pro",
+      at: { x: 0, y: 0, width: 1920, height: 1080 },
+    };
+    const said = whereSaid(kicad);
+    const whole = said.join("\n");
+    expect(whole).toContain(
+      "document /home/someone/Documents/kicad/quad-stepper-f7/quad-stepper-f7.kicad_pro",
+    );
+    expect(
+      said.findIndex((line) => line.includes("document ")),
+      "the exact path comes before the window it was read from",
+    ).toBeLessThan(said.findIndex((line) => line.includes("window ")));
+  });
+
+  test("a window that names no place at all says so", () => {
+    /*
+     * An agent told the path is unknown goes and finds it. An agent told nothing assumes
+     * there was never a path to find, and answers about the picture alone. The page with
+     * no URL was already said out loud for this reason; a window with no path is the
+     * same sentence about a different fact.
+     */
+    const bare: Front = {
+      app: "some-game",
+      id: "0x9",
+      title: "",
+      at: { x: 0, y: 0, width: 1920, height: 1080 },
+    };
+    expect(whereSaid(bare).join("\n")).toContain("the path was not available");
+
+    // And it is not said when something did name a place — one of these facts is enough.
+    expect(whereSaid(code).join("\n")).not.toContain("the path was not available");
+    expect(whereSaid(browser).join("\n")).not.toContain("the path was not available");
+  });
+
+  test("VS Code writes its title with plain hyphens, and that has to match", () => {
+    /*
+     * The pattern accepted an em dash only, on the reasoning that " - " is too common to
+     * match safely. But the safety is the anchor, not the separator: it only matches a
+     * title ending in the editor's own name. Measured on a real desktop, VS Code writes
+     * "Colai Work Panel.html - colai - Visual Studio Code" — so the em-dash-only shape
+     * matched nothing, and the file and project were never read at all.
+     */
+    const hyphens: Front = { ...code, title: "Colai Work Panel.html - colai - Visual Studio Code" };
+    expect(whereSaid(hyphens).join("\n")).toContain(
+      "file Colai Work Panel.html in colai (read from the title)",
+    );
+    // The em dash it always handled still works.
+    expect(whereSaid(code).join("\n")).toContain("file toolbar-rail.js in colai");
   });
 
   test("a real URL replaces the page title rather than sitting beside it", () => {

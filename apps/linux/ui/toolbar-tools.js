@@ -377,11 +377,17 @@ function placeOf(front) {
   const both = `${app} ${exe}`;
 
   // An editor: "file.ts — folder - Visual Studio Code", with a dot for unsaved work.
-  // The em dash is what makes this shape safe to match — a page title containing " - "
-  // is common and " — " between two path-ish words is not.
-  const code = /^[●•*\s]*(.+?)\s+[—–]\s+(.+?)\s+-\s+(?:Visual Studio Code|VSCodium|Code - OSS)$/.exec(
-    title,
-  );
+  //
+  // Either dash between the file and the folder. It was em dash only, on the reasoning
+  // that a plain " - " is too common to match safely — but the safety is not in the
+  // separator, it is in the anchor: this only matches a title that *ends* in the
+  // editor's own name. Measured on this desktop, VS Code writes "Colai Work Panel.html -
+  // colai - Visual Studio Code" with plain hyphens, so the em-dash-only shape silently
+  // matched nothing and the file and project were never read at all.
+  const code =
+    /^[●•*\s]*(.+?)\s+[—–-]\s+(.+?)\s+-\s+(?:Visual Studio Code|VSCodium|Code - OSS)$/.exec(
+      title,
+    );
   if (code) return { file: code[1].trim(), project: code[2].trim() };
 
   // Sublime and friends: "file — folder", and nothing else on the line.
@@ -424,6 +430,10 @@ function whereSaid(where) {
   if (where.cwd) head.push(`— ${where.cwd}`);
   said.push(head.join(" "));
   if (where.url) said.push(`  ${where.url}`);
+  // The exact document, read off the window's own command line. First, because it is the
+  // strongest thing known here and the one an agent can act on without looking anything
+  // up — everything below it is a name, a folder, or a guess from a title.
+  if (where.opened) said.push(`  document ${where.opened}`);
   const window = [];
   if (where.at) window.push(`window ${where.at.width}×${where.at.height}`);
   if (where.title) window.push(`"${where.title}"`);
@@ -433,6 +443,12 @@ function whereSaid(where) {
     said.push(`  file ${of} (read from the title)`);
   }
   if (place.path) said.push(`  path ${place.path} (read from the title)`);
+  // Nothing here names a place on disk. Said out loud, for the same reason a page with
+  // no URL is: an agent told the path is unknown goes and finds it, where one told
+  // nothing assumes there was never a path to find and answers about the picture alone.
+  if (!where.opened && !where.cwd && !place.file && !place.path && !where.url) {
+    said.push("  the path was not available");
+  }
   // A page with no address. Said rather than left out: an agent given a page title and
   // no URL knows it has to find the page, where one given nothing assumes there was
   // never a page to find. Measured on this desktop — holding an accessibility

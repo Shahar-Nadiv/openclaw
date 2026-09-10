@@ -70,7 +70,17 @@ pub(crate) struct Front {
     /// machine: a window whose `WM_CLASS` was `steam_app_2642680` — a number, useless —
     /// sat in a directory that named the application exactly. For an editor or a
     /// terminal it names the repository somebody is asking about.
+    ///
+    /// Not always the window's own process, though. An Electron editor launched from the
+    /// desktop leaves its window in the home directory and does its work in children;
+    /// `where_the_work_is` asks them when the window says nothing. Empty rather than
+    /// misleading — a directory that names nothing is not sent at all.
     pub cwd: Option<String>,
+    /// The document this window was opened with, if it was opened with one.
+    ///
+    /// The strongest thing colai can know about a window and the one an agent most needs:
+    /// an exact path, where the title gives a basename and the directory gives a folder.
+    pub opened: Option<String>,
 }
 
 /// The edges of the overlay the desktop's own chrome is using, in physical pixels.
@@ -419,7 +429,8 @@ fn frontmost_x11() -> Option<Front> {
         at: window_rect(id),
         pid,
         exe: pid.and_then(named_link).map(|path| exe_name(&path)),
-        cwd: pid.and_then(working_directory),
+        cwd: pid.and_then(where_the_work_is),
+        opened: pid.and_then(opened_with),
     };
     remember_front(&front);
     Some(front)
@@ -480,6 +491,122 @@ fn working_directory(pid: u32) -> Option<String> {
         // A process whose cwd is inside /proc is a helper looking at another process,
         // which is true of every browser content process and useful to nobody.
         .filter(|path| !path.starts_with("/proc/"))
+}
+
+/// Whether a directory says anything about what somebody is working on.
+///
+/// A window launched from the desktop inherits the session's own directory, so half the
+/// windows on a machine report the home directory and mean nothing by it. Printing that
+/// as the window's address is worse than printing nothing: it reads as an answer, and
+/// an agent sent to `/home/someone` looking for a project finds a home directory.
+///
+/// System prefixes go the same way. A program living in `/usr` or `/snap` is telling us
+/// where it was installed, not where the work is.
+fn tells_us_nothing(path: &str) -> bool {
+    if path == "/" || path.starts_with("/proc/") {
+        return true;
+    }
+    if std::env::var("HOME").is_ok_and(|home| !home.is_empty() && path == home) {
+        return true;
+    }
+    ["/usr/", "/snap/", "/opt/", "/etc/", "/var/"]
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+}
+
+/// The directory a window's work is actually in.
+///
+/// The window's own process is asked first and is usually right. Electron editors are
+/// the exception that matters: measured on this desktop, VS Code's window process sits
+/// in the home directory while three of its children sit in the open workspace. So when
+/// the window itself says nothing useful, its descendants are asked.
+///
+/// The commonest answer wins rather than the first. One child may be a terminal somebody
+/// opened somewhere unrelated; the workspace is the directory several of them share.
+fn where_the_work_is(pid: u32) -> Option<String> {
+    if let Some(own) = working_directory(pid).filter(|path| !tells_us_nothing(path)) {
+        return Some(own);
+    }
+    let family = descendants(pid);
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for child in family {
+        if let Some(path) = working_directory(child).filter(|path| !tells_us_nothing(path)) {
+            *seen.entry(path).or_default() += 1;
+        }
+    }
+    seen.into_iter()
+        // Ties broken by the longer path, so a workspace inside a checkout beats the
+        // checkout — deterministic, rather than whichever the map happened to yield.
+        .max_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.len().cmp(&b.0.len())))
+        .map(|(path, _)| path)
+}
+
+/// How many processes are walked looking for that directory.
+///
+/// A browser is hundreds of processes and this runs while somebody is marking something.
+/// Generous enough for an editor's whole tree, small enough that the walk is never the
+/// reason marking felt slow.
+const FAMILY_MOST: usize = 400;
+
+/// Every process descended from this one, breadth-first and bounded.
+fn descendants(pid: u32) -> Vec<u32> {
+    let mut parents: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    for entry in entries.flatten() {
+        let Some(child) = entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Ok(status) = std::fs::read_to_string(format!("/proc/{child}/status")) else {
+            continue;
+        };
+        if let Some(parent) = status
+            .lines()
+            .find_map(|line| line.strip_prefix("PPid:"))
+            .and_then(|said| said.trim().parse::<u32>().ok())
+        {
+            parents.entry(parent).or_default().push(child);
+        }
+    }
+    let mut found = Vec::new();
+    let mut looking = vec![pid];
+    while let Some(one) = looking.pop() {
+        if found.len() >= FAMILY_MOST {
+            break;
+        }
+        for child in parents.get(&one).cloned().unwrap_or_default() {
+            found.push(child);
+            looking.push(child);
+        }
+    }
+    found
+}
+
+/// The document a window was opened with, when it was opened with one.
+///
+/// `/proc/<pid>/cmdline` carries the arguments a program was started with, and a
+/// document-shaped program is usually started with its document: measured on this
+/// desktop, KiCad's window names `…/quad-stepper-f7.kicad_pro` exactly, where its title
+/// says only `quad-stepper-f7`. That is the difference between an agent opening a file
+/// and an agent looking for one.
+///
+/// Only arguments that exist on disk right now. A flag, a socket name or a stale path is
+/// not an address, and offering one as the answer is the confident kind of wrong.
+fn opened_with(pid: u32) -> Option<String> {
+    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    raw.split(|byte| *byte == 0)
+        .skip(1)
+        .filter_map(|part| std::str::from_utf8(part).ok())
+        .map(str::trim)
+        .filter(|part| !part.is_empty() && !part.starts_with('-'))
+        // And not the program's own files. A GNOME extension is started with the path of
+        // its own script, which exists, is on the command line, and is nobody's document
+        // — it is where the thing was installed. The same test the directory gets.
+        .filter(|part| !tells_us_nothing(part))
+        .find(|part| std::path::Path::new(part).exists())
+        .map(str::to_string)
 }
 
 fn named_link(pid: u32) -> Option<std::path::PathBuf> {
@@ -913,6 +1040,85 @@ mod where_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_directory_that_names_nothing_is_not_an_address() {
+        /*
+         * A window launched from the desktop inherits the session's directory, so half
+         * the windows on a machine report the home directory and mean nothing by it.
+         * Sending that as the window's address is worse than sending nothing: it reads
+         * as an answer, and an agent sent to a home directory looking for a project
+         * finds a home directory.
+         */
+        assert!(tells_us_nothing("/"));
+        assert!(tells_us_nothing("/usr/share/gnome-shell/extensions"));
+        assert!(tells_us_nothing("/snap/code/261"));
+        assert!(tells_us_nothing("/proc/1234/fd"));
+
+        // A real place of work is not refused.
+        assert!(!tells_us_nothing("/home/someone/Documents/kicad/quad-stepper-f7"));
+        assert!(!tells_us_nothing("/srv/build"));
+
+        // The home directory itself, whatever it is called on this machine.
+        if let Ok(home) = std::env::var("HOME") {
+            if !home.is_empty() {
+                assert!(tells_us_nothing(&home));
+                // But a project inside it is exactly the case this must not refuse.
+                assert!(!tells_us_nothing(&format!("{home}/Desktop/colai")));
+            }
+        }
+    }
+
+    #[test]
+    fn the_document_a_window_was_opened_with_is_read_off_its_command_line() {
+        /*
+         * Measured on this desktop: KiCad's window names its `.kicad_pro` exactly on the
+         * command line, where the window title says only `quad-stepper-f7`. That is the
+         * difference between an agent opening a file and an agent looking for one.
+         *
+         * Read against this test process, which is the one process whose command line is
+         * certain to exist while the test runs.
+         */
+        let me = std::process::id();
+        let raw = std::fs::read(format!("/proc/{me}/cmdline")).unwrap_or_default();
+        let argv: Vec<String> = raw
+            .split(|byte| *byte == 0)
+            .filter_map(|part| std::str::from_utf8(part).ok())
+            .map(str::to_string)
+            .filter(|part| !part.is_empty())
+            .collect();
+
+        match opened_with(me) {
+            // Whatever it found must be a real path that was genuinely on the line, and
+            // never the program itself — the first argument is skipped because a binary
+            // is not the document it was opened with.
+            Some(found) => {
+                assert!(std::path::Path::new(&found).exists(), "{found} must exist");
+                assert!(!tells_us_nothing(&found), "a program's own files are not a document");
+                assert!(argv.iter().skip(1).any(|arg| *arg == found));
+                assert!(!found.starts_with('-'), "a flag is not a document");
+            }
+            // A test binary run with no path arguments is the ordinary case and is not a
+            // failure: saying nothing is the honest answer.
+            None => assert!(
+                !argv.iter().skip(1).any(|arg| {
+                    !arg.starts_with('-') && std::path::Path::new(arg).exists()
+                }),
+                "there was a path on the line and it was missed",
+            ),
+        }
+    }
+
+    #[test]
+    fn a_process_is_not_its_own_descendant() {
+        // The walk feeds `where_the_work_is`, which asks a window's children where the
+        // work is when the window itself will not say. A tree that contained its own
+        // root would answer with the very cwd that was already rejected.
+        let me = std::process::id();
+        let family = descendants(me);
+        assert!(!family.contains(&me));
+        assert!(family.len() <= FAMILY_MOST);
+    }
 
     fn screen(x: i32, y: i32, width: u32, height: u32) -> Span {
         Span {
