@@ -4354,3 +4354,59 @@ describe("a press that went nowhere", () => {
     expect(page, "and the old per-tool attribute is gone").not.toContain("dataset.design");
   });
 });
+
+describe("clicking away closes what is open", () => {
+  const page = readFileSync(new URL("../apps/linux/ui/toolbar.js", import.meta.url), "utf8");
+  const mark = readFileSync(new URL("../apps/linux/ui/toolbar-mark.js", import.meta.url), "utf8");
+
+  test("another window coming forward is what 'outside' means here", () => {
+    /*
+     * A press on somebody's editor never reaches this page. The overlay only catches
+     * clicks where it drew something — which is the whole reason the desktop underneath
+     * stays usable — so there is no outside click to listen for.
+     *
+     * What there is: the window that press landed on comes to the front. Same news, by
+     * another route, and it costs nothing because the toolbar already watches for it.
+     */
+    const listening = page.slice(page.indexOf('listen("colai:front"'));
+    expect(listening.slice(0, 900)).toContain("shutWhatIsOpen()");
+    expect(listening.slice(0, 900), "only when the front is somebody else's").toMatch(
+      /state\.front\.ours === false/,
+    );
+
+    const shutting = page.slice(page.indexOf("function shutWhatIsOpen("));
+    expect(shutting.slice(0, 700), "the Work panel").toContain("state.work.open = false");
+    expect(shutting.slice(0, 700), "any open menu").toContain("state.open = null");
+    expect(shutting.slice(0, 700), "and the library").toContain("state.library = null");
+  });
+
+  test("taking a picture is not somebody clicking away", () => {
+    /*
+     * The overlay makes itself invisible to photograph what is behind it, which makes
+     * somebody else's window the front one for a moment. Read as "they clicked away",
+     * that would close the panel on every single mark — so the capture says so while it
+     * happens, and the rule stands down.
+     */
+    const shutting = page.slice(page.indexOf("function shutWhatIsOpen("));
+    expect(shutting.slice(0, 200)).toContain("if (state.capturing) return;");
+    // And the flag is actually raised and lowered around the picture, or the guard is
+    // guarding nothing.
+    expect(mark).toContain("state.capturing = true");
+    const after = mark.slice(mark.indexOf("state.capturing = true"));
+    expect(after, "lowered again whatever happened").toContain("state.capturing = false");
+    expect(
+      after.indexOf("state.capturing = false") <
+        after.indexOf('document.body.style.visibility = ""'),
+      "lowered with the same `finally` that gives the page back",
+    ).toBe(true);
+  });
+
+  test("a press on the glass closes it too, and keeps what was typed", () => {
+    // The glass is anywhere that is not the panel, so pressing it is pressing outside.
+    // It closes a window rather than throwing work away: the composer's words live in
+    // state and are written back the next time it opens.
+    const pressing = mark.slice(mark.indexOf("function startGesture("));
+    expect(pressing.slice(0, 1400)).toContain("state.work.open = false");
+    expect(pressing, "nothing here clears what was typed").not.toContain('state.text = ""');
+  });
+});

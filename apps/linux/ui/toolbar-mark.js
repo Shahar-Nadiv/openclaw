@@ -52,6 +52,14 @@ function startGesture(event) {
     closeLibrary();
     return;
   }
+  // And the Work panel, for the same reason: a press on the glass is a press somewhere
+  // that is not the panel. It closes rather than swallowing the press — what was being
+  // marked is still being marked, and what was typed is still in the composer when it
+  // opens again.
+  if (state.work.open) {
+    state.work.open = false;
+    render();
+  }
   // A press off the popup. The catcher covers the whole desk and the popup is stacked
   // above it, so this only ever fires outside.
   //
@@ -274,6 +282,9 @@ async function photograph(mark) {
     };
   }
   document.body.style.visibility = "hidden";
+  // Said out loud, because going invisible makes somebody else's window the front one
+  // and the rule that closes panels on that would otherwise fire on every mark.
+  state.capturing = true;
   try {
     await new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn)));
     await new Promise((waited) => setTimeout(waited, 40));
@@ -297,6 +308,7 @@ async function photograph(mark) {
     mark.trouble = error && error.message ? error.message : String(error);
   } finally {
     stopRecording();
+    state.capturing = false;
     document.body.style.visibility = "";
   }
 }

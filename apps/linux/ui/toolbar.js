@@ -144,6 +144,12 @@ const state = {
   // this toolbar is, and a first look at it should be the whole thing. Remembered with
   // the dock, because it is the same kind of fact: how somebody wants this to sit.
   tucked: false,
+  // Whether a picture is being taken right now.
+  //
+  // The overlay makes itself invisible to photograph what is behind it, which briefly
+  // makes somebody else's window the front one. Without knowing that, the rule that
+  // closes panels when attention moves away would fire on every single mark.
+  capturing: false,
   // Whether the whole rail is put away: the grip and the claw, and nothing else.
   //
   // A second, deeper fold than `tucked`. That one hides four tools somebody rarely
@@ -175,6 +181,36 @@ const state = {
 };
 
 /* ── drawing the whole thing ─────────────────────────────────────────────── */
+
+/**
+ * Close whatever is hanging off the rail, because attention went elsewhere.
+ *
+ * A panel that stays open over a desktop somebody has moved on from is furniture. What
+ * is *in* it is kept — the words in the composer live in state and are written back the
+ * next time it opens — so this closes a window rather than throwing work away.
+ *
+ * Never while a picture is being taken. The overlay hides itself to photograph what is
+ * behind it, which makes the front window somebody else's for a moment; treating that as
+ * "they clicked away" would close the panel every time anybody marked anything.
+ */
+function shutWhatIsOpen() {
+  if (state.capturing) return;
+  let shut = false;
+  if (state.open !== null) {
+    state.open = null;
+    shut = true;
+  }
+  if (state.work.open) {
+    state.work.open = false;
+    shut = true;
+  }
+  if (state.library !== null) {
+    state.library = null;
+    shut = true;
+  }
+  // One redraw for all three, rather than one per thing that happened to be open.
+  if (shut) render();
+}
 
 function render() {
   const vertical = isVertical(state.dock);
@@ -686,7 +722,17 @@ async function start() {
     .catch(() => {});
 
   void listen("colai:front", (event) => {
+    const was = state.front;
     state.front = (event && event.payload) || null;
+    // Somebody clicked another window, which on a desktop is what "outside" means.
+    //
+    // A press on an editor or on bare desktop never reaches this page: the overlay only
+    // catches clicks where it drew something, which is the whole reason the desktop is
+    // still usable underneath it. But the window that press landed on comes to the
+    // front, and that is the same news arriving by another route.
+    const left = state.front && state.front.ours === false;
+    const cameFromUs = !was || was.ours !== false;
+    if (left && cameFromUs) shutWhatIsOpen();
     redrawMarksSoon();
   }).catch(() => {});
 
