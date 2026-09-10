@@ -16,8 +16,8 @@
   "files": [
     "index.ts",
     "dist/",
+    "bin/",
     "openclaw.plugin.json",
-    "scripts/",
     "toolbar/ui/",
     "toolbar/src-tauri/src/",
     "toolbar/src-tauri/permissions/",
@@ -25,13 +25,15 @@
     "toolbar/src-tauri/Cargo.toml",
     "toolbar/src-tauri/Cargo.lock",
     "toolbar/src-tauri/build.rs",
-    "toolbar/src-tauri/tauri.conf.json"
+    "toolbar/src-tauri/tauri.conf.json",
+    "scripts/"
   ],
   "dependencies": {
     "zod": "4.4.3"
   },
   "scripts": {
-    "postinstall": "node scripts/build-toolbar.mjs"
+    "build": "node scripts/build-toolbar.mjs",
+    "prepack": "node scripts/build-toolbar.mjs"
   },
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*"

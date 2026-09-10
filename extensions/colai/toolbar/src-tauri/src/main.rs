@@ -9,8 +9,10 @@
 // `gateway_device_identity` came across from the desktop app, trimmed to what the
 // toolbar calls. See the header on `gateway_ws.rs`.
 //
-// What it does not need is most of that app — the tray, Quick Chat, the updater, the
-// installer, discovery, sleep handling. Fourteen thousand lines the toolbar never called.
+// What it does not need is most of that app — Quick Chat, the updater, the installer,
+// discovery, sleep handling. Fourteen thousand lines the toolbar never called. The tray
+// it does need, because the toolbar can be put away from its own keyboard and there is
+// no other window left to bring it back.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -28,6 +30,7 @@ mod colai_send;
 mod gateway;
 mod gateway_device_identity;
 mod gateway_ws;
+mod tray;
 
 use tauri::Manager;
 
@@ -44,6 +47,16 @@ fn main() {
             app.manage(colai::ShapeState::default());
             app.manage(colai::ControlUi::default());
             app.manage(colai_capture::MarkShots::default());
+
+            // The tray, before the overlay, so the first summon has something to tick.
+            // Not fatal: a desktop with no tray is still a desktop with a toolbar on it,
+            // and the only thing lost is the way back after Escape.
+            match tray::build(app) {
+                Ok(tray) => {
+                    app.manage(tray);
+                }
+                Err(trouble) => eprintln!("[colai] no tray: {trouble}"),
+            }
 
             // The overlay, straight away: this program is the toolbar, so there is
             // nothing to wait for and nowhere else to be.

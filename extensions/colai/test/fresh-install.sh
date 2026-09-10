@@ -11,7 +11,8 @@
 # link cannot:
 #
 #   1. packaging      — only what `files` ships is there
-#   2. the toolchain  — no Rust, no headers, or a cold cargo cache (timed)
+#   2. the toolbar    — it ships already built, because OpenClaw installs plugins with
+#                       `--ignore-scripts` and nothing can compile on the far machine
 #   3. protocol drift — a released `openclaw`, not the fork this was cut from
 #   4. uninstall      — nothing left behind
 #
@@ -36,19 +37,25 @@ for arg in "$@"; do
 done
 
 # name:WITH_RUST:WITH_HEADERS:what it proves
+#
+# `bare` is the one that matters now — no Rust, no headers, nothing but a released
+# OpenClaw, which is what anybody installing this actually has. The other two are kept
+# because a toolbar that only works where a toolchain happens to be would pass `bare`
+# by accident.
 VARIANTS=(
-  "no-rust:0:1:says the Rust toolchain is missing, and installs anyway"
-  "no-headers:1:0:says the GTK and WebKit headers are missing, and installs anyway"
-  "cold:1:1:builds from an empty cargo cache — this is the number that matters"
+  "bare:0:0:a machine with no Rust and no headers still gets a toolbar"
+  "no-headers:1:0:a Rust toolchain it does not need changes nothing"
+  "full:1:1:everything present, and still the shipped binary"
 )
 
 if [ ${#wanted[@]} -eq 0 ]; then
-  wanted=(no-rust no-headers cold)
+  wanted=(bare no-headers full)
 fi
 
-# An installed plugin loads compiled JavaScript, not TypeScript — OpenClaw's install
-# validator says so plainly, and only a source checkout gets the TS fallback. So the
-# runtime output is built first, into `dist/`, which `files` then ships.
+# Two things are built before anything is packed, because neither can happen on the
+# installing machine: the plugin's runtime JavaScript, since an installed plugin loads
+# compiled JS and only a source checkout gets the TypeScript fallback; and the toolbar
+# itself, since OpenClaw passes `--ignore-scripts` to every managed npm install.
 repo="$(cd "$plugin/../.." && pwd)"
 echo "building the plugin runtime"
 (cd "$repo" && node --import ./scripts/tsx.mjs scripts/check-plugin-npm-runtime-builds.mts \
@@ -90,7 +97,6 @@ for variant in "${wanted[@]}"; do
   fi
 
   began=$(date +%s)
-  # No cargo cache mount, deliberately — a cold build is the thing being measured.
   if docker run --rm "${screen[@]+"${screen[@]}"}" \
       -v "$tarball:/work/$(basename "$tarball"):ro" \
       "$image" bash -euo pipefail -c "
@@ -99,15 +105,23 @@ for variant in "${wanted[@]}"; do
         openclaw plugins install 'npm-pack:/work/$(basename "$tarball")' --force --accept-capabilities
         echo
         echo '--- what doctor says'
-        openclaw doctor --severity info 2>&1 | grep -i colai || echo '(colai said nothing about itself)'
+        openclaw doctor 2>&1 | grep -i colai || echo '(colai said nothing about itself)'
         echo
         echo '--- is the toolbar there'
         binary=\$(find ~/.openclaw -type f -name colai-toolbar 2>/dev/null | head -1)
-        if [ -n \"\$binary\" ]; then
-          echo \"built: \$binary (\$(du -h \"\$binary\" | cut -f1))\"
-        else
-          echo 'NOT BUILT — no colai-toolbar anywhere under ~/.openclaw'
+        if [ -z \"\$binary\" ]; then
+          echo 'MISSING — no colai-toolbar anywhere under ~/.openclaw'
+          exit 1
         fi
+        echo \"there: \$binary (\$(du -h \"\$binary\" | cut -f1))\"
+        # Shipped from another machine, so whether it can actually run here is a real
+        # question. It needs a screen it does not have, and says so rather than crashing.
+        \"\$binary\" --help >/dev/null 2>&1 || true
+        if ! head -c4 \"\$binary\" | grep -q ELF; then
+          echo 'NOT AN EXECUTABLE'
+          exit 1
+        fi
+        echo 'and it is an executable this machine could run'
         echo
         echo '--- uninstall'
         openclaw plugins uninstall colai --force

@@ -741,14 +741,24 @@ pub(crate) fn colai_summon(app: AppHandle) -> Result<(), String> {
 
 /// Tell the tray whether the toolbar is on screen.
 ///
-/// There is no tray here yet. It ticked a menu item in the OpenClaw desktop app this was
-/// lifted out of; standing alone, the toolbar is the whole program and the only thing
-/// that could say whether it is showing is the toolbar itself.
+/// Showing and hiding are the only two things that move it, and both report here —
+/// Escape reaches the second without the menu being involved, so a tray that learned
+/// only from its own clicks would be wrong the first time anybody pressed it.
+fn tray_says_toolbar(app: &AppHandle, showing: bool) {
+    if let Some(tray) = app.try_state::<crate::tray::Tray>() {
+        tray.says_toolbar(showing);
+    }
+}
+
+/// Whether the toolbar is on screen right now.
 ///
-/// Kept as the one place that answers the question, so whatever says it next — a tray of
-/// its own, a plugin asking — has somewhere to be wired in rather than two callers to
-/// find.
-fn tray_says_toolbar(_app: &AppHandle, _showing: bool) {}
+/// Asked of the window, which is the only thing that knows. Anything else — a flag beside
+/// it, the tray's own tick — is a second answer to a question with one.
+pub(crate) fn toolbar_is_showing(app: &AppHandle) -> bool {
+    app.get_webview_window(OVERLAY_LABEL)
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or(false)
+}
 
 /// Give the screen back.
 #[tauri::command]

@@ -62,20 +62,23 @@ const ColaiConfigSchema = z.strictObject({
 const configSchema = buildPluginConfigSchema(ColaiConfigSchema);
 
 /**
- * Where the built toolbar ended up.
+ * Where the toolbar is.
  *
- * Release first, because that is what the install builds. The debug path is here for
- * working on the toolbar itself, where `cargo build` has already put one there and
- * rebuilding it as release would double the wait for no gain.
+ * `bin/` is the one that matters: OpenClaw installs plugins with `--ignore-scripts`,
+ * always and with no way to opt in, so nothing a package says can make it compile on
+ * the installing machine. The toolbar therefore travels already built, staged into
+ * `bin/` before the package is packed.
+ *
+ * The two `target/` paths are for working on the toolbar itself, where `cargo build`
+ * has just put one there and staging it first would only add a copy.
  */
 function toolbarBinary(): string | null {
-  for (const profile of ["release", "debug"]) {
-    const path = join(here, "toolbar/src-tauri/target", profile, "colai-toolbar");
-    if (existsSync(path)) {
-      return path;
-    }
-  }
-  return null;
+  const paths = [
+    join(here, "bin/colai-toolbar"),
+    join(here, "toolbar/src-tauri/target/release/colai-toolbar"),
+    join(here, "toolbar/src-tauri/target/debug/colai-toolbar"),
+  ];
+  return paths.find((path) => existsSync(path)) ?? null;
 }
 
 const BUILD_CHECK_ID = "colai/toolbar-built";

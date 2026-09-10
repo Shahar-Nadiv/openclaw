@@ -1,6 +1,6 @@
 // Exercises the pure decisions extracted from the Linux toolbar webview script.
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import vm from "node:vm";
 import { describe, expect, it as test } from "vitest";
@@ -4592,10 +4592,42 @@ describe("what the plugin ships", () => {
     expect(manifest.openclaw?.extensions).toEqual(["./index.ts"]);
   });
 
-  test("the script the install runs travels with it", () => {
-    expect(manifest.scripts?.postinstall).toBe("node scripts/build-toolbar.mjs");
-    expect(shipped("scripts/build-toolbar.mjs")).toBe(true);
+  test("the toolbar travels already built", () => {
+    /*
+     * It cannot be built on the installing machine, and not for want of trying: OpenClaw
+     * passes `--ignore-scripts` to every managed npm install, always, with no flag and no
+     * config to opt in. A `postinstall` here would simply never run — measured in a
+     * container, where three variants installed identically in six seconds and none of
+     * them compiled anything.
+     *
+     * So the binary is staged into `bin/` before the package is packed, and that is what
+     * ships. The day the host stops forcing `--ignore-scripts`, this test says so.
+     */
+    const hostInstallArgs = readFileSync(
+      new URL("../src/infra/safe-package-install.ts", import.meta.url),
+      "utf8",
+    );
+    const builder = hostInstallArgs.slice(hostInstallArgs.indexOf("createSafeNpmInstallArgs"));
+    expect(
+      builder.slice(0, builder.indexOf("\n}")),
+      "the host no longer forces --ignore-scripts; building on install is possible again",
+    ).toContain('"--ignore-scripts"');
+
+    expect(manifest.scripts?.postinstall, "a postinstall here can never run").toBeUndefined();
+    expect(manifest.scripts?.prepack).toBe("node scripts/build-toolbar.mjs");
+    expect(shipped("bin/")).toBe(true);
     expect(existsSync(new URL("scripts/build-toolbar.mjs", dir))).toBe(true);
+  });
+
+  test("it looks in the shipped bin before any build directory", () => {
+    // `target/` exists only where somebody is working on the toolbar. Everywhere else
+    // `bin/` is the whole answer, so it is the one that is asked first.
+    const entry = readFileSync(new URL("index.ts", dir), "utf8");
+    const looking = entry.slice(entry.indexOf("function toolbarBinary"));
+    const inBin = looking.indexOf("bin/colai-toolbar");
+    const inTarget = looking.indexOf("target/release");
+    expect(inBin).toBeGreaterThan(-1);
+    expect(inBin).toBeLessThan(inTarget);
   });
 
   test("what index.ts imports, the package declares", () => {
@@ -4610,24 +4642,6 @@ describe("what the plugin ships", () => {
     }
   });
 
-  test("installing inside a checkout compiles nothing", () => {
-    /*
-     * Measured, not assumed: `pnpm install` in this repo runs every workspace project's
-     * postinstall, and this one compiles Rust. Without the guard a routine dependency
-     * install costs everybody working on OpenClaw several minutes of cargo.
-     *
-     * Running the real script is the proof — the guard returns before cargo is reached,
-     * so this test is as cheap as the thing it is protecting.
-     */
-    const ran = spawnSync(process.execPath, [new URL("scripts/build-toolbar.mjs", dir).pathname], {
-      encoding: "utf8",
-    });
-    expect(ran.status).toBe(0);
-    expect(ran.stderr, "the build script must not compile from inside the source tree").toContain(
-      "cargo build",
-    );
-  });
-
   test("it looks for the binary cargo actually writes", () => {
     /*
      * Two files decide this name and neither can see the other: `[[bin]] name` in
@@ -4639,5 +4653,52 @@ describe("what the plugin ships", () => {
     expect(named?.[1]).toBeTruthy();
     const entry = readFileSync(new URL("index.ts", dir), "utf8");
     expect(entry).toContain(`"${named?.[1]}"`);
+  });
+});
+
+describe("the way back when the toolbar is put away", () => {
+  const tray = readFileSync(
+    new URL("../extensions/colai/toolbar/src-tauri/src/tray.rs", import.meta.url),
+    "utf8",
+  );
+  const overlay = readFileSync(
+    new URL("../extensions/colai/toolbar/src-tauri/src/colai.rs", import.meta.url),
+    "utf8",
+  );
+
+  test("the tray offers the toolbar, OpenClaw, and a way out", () => {
+    /*
+     * Standing alone the toolbar has no other window, and Escape puts it away. Without
+     * a tray, somebody who pressed Escape had nothing left on screen to press.
+     */
+    for (const label of ['"Toolbar"', '"Open OpenClaw"', '"Quit colai"']) {
+      expect(tray, `the tray menu must offer ${label}`).toContain(label);
+    }
+  });
+
+  test("the tick is told by both things that move the toolbar", () => {
+    // Escape reaches `colai_release` without the menu being involved, so a tray that
+    // learned only from its own clicks would be wrong the first time anybody pressed it.
+    const showing = overlay.slice(overlay.indexOf("pub(crate) fn colai_summon"));
+    expect(showing.slice(0, showing.indexOf("\n}"))).toContain("tray_says_toolbar(&app, true)");
+    const hiding = overlay.slice(overlay.indexOf("pub(crate) fn colai_release"));
+    expect(hiding.slice(0, hiding.indexOf("\n}"))).toContain("tray_says_toolbar(&app, false)");
+  });
+
+  test("pressing it asks the window, not its own tick", () => {
+    // The tick is what the press is about to correct. Reading it would make the two
+    // agree with each other while disagreeing with the screen.
+    const pressed = tray.slice(tray.indexOf("fn pressed"));
+    expect(pressed).toContain("colai::toolbar_is_showing(app)");
+    expect(pressed, "the toggle must not decide from the menu item").not.toContain("is_checked");
+  });
+
+  test("no tray is not no toolbar", () => {
+    // A desktop without a tray still has a screen to draw on. Only the way back is lost.
+    const main = readFileSync(
+      new URL("../extensions/colai/toolbar/src-tauri/src/main.rs", import.meta.url),
+      "utf8",
+    );
+    expect(main).toContain('eprintln!("[colai] no tray: {trouble}")');
   });
 });
