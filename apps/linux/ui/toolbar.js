@@ -132,6 +132,13 @@ const state = {
   // this toolbar is, and a first look at it should be the whole thing. Remembered with
   // the dock, because it is the same kind of fact: how somebody wants this to sit.
   tucked: false,
+  // Whether the whole rail is put away: the grip and the claw, and nothing else.
+  //
+  // A second, deeper fold than `tucked`. That one hides four tools somebody rarely
+  // reaches for; this one is for when the toolbar should stop being furniture on a
+  // screen being worked on. The claw stays because it is the way back and because it
+  // already carries the mood — a rail that is away can still say something needs you.
+  away: false,
   // Whether the receiver was chosen rather than worked out. A guess may fill an empty
   // seat; it may never take one somebody has sat in.
   picked: false,
@@ -273,7 +280,21 @@ function render() {
   // disappears takes two hundred pixels of rail with it in one frame, and a toolbar
   // that changes length between two blinks reads as a glitch, not as a thing that
   // folded.
-  for (const tool of EXACT) buttons[tool].dataset.folded = String(state.tucked);
+  //
+  // Two reasons a key can be shut: the exact tools are tucked, or the whole rail is
+  // away. The same closing, because it is the same gesture at two depths — and reusing
+  // it means an away rail collapses with the animation this already got right rather
+  // than a second one that would have to agree with it.
+  for (const [id, button] of Object.entries(buttons)) {
+    if (id === "settings") continue;
+    button.dataset.folded = String(state.away || (EXACT.includes(id) && state.tucked));
+  }
+  el.wrap.dataset.away = String(state.away);
+  // What the handle says it will do next, and what a screen reader is told the rail is.
+  el.grip.setAttribute("aria-expanded", String(!state.away));
+  el.grip.title = state.away
+    ? "Drag toolbar · double click to bring it back"
+    : "Drag toolbar · double click to put it away";
   if (state.open === "automate") drawAutomation();
   el.flyRow.hidden = state.open !== "row";
   el.flyPoints.hidden = state.open !== "points";

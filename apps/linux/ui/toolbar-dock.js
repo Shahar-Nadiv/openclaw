@@ -20,6 +20,9 @@ function listenForDrag() {
     let grabY = event.clientY - box.top;
     let edge = state.dock;
     let last = { x: box.left, y: box.top };
+    // Where the hand went down, so a tap that went nowhere can be told from a drag.
+    const from = { x: event.clientX, y: event.clientY };
+    let travelled = 0;
 
     const move = (moved) => {
       const size = railBox();
@@ -45,6 +48,7 @@ function listenForDrag() {
         if (turned) turn(render);
         else render();
       }
+      travelled = Math.max(travelled, Math.hypot(hand.x - from.x, hand.y - from.y));
       last = { x, y };
       state.at = last;
       place();
@@ -65,11 +69,49 @@ function listenForDrag() {
       state.at = rest;
       place();
       remember();
+      if (travelled <= TAP_STILL) tapped();
     };
 
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   });
+}
+
+/**
+ * How far the hand may wander and still have been a tap.
+ *
+ * A few pixels, because a double click on a handle that is also a drag handle is a
+ * double click somebody made while holding a mouse steady, not perfectly still.
+ */
+const TAP_STILL = 4;
+/** How long after one tap a second one still belongs to it. */
+const TAP_AGAIN = 400;
+
+let lastTap = 0;
+
+/**
+ * Two taps on the grip put the rail away, and two more bring it back.
+ *
+ * Counted here rather than by listening for `dblclick`: the drag calls `preventDefault`
+ * on pointerdown, which stops some engines ever synthesising one — and doing it from the
+ * pointer events gets touch right for free, and cannot fire in the middle of a drag
+ * because a drag is not a tap.
+ */
+function tapped() {
+  const now = Date.now();
+  const again = now - lastTap < TAP_AGAIN;
+  lastTap = again ? 0 : now;
+  if (!again) return;
+  state.away = !state.away;
+  // Nothing hangs off a rail that is not there. The same tidy-up opening the Work panel
+  // already does for flyouts, in the other direction.
+  if (state.away) {
+    state.open = null;
+    state.work.open = false;
+  }
+  remember();
+  render();
+  followTheFold();
 }
 
 /* ── turning between flat and upright ────────────────────────────────────── */
@@ -177,6 +219,7 @@ function remember() {
         ...state.at,
         dock: state.dock,
         tucked: state.tucked,
+        away: state.away,
       }),
     );
   } catch {
@@ -196,6 +239,7 @@ function recall() {
       // Only an explicit `true` folds them. A toolbar remembered from before this
       // existed has no opinion, and open is what somebody who has not said should get.
       state.tucked = put.tucked === true;
+      state.away = put.away === true;
       return;
     }
   } catch {

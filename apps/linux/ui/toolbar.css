@@ -142,6 +142,8 @@ body {
   width: 22px;
   height: 34px;
   cursor: grab;
+  /* A little room from the claw when they are the only two things left. */
+  margin-right: 0;
   color: var(--muted);
   font-size: 13px;
   letter-spacing: -1px;
@@ -166,6 +168,44 @@ body {
   height: 22px;
   margin: 0 4px;
   background: rgb(255 255 255 / 12%);
+  transition:
+    width 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    height 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    margin 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 110ms ease-in;
+}
+/*
+ * Away: the grip and the claw, and nothing between them.
+ *
+ * The keys close themselves — they wear `data-folded`, the same fold the exact tools
+ * use, so this only has to deal with the lines that were separating them. A divider
+ * left standing between two things that are gone is a mark for nothing.
+ */
+.rail-wrap[data-away="true"] .divider {
+  width: 0;
+  height: 0;
+  margin: 0;
+  opacity: 0;
+}
+/*
+ * And then they leave the layout altogether.
+ *
+ * Collapsing a key to zero width is what makes the fold read as folding, but fifteen
+ * zero-width items in a pill two pixels wide is an overflow, and an overflowing flex row
+ * places its items where neither the pill nor the eye expects them. Once the animation
+ * has run there is nothing left to animate, so they stop being laid out at all and the
+ * pill is exactly the grip and the claw.
+ *
+ * Held until the fold has finished, the same way `.key[data-folded]` holds `visibility`,
+ * so nothing vanishes before it has closed.
+ */
+.rail-wrap[data-away="true"] .rail {
+  gap: 0;
+}
+.rail-wrap[data-away="true"] .key[data-folded],
+.rail-wrap[data-away="true"] .divider {
+  display: none;
+  transition: display 0s linear 220ms;
 }
 .rail-wrap[data-vertical="true"] .divider {
   width: 22px;

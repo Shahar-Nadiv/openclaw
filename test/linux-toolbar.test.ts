@@ -2836,6 +2836,80 @@ describe("the work panel belongs to the toolbar", () => {
     expect(render.split("drawWork();").length - 1, "one call, not two").toBe(1);
   });
 
+  test("the rail can be put away, leaving the grip and the claw", () => {
+    /*
+     * A second and deeper fold than `tucked`, which hides four rarely-reached tools.
+     * This one is for when the toolbar should stop being furniture on a screen somebody
+     * is working on: the handle to bring it back, the claw, and nothing else.
+     *
+     * The claw is kept for two reasons and the second is the load-bearing one — it
+     * already carries the mood (`data-mood`, `data-walking`, `moodSaid` as its title),
+     * so a rail that is away can still say that something needs you. A fold that hid it
+     * would be a toolbar that goes quiet exactly when it should not.
+     */
+    // `render` is toolbar.js, `page` is toolbar.html and `style` is the stylesheet, all
+    // already read by this describe.
+    const dock = readFileSync(new URL("../apps/linux/ui/toolbar-dock.js", import.meta.url), "utf8");
+
+    // One key is exempt from the fold, and it is the claw.
+    expect(render).toContain("state.away");
+    // The last such loop is the fold; an earlier one with the same header sets the
+    // pressed states, so this is found from the end.
+    const folding = render.slice(
+      render.lastIndexOf("for (const [id, button] of Object.entries(buttons))"),
+    );
+    expect(folding.slice(0, 400), "the claw is what stays").toContain('id === "settings"');
+    expect(folding.slice(0, 400), "and both folds close the same way").toMatch(
+      /state\.away \|\| \(EXACT\.includes\(id\) && state\.tucked\)/,
+    );
+
+    // Nothing hangs off a rail that is not there.
+    const tap = dock.slice(
+      dock.indexOf("function tapped("),
+      dock.indexOf("\n}", dock.indexOf("function tapped(")),
+    );
+    expect(tap).toContain("state.open = null");
+    expect(tap).toContain("state.work.open = false");
+    expect(tap, "the pill is re-placed at its new size").toContain("followTheFold()");
+
+    // Remembered beside the other two facts about how somebody wants this to sit.
+    expect(dock).toContain("away: state.away");
+    expect(dock).toContain("state.away = put.away === true");
+
+    // Once folded, the keys leave the layout: fifteen zero-width items in a two-pixel
+    // pill is an overflow, and an overflowing flex row puts them where nobody expects.
+    expect(style).toContain('.rail-wrap[data-away="true"]');
+    expect(style).toMatch(/\.rail-wrap\[data-away="true"\][\s\S]{0,200}display: none/);
+
+    // And the gesture is said out loud, because it is invisible otherwise.
+    expect(page, "the markup says it").toContain("double click");
+    expect(render, "and the handle says which way it goes next").toMatch(
+      /double click to bring it back/,
+    );
+  });
+
+  test("a drag is not a double click, however still the hand was", () => {
+    /*
+     * The grip is the drag handle as well, so the toggle is counted from the pointer
+     * events rather than from a `dblclick` — the drag calls `preventDefault` on
+     * pointerdown, which stops some engines synthesising one at all.
+     *
+     * That leaves one way to get it wrong: a drag that happens to end near where it
+     * started. The distance is tracked across the whole gesture, not measured at the
+     * end, so a rail carried across the desk and back is still a drag.
+     */
+    const dock = readFileSync(new URL("../apps/linux/ui/toolbar-dock.js", import.meta.url), "utf8");
+    expect(dock, "no dblclick listener to be swallowed").not.toContain(
+      'addEventListener("dblclick"',
+    );
+    expect(dock, "the furthest the hand got, not where it ended").toMatch(
+      /travelled = Math\.max\(travelled, Math\.hypot/,
+    );
+    expect(dock).toMatch(/if \(travelled <= TAP_STILL\) tapped\(\)/);
+    // A second tap only counts while the first is still recent.
+    expect(dock).toMatch(/now - lastTap < TAP_AGAIN/);
+  });
+
   test("nothing is left over from when it floated", () => {
     // One canonical way for it to be placed. A leftover drag handle or remembered corner
     // would be a second one, quietly disagreeing with the first.
