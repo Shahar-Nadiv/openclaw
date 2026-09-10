@@ -12,6 +12,7 @@ import { describe, expect, it as test } from "vitest";
 import colai from "./index.js";
 import { notWhatWasBuilt } from "./src/digest.js";
 import { toolbarOnScreen } from "./src/running.js";
+import { screenTrouble } from "./src/screen.js";
 import { Toolbar } from "./src/toolbar-process.js";
 
 type Service = { id: string; start: (ctx: unknown) => void; stop?: (ctx: unknown) => void };
@@ -88,18 +89,42 @@ describe("the plugin OpenClaw loads", () => {
      * honest outcome is a line in the log, not a crash inside a window system that was
      * never there.
      */
-    const display = process.env.DISPLAY;
+    const was = { ...process.env };
     delete process.env.DISPLAY;
+    delete process.env.WAYLAND_DISPLAY;
+    delete process.env.XDG_SESSION_TYPE;
     try {
       const { services, said, ctx } = registerColai();
       services[0]?.start(ctx);
-      expect(said.join("\n")).toContain("no DISPLAY");
+      expect(said.join("\n")).toContain("DISPLAY is not set");
+      expect(said.join("\n"), "and it is not started anyway").toContain("not being started");
     } finally {
-      if (display === undefined) {
-        delete process.env.DISPLAY;
-      } else {
-        process.env.DISPLAY = display;
-      }
+      Object.assign(process.env, was);
+    }
+  });
+
+  test("on Wayland it refuses rather than pointing at the wrong windows", () => {
+    /*
+     * The failure this replaces was not a crash. XWayland sets DISPLAY, so the toolbar
+     * started, drew, and let somebody mark a window it could not see — X11 answers only
+     * about XWayland's own clients, so a native Wayland window is absent from the capture
+     * and is not what "which window is in front" names. The mark reaching the agent was
+     * quietly about something else.
+     *
+     * Refusing is the honest outcome, and the message has to name the session type or the
+     * person has no idea which of their machine's many properties is the problem.
+     */
+    const was = { ...process.env };
+    process.env.DISPLAY = ":0";
+    process.env.XDG_SESSION_TYPE = "wayland";
+    try {
+      const { services, said, ctx } = registerColai();
+      services[0]?.start(ctx);
+      expect(said.join("\n")).toContain("Wayland");
+      expect(said.join("\n"), "with the one thing that changes it").toContain("Xorg");
+      expect(said.join("\n")).toContain("not being started");
+    } finally {
+      Object.assign(process.env, was);
     }
   });
 
@@ -277,5 +302,50 @@ describe("the toolbar's lifetime, against a real process", () => {
     expect(toolbarOnScreen(pidfile)).toBeNull();
     // And it is cleared, so the next look is a quick one.
     expect(existsSync(pidfile)).toBe(false);
+  });
+});
+
+describe("whether this machine has a screen the toolbar can work on", () => {
+  const linux = "linux" as NodeJS.Platform;
+
+  test("an X11 session is what it is built for", () => {
+    expect(screenTrouble({ DISPLAY: ":0", XDG_SESSION_TYPE: "x11" }, linux)).toBeNull();
+  });
+
+  test("no display at all says so, and says what to do", () => {
+    const trouble = screenTrouble({}, linux);
+    expect(trouble?.why).toContain("DISPLAY");
+    expect(trouble?.fix, "a refusal with no way forward is half an answer").toBeTruthy();
+  });
+
+  /*
+   * The one that mattered. Everything the toolbar does to the rest of the screen it does
+   * through X11, and under Wayland XWayland answers those questions about its own clients
+   * only — so a native Wayland window is not in the capture, is not what "which window is
+   * this" names, and the mark that reaches the agent is quietly about something else.
+   *
+   * It is caught before DISPLAY because a Wayland session sets DISPLAY too. That is
+   * precisely how it went unnoticed: the check that existed passed.
+   */
+  test("a Wayland session is refused, not half-served", () => {
+    const said = screenTrouble({ DISPLAY: ":0", XDG_SESSION_TYPE: "wayland" }, linux);
+    expect(said?.why, "named, so the person knows which problem this is").toContain("Wayland");
+    expect(said?.fix).toContain("Xorg");
+  });
+
+  test("and refused however the session announces itself", () => {
+    // Some sessions set only one of the two, and compositors differ. Either is enough.
+    expect(screenTrouble({ DISPLAY: ":0", WAYLAND_DISPLAY: "wayland-0" }, linux)?.why).toContain(
+      "Wayland",
+    );
+    expect(screenTrouble({ DISPLAY: ":0", XDG_SESSION_TYPE: "Wayland" }, linux)?.why).toContain(
+      "Wayland",
+    );
+  });
+
+  test("the question is not asked where it has no answer", () => {
+    // The toolbar does not run on these yet; when it does, they will not be asked about X.
+    expect(screenTrouble({}, "win32" as NodeJS.Platform)).toBeNull();
+    expect(screenTrouble({}, "darwin" as NodeJS.Platform)).toBeNull();
   });
 });

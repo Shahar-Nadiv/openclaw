@@ -17,6 +17,7 @@ import { buildPluginConfigSchema, definePluginEntry } from "openclaw/plugin-sdk/
 import { z } from "zod";
 import { notWhatWasBuilt } from "./src/digest.js";
 import { whereabouts } from "./src/running.js";
+import { screenTrouble } from "./src/screen.js";
 import { Toolbar } from "./src/toolbar-process.js";
 
 /**
@@ -132,17 +133,20 @@ export default definePluginEntry({
           return;
         }
         /*
-         * Somewhere to draw.
+         * Somewhere to draw, and somewhere this toolbar can see.
          *
-         * On Linux that means an X display, and its absence is the ordinary case on a
-         * server or in a container — said rather than left to fail inside a window system
-         * that is not there. On the platforms where a desktop is not optional, the
-         * question does not arise, so it is asked only where it has an answer.
+         * Two different refusals, and only one of them is obvious. No display at all is
+         * the ordinary case on a server or in a container. A Wayland session is not: it
+         * sets DISPLAY, passes every check this used to make, and then shows the toolbar
+         * a desktop with most of the windows missing from it. `screenTrouble` holds both,
+         * and why.
          */
-        if (process.platform === "linux" && !process.env.DISPLAY) {
-          ctx.logger.warn(
-            "colai: no DISPLAY, so there is no screen to draw on. The toolbar is not being started.",
-          );
+        const noScreen = screenTrouble();
+        if (noScreen) {
+          ctx.logger.warn(`colai: ${noScreen.why} The toolbar is not being started.`);
+          if (noScreen.fix) {
+            ctx.logger.warn(`colai: ${noScreen.fix}`);
+          }
           return;
         }
         const binary = toolbarBinary();

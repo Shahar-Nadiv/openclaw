@@ -19,6 +19,7 @@ import { spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { toolbarOnScreen, whereabouts } from "./running.js";
+import { screenTrouble } from "./screen.js";
 
 type CliProgram = Parameters<Parameters<OpenClawPluginApi["registerCli"]>[0]>[0]["program"];
 
@@ -130,6 +131,19 @@ export function registerColaiCli(program: CliProgram, toolbarBinary: () => strin
       .command(word)
       .description(description)
       .action(async () => {
+        // Only the words that would put it on screen. `hide` and `quit` are about a
+        // toolbar that is already running, and refusing those would strand it.
+        if (word === "show" || word === "toggle") {
+          const noScreen = screenTrouble();
+          if (noScreen) {
+            console.error(`The colai toolbar cannot run here — ${noScreen.why}`);
+            if (noScreen.fix) {
+              console.error(noScreen.fix);
+            }
+            process.exitCode = 1;
+            return;
+          }
+        }
         const binary = theToolbar();
         if (binary) {
           await tellTheToolbar(binary, word);
@@ -147,10 +161,14 @@ export function registerColaiCli(program: CliProgram, toolbarBinary: () => strin
       }
       console.log(`Toolbar: ${binary} (${megabytes(binary)})`);
 
-      // Asked only where it has an answer. A missing X display is the ordinary case on a
-      // Linux server; on a desktop that is not optional the question does not arise.
-      if (process.platform === "linux" && !process.env.DISPLAY) {
-        console.log("Screen:  none — DISPLAY is not set, so there is nothing to draw on.");
+      // The same question the plugin asks before starting it, answered the same way, so
+      // status and autostart cannot disagree about whether this machine can run it.
+      const noScreen = screenTrouble();
+      if (noScreen) {
+        console.log(`Screen:  no — ${noScreen.why}`);
+        if (noScreen.fix) {
+          console.log(`         ${noScreen.fix}`);
+        }
         return;
       }
       console.log(`Screen:  ${process.env.DISPLAY || process.platform}`);
