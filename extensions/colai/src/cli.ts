@@ -31,20 +31,77 @@ function megabytes(path: string): string {
   }
 }
 
+/** How long to wait for a toolbar to fall over before deciding it is not going to. */
+const FIRST_BREATH = 600;
+
 /**
  * Hand one word to the toolbar, starting it if it is not up.
  *
- * Detached and unwaited, because this returns a menu to the person who opened it: the
- * toolbar outlives the command that spoke to it, and holding the terminal until a window
- * closes would be the wrong shape for both callers.
+ * Detached, because this returns a terminal to the person who opened it: the toolbar
+ * outlives the command that spoke to it, and holding the terminal until a window closes
+ * would be the wrong shape for both callers.
+ *
+ * But not unwatched. A binary that cannot run at all — missing its libraries, built
+ * against a newer libc than this machine has, the wrong architecture entirely — fails
+ * within milliseconds, and this used to fail into silence: `stdio: "ignore"` threw the
+ * loader's explanation away, nothing listened for the failure, and the command still
+ * reported success. Somebody whose toolbar never appeared had nothing at all to go on.
+ *
+ * So the first breath is watched. Beyond it the toolbar is on its own, which is the
+ * point of detaching it.
  */
-function tellTheToolbar(binary: string, word: "show" | "hide" | "toggle" | "quit"): void {
+async function tellTheToolbar(
+  binary: string,
+  word: "show" | "hide" | "toggle" | "quit",
+): Promise<void> {
   // The pidfile travels with every word, so a toolbar started from here records itself
   // the same way one started by the plugin does.
-  spawn(binary, [word, "--pidfile", whereabouts()], {
+  const started = spawn(binary, [word, "--pidfile", whereabouts()], {
     detached: true,
-    stdio: "ignore",
-  }).unref();
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+
+  // Kept rather than printed as it arrives, so a toolbar that starts normally and warns
+  // about something does not scribble over the terminal it just handed back.
+  let complaint = "";
+  started.stderr?.on("data", (chunk: Buffer) => {
+    complaint += String(chunk);
+  });
+
+  const fell = await new Promise<string | null>((answer) => {
+    const enough = setTimeout(() => answer(null), FIRST_BREATH);
+    // Without this listener a spawn that fails outright — the file vanished between the
+    // check and the call, or is not executable — reaches Node as an unhandled error
+    // event, which does not warn: it throws, out of a command that was asked to open a
+    // window.
+    started.once("error", (error: Error) => {
+      clearTimeout(enough);
+      answer(error.message);
+    });
+    started.once("exit", (code, signal) => {
+      clearTimeout(enough);
+      // Exiting cleanly is what a handoff looks like: a second copy hands its word to
+      // the one already on screen and stops. That is the success, not a failure.
+      answer(signal === null && code === 0 ? null : `it exited with ${signal ?? code}`);
+    });
+  });
+
+  if (fell === null) {
+    // Nothing more to hear. The pipe is a handle, and a handle nobody closes keeps this
+    // process alive after the toolbar it started no longer needs it.
+    started.stderr?.destroy();
+    started.unref();
+    return;
+  }
+
+  console.error(`The colai toolbar did not start — ${fell}.`);
+  if (complaint.trim()) {
+    console.error(complaint.trim());
+  } else {
+    console.error("It wrote nothing to explain why. Run it directly to see what it says:");
+    console.error(`  ${binary} ${word}`);
+  }
+  process.exitCode = 1;
 }
 
 export function registerColaiCli(program: CliProgram, toolbarBinary: () => string | null): void {
@@ -72,10 +129,10 @@ export function registerColaiCli(program: CliProgram, toolbarBinary: () => strin
     colai
       .command(word)
       .description(description)
-      .action(() => {
+      .action(async () => {
         const binary = theToolbar();
         if (binary) {
-          tellTheToolbar(binary, word);
+          await tellTheToolbar(binary, word);
         }
       });
   }

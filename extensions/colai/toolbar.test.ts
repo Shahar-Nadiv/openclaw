@@ -4642,9 +4642,48 @@ describe("what the plugin ships", () => {
      * stopped forcing it; nothing here reads OpenClaw's source to find out.
      */
     expect(manifest.scripts?.postinstall, "a postinstall here can never run").toBeUndefined();
-    expect(manifest.scripts?.prepack).toBe("node scripts/build-toolbar.mjs");
+    expect(manifest.scripts?.prepack).toContain("node scripts/build-toolbar.mjs");
     expect(shipped("bin/")).toBe(true);
     expect(existsSync(new URL("scripts/build-toolbar.mjs", dir))).toBe(true);
+  });
+
+  test("npm refuses the machines the binary cannot run on", () => {
+    /*
+     * `bin/colai-toolbar` is one ELF for one architecture. Without `cpu`, npm installs it
+     * onto an arm64 machine perfectly happily, the host loads the plugin, and the toolbar
+     * exits 127 — a working install of a program that cannot run. `os` has always been
+     * here and does the same job for Windows and macOS; `cpu` was simply missing.
+     */
+    expect(manifest.os, "the binary is Linux-only").toEqual(["linux"]);
+    expect(manifest.cpu, "and it is one architecture, not any").toEqual(["x64"]);
+  });
+
+  test("the runtime the host actually loads is built by this package", () => {
+    /*
+     * The entry is `./index.ts`, and OpenClaw refuses a TypeScript entry with no compiled
+     * output beside it — so `dist/index.js` decides whether the plugin loads at all.
+     *
+     * It used to be built by a script in the OpenClaw repository, which is not part of
+     * this package and is not on a publisher's disk, into a directory git ignores. A
+     * publish from a clean checkout therefore shipped every file except the one the host
+     * runs, and said nothing: the tarball was the right size and the failure arrived on
+     * somebody else's machine as "plugin not found". Nothing outside this directory may
+     * be needed to produce it.
+     */
+    expect(manifest.scripts?.prepack, "packing must build it").toContain(
+      "node scripts/build-runtime.mjs",
+    );
+    expect(existsSync(new URL("scripts/build-runtime.mjs", dir))).toBe(true);
+    expect(shipped("dist/"), "and the tarball must carry it").toBe(true);
+
+    const builds = readFileSync(new URL("scripts/build-runtime.mjs", dir), "utf8");
+    // The host's own SDK and a declared dependency stay external. Bundling either ships a
+    // second copy that cannot recognise the first.
+    for (const theirs of ["openclaw", "zod"]) {
+      expect(builds, `${theirs} is the host's to provide`).toContain(`"${theirs}"`);
+    }
+    // Its only tool is one this package declares, or a publisher does not have it.
+    expect(manifest.devDependencies?.esbuild, "declared, not borrowed").toBeTruthy();
   });
 
   test("it looks in the shipped bin before any build directory", () => {

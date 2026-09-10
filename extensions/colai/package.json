@@ -33,11 +33,14 @@
     "zod": "4.4.3"
   },
   "scripts": {
-    "build": "node scripts/build-toolbar.mjs",
-    "prepack": "node scripts/build-toolbar.mjs"
+    "build": "node scripts/build-runtime.mjs && node scripts/build-toolbar.mjs",
+    "prepack": "node scripts/build-runtime.mjs && node scripts/build-toolbar.mjs",
+    "build:runtime": "node scripts/build-runtime.mjs",
+    "build:toolbar": "node scripts/build-toolbar.mjs"
   },
   "devDependencies": {
-    "@openclaw/plugin-sdk": "workspace:*"
+    "@openclaw/plugin-sdk": "workspace:*",
+    "esbuild": "0.28.2"
   },
   "openclaw": {
     "extensions": [
@@ -51,5 +54,8 @@
     "compat": {
       "pluginApi": ">=2026.9.1"
     }
-  }
+  },
+  "cpu": [
+    "x64"
+  ]
 }

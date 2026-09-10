@@ -62,6 +62,12 @@ export class Toolbar {
       stdio: ["ignore", sink, sink],
     });
     started.unref();
+    // Without this a spawn that fails outright — the binary vanished under us, or is not
+    // executable — reaches Node as an unhandled error event, which does not warn: it
+    // throws, inside the Gateway, out of a plugin that was only asked to open a window.
+    started.once("error", (error: Error) => {
+      says.warn(`colai: the toolbar could not be started — ${error.message}`);
+    });
     started.once("exit", (code, signal) => {
       // Exiting straight away is what a handoff looks like, and a handoff is a success —
       // the toolbar somebody can see is the one that was already there.
@@ -90,10 +96,15 @@ export class Toolbar {
       return;
     }
     // Asked, not signalled. It puts itself down, the same way on every platform.
-    spawn(this.binary, ["quit", "--pidfile", this.pidfile], {
+    const asked = spawn(this.binary, ["quit", "--pidfile", this.pidfile], {
       detached: true,
       stdio: "ignore",
-    }).unref();
+    });
+    // Same reason as in `start`: an unheard error event is thrown, not logged. Nothing to
+    // say here beyond not throwing — the wait below is what decides whether it worked,
+    // and it ends in a SIGKILL either way.
+    asked.once("error", () => {});
+    asked.unref();
 
     const until = Date.now() + STOP_PATIENCE;
     while (Date.now() < until) {
