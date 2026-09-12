@@ -638,26 +638,36 @@ function askField(go) {
   menu.className = "ask-menu";
   menu.hidden = true;
 
-  // Which mark is open, if either. `/` answers from a table and `@` answers from disk,
-  // but where the menu goes and how it is driven is the same question both times.
-  let mark = null;
-  let showing = [];
-  let picked = 0;
+  /*
+   * Which mark is open, if either. `/` answers from a table and `@` answers from disk,
+   * but where the menu goes and how it is driven is the same question both times.
+   *
+   * Held in `state` rather than in this closure, because this whole field is rebuilt by
+   * every render — and a render happens on a five-second refresh, on any reply arriving,
+   * and whenever a window moves under the toolbar. So an open `/` or `@` list closed
+   * itself, mid-choice, because something unrelated happened somewhere else. Reading a
+   * list of files from disk and then throwing it away before the person could pick one
+   * is the same class of bug as the caret this field already lost once.
+   *
+   * `asked` stays local: it is a sequence number for in-flight lookups, and a rebuilt
+   * field has no in-flight lookups of its own to disambiguate.
+   */
+  const asking = state.ask;
   let asked = 0;
 
   const close = () => {
-    mark = null;
-    showing = [];
-    picked = 0;
+    asking.mark = null;
+    asking.showing = [];
+    asking.picked = 0;
     menu.hidden = true;
     menu.replaceChildren();
   };
 
   const take = (chosen) => {
-    const token = tokenAt(text.value, text.selectionStart, mark);
+    const token = tokenAt(text.value, text.selectionStart, asking.mark);
     if (!token) return close();
     const left = withoutToken(text.value, token);
-    if (mark === "/") {
+    if (asking.mark === "/") {
       state.mode = chosen.id;
     } else {
       // Described rather than assumed. Whether a file travels with the message or is
@@ -681,14 +691,14 @@ function askField(go) {
   };
 
   const draw = () => {
-    picked = Math.min(picked, Math.max(0, showing.length - 1));
-    menu.hidden = showing.length === 0;
+    asking.picked = Math.min(asking.picked, Math.max(0, asking.showing.length - 1));
+    menu.hidden = asking.showing.length === 0;
     menu.replaceChildren(
       ...showing.map((row, at) => {
         const one = document.createElement("button");
         one.type = "button";
         one.className = "ask-menu-row";
-        one.dataset.on = String(at === picked);
+        one.dataset.on = String(at === asking.picked);
         const name = document.createElement("span");
         name.className = "ask-menu-name";
         name.textContent = row.label ?? row.shown;
@@ -715,11 +725,11 @@ function askField(go) {
     // Whichever was typed later is the one being typed now.
     const token = !slash ? at : !at ? slash : slash.from > at.from ? slash : at;
     if (!token) return close();
-    mark = token === slash ? "/" : "@";
+    asking.mark = token === slash ? "/" : "@";
 
-    if (mark === "/") {
-      showing = modesMatching(token.word);
-      if (showing.length === 0) return close();
+    if (asking.mark === "/") {
+      asking.showing = modesMatching(token.word);
+      if (asking.showing.length === 0) return close();
       return draw();
     }
     // Asked of the machine, so the answer arrives after the keystroke that wanted it.
@@ -729,9 +739,9 @@ function askField(go) {
     const mine = ++asked;
     void invoke("colai_search_files", { query: token.word })
       .then((rows) => {
-        if (mine !== asked || mark !== "@") return;
-        showing = rows || [];
-        if (showing.length === 0) return close();
+        if (mine !== asked || asking.mark !== "@") return;
+        asking.showing = rows || [];
+        if (asking.showing.length === 0) return close();
         draw();
       })
       .catch(() => close());
@@ -756,7 +766,7 @@ function askField(go) {
     if (menu.hidden && event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       const going = chosenMarks();
-      if (canSend(going)) void sendMarks(going.map((mark) => mark.id));
+      if (canSend(going)) void sendMarks(going.map((one) => one.id));
       return;
     }
     if (menu.hidden) return;
@@ -771,18 +781,24 @@ function askField(go) {
     }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      picked = (picked + (event.key === "ArrowDown" ? 1 : showing.length - 1)) % showing.length;
+      asking.picked =
+        (asking.picked + (event.key === "ArrowDown" ? 1 : asking.showing.length - 1)) %
+        asking.showing.length;
       return look();
     }
     // Enter takes the highlighted one. Tab too, because a menu that only answers to one
     // key is a menu half the people using it never get out of.
     if (event.key === "Enter" || event.key === "Tab") {
       event.preventDefault();
-      take(showing[picked]);
+      take(asking.showing[asking.picked]);
     }
   });
 
   box.append(text, menu);
+  // Put back on screen, not merely remembered. The state above survives the rebuild; the
+  // element does not, so a list that was open has to be drawn again or hoisting it would
+  // only have moved where the disappearance happens.
+  if (asking.showing.length > 0) draw();
   return box;
 }
 
@@ -1451,6 +1467,49 @@ function drawComposer(into) {
   key.textContent = "Ctrl ↵";
   key.title = "Ctrl+Enter sends";
 
+  /*
+   * And the two keystrokes inside the field, which had nowhere permanent to be said.
+   *
+   * They were named in the placeholder — the one piece of text guaranteed to be gone by
+   * the time anybody could use them, because it disappears on the first character typed.
+   * So the two things that make this field more than a text box were advertised only to
+   * people who had not started using it yet.
+   *
+   * Buttons rather than labels: somebody who has just learned that `/` exists should be
+   * able to press the thing that told them so.
+   */
+  const inField = document.createElement("span");
+  inField.className = "compose-keys";
+  for (const [mark, what] of [
+    ["/", "Choose how this is read — plan, review, commit…"],
+    ["@", "Bring in a file by name"],
+  ]) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "compose-key compose-key-do";
+    chip.textContent = mark;
+    chip.title = what;
+    chip.setAttribute("aria-label", what);
+    chip.addEventListener("click", () => {
+      // Typed into the field rather than acted on here, so one piece of code decides what
+      // these mean: the field's own key handler, which already knows.
+      const field = document.querySelector('[data-field="ask"]');
+      if (!field) return;
+      const at = field.selectionStart ?? field.value.length;
+      // On a word boundary, because that is the only place the menus open. Appended to
+      // the end of a word it would insert a character and do nothing else.
+      const before = field.value.slice(0, at);
+      const spacer = before.length === 0 || /\s$/.test(before) ? "" : " ";
+      field.value = `${before}${spacer}${mark}${field.value.slice(at)}`;
+      state.text = field.value;
+      field.focus({ preventScroll: true });
+      const now = at + spacer.length + 1;
+      field.setSelectionRange(now, now);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    inField.append(chip);
+  }
+
   // The two rarest things this message can do, on a line of their own. In the send row
   // they cost the receiver's name its last four characters, and a name shortened to make
   // room for "Schedule…" is the wrong thing to have shortened.
@@ -1469,7 +1528,7 @@ function drawComposer(into) {
   gap.className = "compose-gap";
   // Who, how it should be taken, and which model takes it — the three facts about the
   // answer, in the order they were asked for. Then what happens to it, on the right.
-  foot.append(to, modePick(), modelPick(), gap, key, go);
+  foot.append(to, modePick(), modelPick(), gap, inField, key, go);
   rows.push(foot);
 
   into.replaceChildren(...rows);
@@ -1619,6 +1678,7 @@ function whoRow({ face, name, note, busy, receiving, onPick, about }) {
   const row = document.createElement("button");
   row.type = "button";
   row.className = "row";
+  row.setAttribute("role", "menuitem");
   row.setAttribute("aria-pressed", String(receiving));
 
   const avatar = document.createElement("span");

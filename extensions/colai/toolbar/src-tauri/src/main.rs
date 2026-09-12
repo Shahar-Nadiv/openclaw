@@ -34,6 +34,7 @@ mod colai_send;
 mod gateway;
 mod gateway_device_identity;
 mod gateway_ws;
+mod hotkey;
 mod tray;
 mod whereabouts;
 
@@ -67,6 +68,7 @@ fn main() {
                 eprintln!("[colai] could not do what was asked: {trouble}");
             }
         }))
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             app.manage(gateway_ws::GatewayClient::new());
@@ -83,6 +85,10 @@ fn main() {
                 }
                 Err(trouble) => eprintln!("[colai] no tray: {trouble}"),
             }
+
+            // The way in from anywhere. After the tray, so the two lines about how to
+            // reach the toolbar are printed together.
+            hotkey::listen(app.handle());
 
             // The overlay, straight away: this program is the toolbar, so there is
             // nothing to wait for and nowhere else to be. Unless the very command that

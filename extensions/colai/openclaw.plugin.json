@@ -22,6 +22,10 @@
       "autostart": {
         "type": "boolean",
         "description": "Open the toolbar when OpenClaw starts. On by default."
+      },
+      "hotkey": {
+        "type": "string",
+        "description": "The keys that bring the toolbar up from anywhere, for example \"Ctrl+Alt+Space\" (the default) or \"Ctrl+Shift+M\"."
       }
     }
   },

@@ -31,6 +31,7 @@ const el = {
   flyAgents: document.getElementById("fly-agents"),
   agentRows: document.getElementById("agent-rows"),
   trouble: document.getElementById("trouble"),
+  tips: document.getElementById("tips"),
   marks: document.getElementById("marks"),
   pins: document.getElementById("pins"),
   recording: document.getElementById("recording"),
@@ -176,6 +177,17 @@ const state = {
   sending: false,
   // What went wrong, when something did. Null the rest of the time, which is the rest
   // of the time.
+  /*
+   * What the ask field's own menu is showing, if anything.
+   *
+   * Here rather than inside the field, because the field is rebuilt by every render — a
+   * five-second refresh, a reply arriving, a window moving under the toolbar — and a `/`
+   * or `@` list that closes itself mid-choice because something unrelated happened is
+   * the same bug the caret in that field already had.
+   */
+  ask: { mark: null, showing: [], picked: 0 },
+  // Whether the first-run card is up. Set on a first run, and again from the tray.
+  tips: false,
   trouble: null,
   // What kind of thing `trouble` is, and which words it was decided for. See `say`.
   tone: "failure",
@@ -492,6 +504,7 @@ function render() {
   drawPopup();
   drawLibrary();
   drawToasts();
+  drawTips();
   drawTrouble();
   // Left mounted while a popup is open, which is how a click off the popup is heard at
   // all — the popup is stacked above it, so its own controls still get their clicks.
@@ -641,6 +654,9 @@ function shape() {
   if (state.library !== null && !el.library.hidden) rects.push(boxAround(el.library));
   if (state.work.open && !el.work.hidden) rects.push(boxAround(el.work));
   if (state.toasts.length && !el.toasts.hidden) rects.push(boxAround(el.toasts));
+  // The first-run card, which has a button on it. Everything the overlay does not claim
+  // belongs to the desktop, so a card left out of this one is a card nobody can dismiss.
+  if (state.tips && el.tips && !el.tips.hidden) rects.push(boxAround(el.tips));
   const key = JSON.stringify(rects);
   if (key === shaped) return;
   shaped = key;
@@ -720,7 +736,45 @@ function listenForKeys() {
   window.addEventListener("blur", () => shutWhatIsOpen());
 }
 
+/**
+ * Arrow keys walk a menu, the way every other menu on the desktop does.
+ *
+ * The flyouts have always been marked up as menus and never behaved as one: Tab moved
+ * through them in document order, arrow keys did nothing, and there was no way to get
+ * from the last item back to the first. A menu that only answers to Tab is one that
+ * keyboard users leave.
+ *
+ * Home and End too, because a list of eleven tools has a top worth reaching directly.
+ */
+function walkMenu(event) {
+  const going = { ArrowDown: 1, ArrowUp: -1, Home: 0, End: 0 };
+  if (!(event.key in going)) return false;
+  const from = document.activeElement;
+  if (!from || from.getAttribute("role") !== "menuitem") return false;
+  const menu = from.closest('[role="menu"]');
+  if (!menu) return false;
+
+  const items = [...menu.querySelectorAll('[role="menuitem"]')].filter(
+    (item) => !item.disabled && item.offsetParent !== null,
+  );
+  if (items.length === 0) return false;
+
+  const at = items.indexOf(from);
+  // Wrapping, because a menu with ends is a menu somebody gets stuck at.
+  const to =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? items.length - 1
+        : (at + going[event.key] + items.length) % items.length;
+  event.preventDefault();
+  items[to].focus({ preventScroll: true });
+  return true;
+}
+
 function onKey(event) {
+  if (walkMenu(event)) return;
+
   // A recording first, because it is the one thing here somebody has to wait out and the
   // only state Escape could not reach. Fifteen seconds of countdown started by mistake
   // had no way out but killing the toolbar. What was filmed so far is kept: this is
@@ -930,6 +984,9 @@ async function start() {
   listenForDrops();
   listenForDrag();
   recall();
+  // On a first run only, and after `recall` — which is where "has this toolbar been used
+  // before" is actually answered. Four things nobody can discover by looking; see `TIPS`.
+  state.tips = !tipsWereSeen();
   // What only this toolbar knew about those conversations — which marks travelled, what
   // was pointed at. Read before the list arrives, so it is ready to be laid over it.
   recallWork();
@@ -957,6 +1014,10 @@ async function start() {
     })
     .catch(() => {});
 
+  // Asked for from the tray, which is the only surface reachable with the toolbar away.
+  void listen("colai:tips", () => {
+    showTips();
+  });
   void listen("colai:front", (event) => {
     state.front = (event && event.payload) || null;
     // Somebody clicked another window, which on a desktop is what "outside" means.

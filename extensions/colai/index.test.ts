@@ -61,20 +61,27 @@ describe("the plugin OpenClaw loads", () => {
 
   test("the reload declaration names the setting it reloads for", () => {
     /*
-     * `autostart` is the one thing that should move the toolbar without a restart, and
-     * the service says so by naming the exact config path. A prefix that does not match
-     * the manifest's option is a toggle that appears to do nothing until the next
-     * Gateway restart, which is exactly the shape of bug nobody reports.
+     * Every option that the toolbar reads only at startup has to be named here, or it is
+     * a setting that appears to do nothing until the next Gateway restart — exactly the
+     * shape of bug nobody reports. `autostart` moves the toolbar; `hotkey` is read from
+     * the environment when the process is spawned, so changing it needs the same
+     * treatment.
+     *
+     * Checked against the manifest rather than written out twice: a prefix that does not
+     * match a declared option is a path to nothing.
      */
     const { services } = registerColai();
     const service = services[0] as Service & { reload?: { configPrefixes?: string[] } };
-    expect(service.reload?.configPrefixes).toEqual(["plugins.entries.colai.config.autostart"]);
     const declared = JSON.parse(
       readFileSync(new URL("./openclaw.plugin.json", import.meta.url), "utf8"),
     ) as { id: string; configSchema?: { properties?: Record<string, unknown> } };
-    const prefix = service.reload?.configPrefixes?.[0] ?? "";
-    expect(prefix).toBe(`plugins.entries.${declared.id}.config.autostart`);
-    expect(Object.keys(declared.configSchema?.properties ?? {})).toContain("autostart");
+    const options = Object.keys(declared.configSchema?.properties ?? {});
+
+    expect(options).toContain("autostart");
+    expect(options).toContain("hotkey");
+    expect(service.reload?.configPrefixes).toEqual(
+      options.map((option) => `plugins.entries.${declared.id}.config.${option}`),
+    );
   });
 
   test("autostart off leaves the toolbar alone, and says so", () => {

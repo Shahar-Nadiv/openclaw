@@ -59,11 +59,34 @@
           had to work out which screen it belonged on, and got it wrong.
         -->
         <div id="work" class="work" role="dialog" aria-label="Work" hidden></div>
-        <div id="fly-agents" class="agents" role="menu" hidden>
-          <p class="agents-title">Select who receives your edits</p>
-          <div id="agent-rows" class="agent-rows scrolls"></div>
+        <!--
+          The heading is outside the menu and names it, rather than sitting inside as an
+          item that cannot be chosen. A paragraph among the options is counted as one by
+          anything reading the list, so the menu announced one more choice than it had.
+        -->
+        <div id="fly-agents" class="agents" hidden>
+          <p class="agents-title" id="agents-title">Select who receives your edits</p>
+          <div
+            id="agent-rows"
+            class="agent-rows scrolls"
+            role="menu"
+            aria-labelledby="agents-title"
+          ></div>
         </div>
       </div>
+
+      <!--
+        The first run: four things about this toolbar that cannot be discovered by
+        looking at it. Shown once, and again from the tray for anybody who dismissed it
+        before reading it.
+      -->
+      <div
+        id="tips"
+        class="tips"
+        role="dialog"
+        aria-label="Four things worth knowing"
+        hidden
+      ></div>
 
       <p id="trouble" class="trouble" role="status" hidden></p>
     </div>

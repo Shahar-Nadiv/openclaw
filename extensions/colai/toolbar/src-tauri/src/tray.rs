@@ -17,6 +17,11 @@ use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::{App, AppHandle};
 
 const TOOLBAR_ID: &str = "colai-toolbar";
+const BINDING_ID: &str = "colai-binding";
+const TIPS_ID: &str = "colai-tips";
+
+/// What the page hears when somebody asks for the basics again.
+pub(crate) const TIPS_EVENT: &str = "colai:tips";
 const OPEN_ID: &str = "open-openclaw";
 const QUIT_ID: &str = "quit";
 
@@ -53,9 +58,24 @@ pub(crate) fn build(app: &App) -> tauri::Result<Tray> {
     let toolbar = CheckMenuItem::with_id(app, TOOLBAR_ID, "Toolbar", true, true, None::<&str>)?;
     let open = MenuItem::with_id(app, OPEN_ID, "Open OpenClaw", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
+    // The binding, written where somebody looking for the toolbar will find it. A global
+    // shortcut nobody has been told about is a shortcut nobody uses, and this menu is the
+    // only surface that is reachable when the toolbar is put away. Disabled: it is a
+    // label, and pressing it should not pretend to do something.
+    let binding = MenuItem::with_id(
+        app,
+        BINDING_ID,
+        format!("{} opens it", crate::hotkey::wanted()),
+        false,
+        None::<&str>,
+    )?;
+    // The way back to the four things nobody guesses. They are shown once, on a first
+    // run, and once is not many for a card somebody can dismiss before reading — so the
+    // one surface that is reachable with the toolbar put away offers them again.
+    let tips = MenuItem::with_id(app, TIPS_ID, "Show the basics", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit colai", true, None::<&str>)?;
     let menu = MenuBuilder::new(app)
-        .items(&[&toolbar, &open, &separator, &quit])
+        .items(&[&toolbar, &binding, &tips, &open, &separator, &quit])
         .build()?;
 
     let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
@@ -97,6 +117,16 @@ fn pressed(app: &AppHandle, event: tauri::menu::MenuEvent) {
                     eprintln!("[colai] {trouble}");
                 }
             });
+        }
+        TIPS_ID => {
+            // Shown, which means the toolbar has to be on screen to show it. Somebody
+            // asking for the basics from a tray with the toolbar put away means both.
+            if let Err(trouble) = colai::asked_for(app, &["show".to_string()]) {
+                eprintln!("[colai] could not open the toolbar: {trouble}");
+            }
+            if let Err(trouble) = tauri::Emitter::emit(app, TIPS_EVENT, ()) {
+                eprintln!("[colai] could not ask for the basics: {trouble}");
+            }
         }
         QUIT_ID => app.exit(0),
         _ => {}

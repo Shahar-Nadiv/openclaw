@@ -43,7 +43,7 @@ export class Toolbar {
    * rather than stopped gets told to show itself. Nothing has to recognise it first,
    * which is the whole reason the adoption logic that used to live here is gone.
    */
-  start(log: string, says: Says): void {
+  start(log: string, says: Says, hotkey?: string): void {
     const already = toolbarOnScreen(this.pidfile);
 
     let sink: number | "ignore" = "ignore";
@@ -60,6 +60,11 @@ export class Toolbar {
     const started = spawn(this.binary, ["show", "--pidfile", this.pidfile], {
       detached: true,
       stdio: ["ignore", sink, sink],
+      // The binding travels in the environment rather than on the command line: it is a
+      // setting, and the arguments here are words the toolbar acts on. Absent means the
+      // toolbar's own default, which is the whole of the behaviour when nobody has
+      // chosen — so an unset option and an empty string mean the same thing.
+      env: hotkey ? { ...process.env, COLAI_HOTKEY: hotkey } : process.env,
     });
     started.unref();
     // Without this a spawn that fails outright — the binary vanished under us, or is not

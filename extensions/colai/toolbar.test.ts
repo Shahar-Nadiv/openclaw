@@ -4879,10 +4879,93 @@ describe("the way back when the toolbar is put away", () => {
 
 describe("the work panel is a view of OpenClaw's conversations", () => {
   const dir = new URL("./toolbar/ui/", import.meta.url);
+  const dir2 = new URL("./", import.meta.url);
   const work = readFileSync(new URL("toolbar-work.js", dir), "utf8");
   const send = readFileSync(new URL("toolbar-send.js", dir), "utf8");
   const rail = readFileSync(new URL("toolbar-rail.js", dir), "utf8");
   const page = readFileSync(new URL("toolbar.js", dir), "utf8");
+
+  test("one binding reaches the toolbar from anywhere", () => {
+    /*
+     * Every other shortcut here is a single letter the page handles, and the page only
+     * hears a key once the overlay holds the keyboard — which it takes when a panel opens
+     * and at no other time. So the rail advertised eleven shortcuts that could not be
+     * reached from the desktop, which is exactly where somebody is standing when they
+     * want to mark something.
+     */
+    const hotkey = readFileSync(new URL("toolbar/src-tauri/src/hotkey.rs", dir2), "utf8");
+    expect(hotkey, "a chord the desktop is unlikely to want").toContain("Ctrl+Alt+Space");
+    // Three states, not two: showing and listening are different here, and the middle
+    // one is where the toolbar spends nearly all its time.
+    expect(hotkey).toContain("is_focused");
+    expect(hotkey, "and a binding somebody else holds is said, not swallowed").toContain(
+      "already taken",
+    );
+    // A shortcut nobody has been told about is a shortcut nobody uses, and the tray is
+    // the only surface reachable with the toolbar put away.
+    const tray = readFileSync(new URL("toolbar/src-tauri/src/tray.rs", dir2), "utf8");
+    expect(tray).toContain("opens it");
+  });
+
+  test("the binding is a setting, and changing it takes effect", () => {
+    const declared = JSON.parse(readFileSync(new URL("openclaw.plugin.json", dir2), "utf8")) as {
+      configSchema?: { properties?: Record<string, unknown> };
+    };
+    expect(Object.keys(declared.configSchema?.properties ?? {})).toContain("hotkey");
+    // Read from the environment when the process starts, so it has to restart to change.
+    const process_ = readFileSync(new URL("src/toolbar-process.ts", dir2), "utf8");
+    expect(process_).toContain("COLAI_HOTKEY");
+  });
+
+  test("the first run names what cannot be discovered by looking", () => {
+    // Four things, and every one of them load-bearing. `/` and `@` were named only in a
+    // placeholder that disappears on the first keystroke; the other two nowhere at all.
+    const dock = readFileSync(new URL("toolbar/ui/toolbar-dock.js", dir2), "utf8");
+    expect(dock).toContain("const TIPS");
+    expect(dock, "shown once, and remembered").toContain("colai.tips.seen");
+    for (const said of ["Drag the grip", "fold key", "Type / in the box", "Type @ in the box"]) {
+      expect(dock, `the card should name: ${said}`).toContain(said);
+    }
+    // And reachable again, because once is not many for a card somebody can dismiss
+    // before reading it.
+    const tray = readFileSync(new URL("toolbar/src-tauri/src/tray.rs", dir2), "utf8");
+    expect(tray).toContain("Show the basics");
+  });
+
+  test("the two keystrokes inside the ask field have somewhere permanent to be said", () => {
+    const compose = readFileSync(new URL("toolbar/ui/toolbar-compose.js", dir2), "utf8");
+    expect(compose).toContain("compose-key-do");
+    // Pressable, not merely printed: somebody who has just learned `/` exists should be
+    // able to press the thing that told them.
+    expect(compose).toContain('chip.type = "button"');
+  });
+
+  test("a menu behaves like one", () => {
+    const rail = readFileSync(new URL("toolbar/ui/toolbar-rail.js", dir2), "utf8");
+    const page = readFileSync(new URL("toolbar/ui/toolbar.js", dir2), "utf8");
+    const html = readFileSync(new URL("toolbar/ui/toolbar.html", dir2), "utf8");
+    // The rows were inside `role="menu"` containers and were not items of it, so anything
+    // reading the list announced a menu with nothing in it.
+    expect(rail.match(/role", "menuitem"/g)?.length ?? 0).toBeGreaterThanOrEqual(5);
+    expect(page, "and arrows walk it, wrapping at both ends").toContain("function walkMenu");
+    // The heading was counted as one of the choices. It names the menu instead.
+    expect(html).toContain('aria-labelledby="agents-title"');
+  });
+
+  test("an open suggestion list survives a redraw it has nothing to do with", () => {
+    /*
+     * The `/` and `@` lists lived in the closure that built the field, and the field is
+     * rebuilt by every render — a five-second refresh, a reply arriving, a window moving
+     * under the toolbar. So a list of files read from disk was thrown away before the
+     * person could pick from it, because something unrelated happened somewhere else.
+     */
+    const page = readFileSync(new URL("toolbar/ui/toolbar.js", dir2), "utf8");
+    const compose = readFileSync(new URL("toolbar/ui/toolbar-compose.js", dir2), "utf8");
+    expect(page).toContain("ask: { mark: null, showing: [], picked: 0 }");
+    expect(compose).toContain("const asking = state.ask;");
+    // Remembering is half of it; the element is gone too and has to be drawn again.
+    expect(compose).toContain("if (asking.showing.length > 0) draw();");
+  });
 
   test("a receipt and a failure stop looking the same", () => {
     /*

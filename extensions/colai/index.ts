@@ -52,6 +52,20 @@ const ColaiConfigSchema = z.strictObject({
    * installed and built, waiting to be started by hand.
    */
   autostart: z.boolean().optional(),
+
+  /**
+   * The keys that bring the toolbar up from anywhere.
+   *
+   * Every other shortcut the rail advertises is a single letter the page handles, and the
+   * page only hears a key once the overlay holds the keyboard — which it takes when a
+   * panel opens and at no other time. So the letters were unreachable from the desktop,
+   * which is exactly where somebody is standing when they want to mark something.
+   *
+   * Configurable because a chord is the one setting that can collide with a desktop
+   * nobody here can see. Left unset it is Ctrl+Alt+Space, and a binding another program
+   * already holds is reported rather than silently doing nothing.
+   */
+  hotkey: z.string().optional(),
 });
 
 const configSchema = buildPluginConfigSchema(ColaiConfigSchema);
@@ -100,6 +114,7 @@ export default definePluginEntry({
       );
     }
     const autostart = parsed.data.autostart ?? true;
+    const hotkey = parsed.data.hotkey;
 
     // `openclaw colai show|hide|toggle|status` — the whole control surface outside the
     // toolbar's own window, and the only one a plugin can offer without changing
@@ -126,7 +141,14 @@ export default definePluginEntry({
     api.registerService({
       id: "colai-toolbar",
       // Turning autostart off should put the toolbar away, not wait for a restart.
-      reload: { configPrefixes: ["plugins.entries.colai.config.autostart"] },
+      // The hotkey too: it is read when the toolbar starts, so changing it has to
+      // restart the toolbar or the setting would appear to do nothing until a reboot.
+      reload: {
+        configPrefixes: [
+          "plugins.entries.colai.config.autostart",
+          "plugins.entries.colai.config.hotkey",
+        ],
+      },
       start(ctx) {
         if (!autostart) {
           ctx.logger.info("colai: autostart is off, so the toolbar is not being started.");
@@ -162,7 +184,7 @@ export default definePluginEntry({
           return;
         }
         toolbar = new Toolbar(binary, whereabouts());
-        toolbar.start(logFile(ctx.stateDir), ctx.logger);
+        toolbar.start(logFile(ctx.stateDir), ctx.logger, hotkey);
       },
       stop() {
         return toolbar?.stop() ?? Promise.resolve();

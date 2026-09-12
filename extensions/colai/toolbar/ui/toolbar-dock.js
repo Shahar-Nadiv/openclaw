@@ -352,3 +352,90 @@ function clamp() {
   // falls through to the desktop. Silent, and indistinguishable from a dead button.
   shape();
 }
+
+/* ── the first run ────────────────────────────────────────────────────────────
+ *
+ * Four things about this toolbar cannot be discovered by looking at it, and every one of
+ * them is load-bearing: the grip moves it and double-clicking puts it away, the fold key
+ * hides the exact tools, `/` chooses how a message is read, and `@` brings in a file.
+ *
+ * There was no teaching surface at all. `/` and `@` were named in a placeholder that
+ * disappears on the first keystroke, and the other two were named nowhere. So this is one
+ * pass, shown once, over the things somebody would otherwise never find — not a tour, and
+ * not a thing that comes back on its own.
+ */
+
+/** Where the answer to "have they seen this" is kept. */
+const TIPS_SEEN = "colai.tips.seen";
+
+/** What nobody guesses, in the order they will meet it. */
+const TIPS = [
+  ["Move it", "Drag the grip. Double-click it to put the toolbar away."],
+  ["Fold it", "The fold key tucks the exact tools out of the way."],
+  ["Say how", "Type / in the box to choose how a message is read."],
+  ["Bring a file", "Type @ in the box to name a file to send with it."],
+];
+
+function tipsWereSeen() {
+  try {
+    return window.localStorage.getItem(TIPS_SEEN) === "yes";
+  } catch {
+    // A browser that will not remember is one that gets told again. Annoying beats a
+    // toolbar that refuses to start over a storage permission.
+    return false;
+  }
+}
+
+function rememberTipsSeen() {
+  try {
+    window.localStorage.setItem(TIPS_SEEN, "yes");
+  } catch {}
+}
+
+/** Show them again, from the tray, for somebody who dismissed them too fast. */
+function showTips() {
+  state.tips = true;
+  render();
+}
+
+function drawTips() {
+  if (!el.tips) return;
+  el.tips.hidden = !state.tips;
+  if (!state.tips) return;
+
+  const rows = [];
+  const head = document.createElement("div");
+  head.className = "tips-head";
+  const title = document.createElement("strong");
+  title.textContent = "Four things worth knowing";
+  head.append(title);
+  rows.push(head);
+
+  for (const [what, how] of TIPS) {
+    const row = document.createElement("p");
+    row.className = "tips-row";
+    const name = document.createElement("span");
+    name.className = "tips-what";
+    name.textContent = what;
+    const said = document.createElement("span");
+    said.textContent = how;
+    row.append(name, said);
+    rows.push(row);
+  }
+
+  const foot = document.createElement("div");
+  foot.className = "tips-foot";
+  const done = document.createElement("button");
+  done.type = "button";
+  done.className = "popup-do popup-go";
+  done.textContent = "Got it";
+  done.addEventListener("click", () => {
+    state.tips = false;
+    rememberTipsSeen();
+    render();
+  });
+  foot.append(done);
+  rows.push(foot);
+
+  el.tips.replaceChildren(...rows);
+}

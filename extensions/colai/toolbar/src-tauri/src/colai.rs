@@ -814,6 +814,17 @@ pub(crate) fn toolbar_is_showing(app: &AppHandle) -> bool {
 #[tauri::command]
 pub(crate) fn colai_release(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(OVERLAY_LABEL) {
+        // Taking the keyboard is a hint turned on, and it was never turned off again: a
+        // dock that has once said "you may focus me" goes on saying it, so afterwards
+        // every click near the rail could pull focus off the work the toolbar sits over.
+        // It matters more now that a global shortcut can take the keyboard from anywhere.
+        #[cfg(target_os = "linux")]
+        {
+            use gtk::prelude::GtkWindowExt;
+            if let Ok(gtk_window) = window.gtk_window() {
+                gtk_window.set_accept_focus(false);
+            }
+        }
         window
             .hide()
             .map_err(|error| format!("Could not hide the overlay: {error}"))?;

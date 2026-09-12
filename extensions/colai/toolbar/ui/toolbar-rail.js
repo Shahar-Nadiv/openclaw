@@ -272,6 +272,7 @@ function lengthRow(into, seconds) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "row";
+  button.setAttribute("role", "menuitem");
   button.dataset.seconds = String(seconds);
   button.innerHTML = icon("record", 14) + `<span>${seconds} seconds</span>`;
   button.addEventListener("click", () => {
@@ -366,6 +367,7 @@ function penRow(into, id, pen) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "row";
+  button.setAttribute("role", "menuitem");
   button.dataset.pen = id;
   button.innerHTML = icon(pen.glyph, 14) + `<span>${pen.label}</span>`;
   button.addEventListener("click", () => {
@@ -389,6 +391,7 @@ function designRow(into, id, kind) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "row";
+  button.setAttribute("role", "menuitem");
   button.dataset.tool = "design";
   button.dataset.kind = id;
   button.innerHTML = icon(kind.glyph, 14) + `<span>${kind.label}</span>`;
@@ -409,6 +412,7 @@ function gitRow(into, id, kind) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "row";
+  button.setAttribute("role", "menuitem");
   button.dataset.tool = "git";
   button.dataset.kind = id;
   button.innerHTML = icon(kind.glyph, 14) + `<span>${kind.label}</span>`;
@@ -419,10 +423,13 @@ function gitRow(into, id, kind) {
   into.append(button);
 }
 
+// Every row here sits inside a `role="menu"`, so each one is an item of it. Without
+// this the menus announced a count of nothing and arrow keys had no list to walk.
 function row(into, tool, label, glyph, press) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "row";
+  button.setAttribute("role", "menuitem");
   button.dataset.tool = tool;
   button.innerHTML =
     icon(glyph, 14) +
