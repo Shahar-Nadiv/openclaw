@@ -761,6 +761,23 @@ struct CachedAgents {
     result: AgentsListResult,
 }
 
+/// The conversation list, for as long as it is certainly still true.
+struct CachedSessions {
+    fetched_at: Instant,
+    result: SessionsListResult,
+}
+
+/// How long two callers asking the same question count as one asking.
+///
+/// The panel and the rail both want the conversation list, and they want it in the same
+/// breath: `loadWork` asks, and `colai_at_work` asks again microseconds later for a count
+/// derived from the same rows. That was two identical round trips every five seconds
+/// forever — around half of everything this toolbar pulled while nobody was touching it.
+///
+/// Deliberately far shorter than the tick that drives them. This is not a cache of the
+/// conversation list; it is a way of noticing that one question was asked twice.
+const SESSIONS_ARE_FRESH_FOR: Duration = Duration::from_millis(750);
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ChatSendParams {
@@ -997,6 +1014,7 @@ struct GatewayClientInner {
     identity: Mutex<Option<GatewayDeviceIdentityStore>>,
     /// What the Gateway said this connection may do, from the last handshake.
     scopes: Mutex<Vec<String>>,
+    sessions_cache: Mutex<Option<CachedSessions>>,
     /// The sessions this toolbar is listening to.
     ///
     /// A subscription lives on the connection, not on the account, so every one of them
@@ -1024,6 +1042,7 @@ impl GatewayClient {
                 config_generation: AtomicU64::new(0),
                 commands: Mutex::new(None),
                 scopes: Mutex::new(Vec::new()),
+                sessions_cache: Mutex::new(None),
                 watching: Mutex::new(std::collections::BTreeSet::new()),
                 agents_cache: Mutex::new(None),
                 identity: Mutex::new(None),
@@ -1142,10 +1161,26 @@ impl GatewayClient {
         if !self.is_connected() {
             return Err("Gateway unreachable — retrying".to_string());
         }
+        // Answered from the last one if it is younger than a blink. See
+        // `SESSIONS_ARE_FRESH_FOR`: the two callers that want this want it together, and
+        // asking twice cost a duplicate of the largest message the toolbar receives.
+        if let Ok(held) = self.inner.sessions_cache.lock() {
+            if let Some(cached) = held.as_ref() {
+                if cached.fetched_at.elapsed() < SESSIONS_ARE_FRESH_FOR {
+                    return Ok(cached.result.clone());
+                }
+            }
+        }
         let response = self.request(GatewayRequest::SessionsList).await?;
         let GatewayResponse::SessionsList(result) = response else {
             return Err("Gateway returned the wrong response for sessions.list.".to_string());
         };
+        if let Ok(mut held) = self.inner.sessions_cache.lock() {
+            *held = Some(CachedSessions {
+                fetched_at: Instant::now(),
+                result: result.clone(),
+            });
+        }
         Ok(result)
     }
 
@@ -2535,6 +2570,25 @@ fn dispatch_session_message<R: tauri::Runtime>(app: &AppHandle<R>, frame: &Value
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two callers asking in the same breath is one question, not a cache.
+    ///
+    /// The guard is on the size of the window rather than on the behaviour, because the
+    /// behaviour needs a Gateway. It is the number that matters: this exists to notice
+    /// that `loadWork` and `colai_at_work` want the same list microseconds apart, and
+    /// anything approaching the five-second refresh would stop being that and start being
+    /// a stale conversation list shown to somebody watching an agent work.
+    #[test]
+    fn the_sessions_window_is_a_blink_not_a_cache() {
+        assert!(
+            SESSIONS_ARE_FRESH_FOR < Duration::from_secs(1),
+            "long enough to serve a stale list to the panel that refreshes every 5s"
+        );
+        assert!(
+            SESSIONS_ARE_FRESH_FOR >= Duration::from_millis(100),
+            "too short to catch the second of two calls made together"
+        );
+    }
 
     /// A subscription belongs to a socket, so a new socket has to be told again.
     ///

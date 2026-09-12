@@ -377,11 +377,23 @@ fn apply_shape(_window: &WebviewWindow, _rects: &[(i32, i32, i32, i32)]) -> Resu
 ///
 /// Null when it cannot tell, which reads as "no connector" — the safe answer rather
 /// than the convenient one.
+/// Asked off the main thread, because answering it is three programs and a `/proc` walk.
+///
+/// A synchronous Tauri command runs on the thread that draws, and this one is not cheap:
+/// two `xprop` runs, an `xwininfo`, and a walk of `/proc` to name the process behind the
+/// window. That is milliseconds of the UI thread every time somebody makes a mark — the
+/// one moment they are watching the screen closely — and it showed as the toolbar
+/// hesitating under the hand that was drawing on it.
+///
+/// `spawn_blocking` rather than plain `async`: the work is blocking whichever thread it
+/// lands on, and an async command lands on a tokio worker shared with the Gateway socket.
+/// Nothing here touches GDK, which is what makes moving it off the main thread safe at
+/// all — the contact sheet next door is the counter-example.
 #[tauri::command]
-pub(crate) fn colai_frontmost() -> Option<Front> {
+pub(crate) async fn colai_frontmost() -> Option<Front> {
     #[cfg(target_os = "linux")]
     {
-        frontmost_x11()
+        tokio::task::spawn_blocking(frontmost_x11).await.ok().flatten()
     }
     #[cfg(not(target_os = "linux"))]
     {
