@@ -4518,8 +4518,8 @@ describe("clicking away closes what is open", () => {
     expect(after, "lowered again whatever happened").toContain("state.capturing = false");
     expect(
       after.indexOf("state.capturing = false") <
-        after.indexOf('document.body.style.visibility = ""'),
-      "lowered with the same `finally` that gives the page back",
+        after.indexOf("for (const layer of putAway) layer.style.visibility"),
+      "lowered with the same `finally` that gives the layers back",
     ).toBe(true);
   });
 
@@ -4965,6 +4965,47 @@ describe("the work panel is a view of OpenClaw's conversations", () => {
     expect(compose).toContain("const asking = state.ask;");
     // Remembering is half of it; the element is gone too and has to be drawn again.
     expect(compose).toContain("if (asking.showing.length > 0) draw();");
+  });
+
+  test("the toolbar gets out of the picture without blinking off the screen", () => {
+    /*
+     * A capture photographs the desktop, and this window is on the desktop, so whatever
+     * it is drawing lands in the shot. It solved that by hiding the whole body: every
+     * layer, the rail included, for two frames and forty milliseconds, on every single
+     * mark. That is the blink somebody sees the moment they finish a gesture — and the
+     * rail is almost never inside the region being photographed.
+     */
+    const mark = readFileSync(new URL("toolbar/ui/toolbar-mark.js", dir2), "utf8");
+    expect(mark, "the whole page no longer goes dark").not.toContain(
+      'document.body.style.visibility = "hidden"',
+    );
+    expect(mark).toContain("function hideFromTheShot(");
+    // Each layer is asked whether it is actually in shot.
+    expect(mark).toContain("getBoundingClientRect()");
+    // And the new mark is not drawn and then hidden for its own photograph.
+    expect(mark).toContain("if (held.shooting) continue;");
+    expect(mark).toContain("delete mark.shooting;");
+  });
+
+  test("what the page thinks is in shot is what the crop actually takes", () => {
+    /*
+     * The page decides which layers to hide, so it has to know how far past the mark the
+     * picture reaches — and that is decided in Rust. Too small a margin does not show up
+     * as a visual bug: it shows up as the toolbar standing in somebody's screenshot.
+     *
+     * A first attempt used 64px against a crop that grows a point mark by about 151.
+     */
+    const page = readFileSync(new URL("toolbar/ui/toolbar-mark.js", dir2), "utf8");
+    const rust = readFileSync(new URL("toolbar/src-tauri/src/colai_marks.rs", dir2), "utf8");
+
+    for (const [name, value] of [
+      ["OUTLINE_ROOM", "12"],
+      ["CONTEXT_SHARE", "0.14"],
+      ["CONTEXT_LEAST", "140"],
+    ]) {
+      expect(page, `${name} in the page`).toContain(`const ${name} = ${value};`);
+      expect(rust, `${name} in the crop`).toContain(`const ${name}: f64 = ${value}`);
+    }
   });
 
   test("the pill is the same size whether anything is marked or not", () => {

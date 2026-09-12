@@ -217,6 +217,8 @@ function addMark(mark) {
   // address is read after the picture is taken, so it is stamped on in `shoot` where
   // the rest of the address is.
   if (mark.tool === "git") mark.git = state.gitKind;
+  // Until there is a photograph of what it is about. See `drawMarks`.
+  mark.shooting = true;
   state.marks.push(mark);
   // A new mark ends the redo trail: what was undone is no longer what comes next.
   state.undone = [];
@@ -251,6 +253,96 @@ async function shoot(mark) {
  * Split from `shoot` because the popup and the keyboard grab are what a person wants
  * when they have just marked something, and a picture is worth taking without them.
  */
+/*
+ * Getting out of the picture, without the toolbar disappearing to do it.
+ *
+ * A capture is a photograph of the desktop, and this window is on the desktop — so
+ * anything it is drawing lands in the shot. It used to solve that by hiding the whole
+ * body: every layer, the rail included, for two frames and forty milliseconds, on every
+ * single mark. That is the blink. The rail is almost never inside the region being
+ * photographed, and it was being taken off the screen anyway.
+ *
+ * So each layer is asked whether it is actually in shot. The marks are, by definition —
+ * they are drawn on the thing being photographed. The rail, a popup, a toast usually are
+ * not, and stay exactly where they are.
+ *
+ * `visibility` rather than `display` or `opacity`, as before: it is the one property a
+ * child can turn back on underneath a hidden ancestor, which is how the recording frame
+ * stays visible while everything around it goes.
+ */
+
+/** The layers that could show up in a photograph, in the order they are stacked. */
+const IN_SHOT = ["rail-wrap", "marks", "pins", "popup", "library", "toasts", "flights"];
+
+/*
+ * How far past the mark the picture actually reaches.
+ *
+ * These three are `OUTLINE_ROOM`, `CONTEXT_SHARE` and `CONTEXT_LEAST` in
+ * `src-tauri/src/colai_marks.rs`, which is where the crop is really decided. They are
+ * repeated here because this side has to know what will be in the photograph *before*
+ * asking for it, and a guess is not good enough in one direction: too small and the
+ * toolbar is left standing in somebody's screenshot.
+ *
+ * A region is its own rectangle plus room for the outline drawn on it. Anything else — a
+ * point, a stroke, a measurement — is photographed with a wide margin of context around
+ * it, because a dot with nothing around it tells an agent nothing. On a 1080-tall screen
+ * that margin is about 151px, not a rounding error.
+ *
+ * `colai_marks.rs` works in physical pixels and this works in CSS pixels. Using the same
+ * numbers therefore over-estimates on a HiDPI screen, which is the direction to be wrong
+ * in. The test beside this holds the two files to the same figures.
+ */
+const OUTLINE_ROOM = 12;
+const CONTEXT_SHARE = 0.14;
+const CONTEXT_LEAST = 140;
+
+/** Where on the page this mark is about to photograph, in CSS pixels. */
+function shotBox(mark) {
+  const across = window.innerWidth;
+  const down = window.innerHeight;
+  const box = mark.region
+    ? mark.region.box
+    : mark.points && mark.points.length
+      ? boxOf(mark.points)
+      : null;
+  // No box is a whole-display capture, and everything is in that.
+  if (!box) return null;
+  const room = mark.region
+    ? OUTLINE_ROOM
+    : Math.max(Math.min(across, down) * CONTEXT_SHARE, CONTEXT_LEAST);
+  return {
+    left: box.x * across - room,
+    top: box.y * down - room,
+    right: (box.x + box.w) * across + room,
+    bottom: (box.y + box.h) * down + room,
+  };
+}
+
+function overlaps(rect, shot) {
+  return (
+    rect.left < shot.right &&
+    rect.right > shot.left &&
+    rect.top < shot.bottom &&
+    rect.bottom > shot.top
+  );
+}
+
+/** Take the layers that are in shot off the screen, and say which they were. */
+function hideFromTheShot(mark) {
+  const shot = shotBox(mark);
+  const putAway = [];
+  for (const id of IN_SHOT) {
+    const layer = document.getElementById(id);
+    if (!layer || layer.hidden) continue;
+    // No box means no way to tell, which is the one case worth being timid about: a
+    // whole-display capture has no region, and everything is in it.
+    if (shot && id !== "marks" && !overlaps(layer.getBoundingClientRect(), shot)) continue;
+    layer.style.visibility = "hidden";
+    putAway.push(layer);
+  }
+  return putAway;
+}
+
 async function photograph(mark) {
   // What is in front *now*. A mark is about the window somebody is looking at, and
   // reading that once when the app started answered a question about a different
@@ -279,7 +371,7 @@ async function photograph(mark) {
       points: (mark.points || []).map((point) => intoWindow(point, mark.on.at, screen)),
     };
   }
-  document.body.style.visibility = "hidden";
+  const putAway = hideFromTheShot(mark);
   // Said out loud, because going invisible makes somebody else's window the front one
   // and the rule that closes panels on that would otherwise fire on every mark.
   state.capturing = true;
@@ -307,7 +399,10 @@ async function photograph(mark) {
   } finally {
     stopRecording();
     state.capturing = false;
-    document.body.style.visibility = "";
+    for (const layer of putAway) layer.style.visibility = "";
+    // Drawn from here on, picture or no picture: a capture that failed still leaves a
+    // mark somebody made and can describe.
+    delete mark.shooting;
   }
 }
 
@@ -352,6 +447,11 @@ function drawMarks() {
   // Whether marks are on the screen at all: only while a tool is out.
   const look = { tool: state.tool };
   for (const held of state.marks) {
+    // Not while it is being photographed. It used to be drawn the instant it was made
+    // and then hidden for its own capture, so a mark appeared, vanished for the length
+    // of the shot, and came back — the flash somebody sees the moment they finish a
+    // gesture. Drawn once, when there is a picture of what it is about.
+    if (held.shooting) continue;
     if (!showingNow(held, front, look)) continue;
     const mark = asDrawn(held, front, screen);
     // A span has no region — it is two points and the distance between them — so the
