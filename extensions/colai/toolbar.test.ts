@@ -2951,7 +2951,7 @@ describe("the work panel belongs to the toolbar", () => {
     );
     expect(folding.slice(0, 400), "the claw is what stays").toContain('id === "settings"');
     expect(folding.slice(0, 400), "and both folds close the same way").toMatch(
-      /foldedAway\(\) \|\| \(EXACT\.includes\(id\) && state\.tucked\)/,
+      /foldedAway\(\) \|\|[\s\S]{0,80}EXACT\.includes\(id\) && state\.tucked/,
     );
 
     // Nothing hangs off a rail that is not there.
@@ -4967,6 +4967,25 @@ describe("the work panel is a view of OpenClaw's conversations", () => {
     expect(compose).toContain("if (asking.showing.length > 0) draw();");
   });
 
+  test("the pill is the same size whether anything is marked or not", () => {
+    /*
+     * The count of waiting marks was a flex item on the send key, so the rail grew the
+     * moment anything was marked — and grew again at ten marks, when the number took a
+     * second digit. A toolbar that changes width while somebody is drawing on their own
+     * screen reads as a glitch.
+     *
+     * It is not only visual. A new width means the rail is measured and placed again, and
+     * a fresh set of rectangles crosses to the window manager — on every single mark.
+     */
+    const css = readFileSync(new URL("toolbar/ui/toolbar.css", dir2), "utf8");
+    const badge = css.slice(css.indexOf(".send-many {"), css.indexOf(".send-many:empty"));
+    expect(badge, "laid over the key, not laid out beside it").toContain("position: absolute");
+    expect(
+      css.slice(css.indexOf(".send-key {"), css.indexOf(".send-key[data-waiting")),
+      "and the key it is positioned against says so",
+    ).toContain("position: relative");
+  });
+
   test("model and effort sit with the conversation, not with the message", () => {
     /*
      * They were on the composer's send row and the row above it, which said twice over
@@ -5423,6 +5442,14 @@ describe("stopping an agent from the rail", () => {
     expect(rail).toContain("function runsBeingReceived()");
     // And the key is hidden or shown by that same list.
     expect(page).toContain("const stoppable = runsBeingReceived()");
-    expect(page).toContain("buttons.stop.hidden = stoppable.length === 0");
+    // Folded rather than hidden: `hidden` takes a key out of the rail between two frames,
+    // so the pill changed length in one jump the moment an agent started working. It uses
+    // the same animation the exact tools do, because it is the same thing — a key that is
+    // not currently wanted.
+    expect(page).toContain("const canStop = stoppable.length > 0;");
+    expect(page).toContain('(id === "stop" && !canStop)');
+    expect(rail, "and folded from the start, since nothing clears `hidden` now").toContain(
+      'stop.dataset.folded = "true"',
+    );
   });
 });

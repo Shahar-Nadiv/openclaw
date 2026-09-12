@@ -735,6 +735,9 @@ body {
 /* ── sending what was marked ──────────────────────────────────────────────── */
 
 .send-key {
+  /* The count sits on top of this rather than beside it, so the key is the same size
+     whether anything is waiting or not. See `.send-many`. */
+  position: relative;
   gap: 4px;
   padding: 0 8px;
 }
@@ -743,17 +746,36 @@ body {
 .send-key[data-waiting="true"] {
   color: var(--text-strong);
 }
+/*
+ * The count, laid over the key rather than laid out beside it.
+ *
+ * In the flex row it was part of the rail's width, so the whole pill grew the moment
+ * anything was marked — and grew again at ten marks, when the number took a second digit.
+ * A toolbar that changes size while somebody is using it reads as a glitch, and it is not
+ * only a visual one: a new width means the rail is measured and placed again, and a new
+ * set of rectangles crosses to the window manager, on every single mark.
+ *
+ * Out of flow, the key is 34px whether anything is waiting or not.
+ */
 .send-many {
-  min-width: 15px;
-  height: 15px;
-  padding: 0 4px;
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  box-sizing: border-box;
   border-radius: 999px;
+  /* Against the pill behind it, not against the key: the badge overhangs the key's edge,
+     and without this the two reds touch and read as one shape. */
+  border: 1.5px solid var(--chrome-strong);
   font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 15px;
+  font-size: 9.5px;
+  line-height: 11px;
   text-align: center;
   color: var(--card);
   background: var(--accent);
+  pointer-events: none;
 }
 .send-many:empty {
   display: none;

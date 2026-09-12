@@ -371,7 +371,11 @@ function render() {
   // and the panel is already filtered to it — a run whose conversation is not on screen is
   // not one this key is about.
   const stoppable = runsBeingReceived();
-  buttons.stop.hidden = stoppable.length === 0;
+  // Not `hidden`, which takes a key out of the rail between two frames and makes the
+  // pill change length in one jump. It folds, like the exact tools do — the same
+  // animation, because it is the same thing happening: a key that is not currently
+  // wanted. The rail still gets wider while an agent is running, but it grows into it.
+  const canStop = stoppable.length > 0;
   buttons.stop.title = stoppable.length === 1 ? "Stop the agent" : `Stop ${stoppable.length} runs`;
 
   // The mascot carries what the whole Gateway is doing, including the agents somebody
@@ -440,7 +444,12 @@ function render() {
   // than a second one that would have to agree with it.
   for (const [id, button] of Object.entries(buttons)) {
     if (id === "settings") continue;
-    button.dataset.folded = String(foldedAway() || (EXACT.includes(id) && state.tucked));
+    button.dataset.folded = String(
+      foldedAway() ||
+        (EXACT.includes(id) && state.tucked) ||
+        // Nothing to stop is the ordinary state, and the key is not there for it.
+        (id === "stop" && !canStop),
+    );
   }
   // Drawn shut for one frame longer than it is meant to be, on the way open: see
   // `foldedAway`. The rail's own state is unchanged — only what is on screen.

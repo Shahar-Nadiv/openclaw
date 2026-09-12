@@ -217,7 +217,9 @@ function buildRail() {
   // is never a key somebody can press by reflex looking for something else.
   const stop = key("stop", "Stop the agent", "stop", () => void stopReceiving());
   stop.classList.add("stop-key");
-  stop.hidden = true;
+  // Folded rather than hidden, and folded from the start: `render` decides from here on,
+  // and `hidden` set once here would have outlived it — nothing clears it any more.
+  stop.dataset.folded = "true";
 
   dividers[2].after(send, agents, stop, home);
 
