@@ -4967,6 +4967,29 @@ describe("the work panel is a view of OpenClaw's conversations", () => {
     expect(compose).toContain("if (asking.showing.length > 0) draw();");
   });
 
+  test("model and effort sit with the conversation, not with the message", () => {
+    /*
+     * They were on the composer's send row and the row above it, which said twice over
+     * that they were part of the message being written: they are not. Both belong to the
+     * conversation, and the toolbar already stored them that way — beside the dock
+     * position, not with the text. On the send row they cost a third of its width and
+     * shortened the receiver's name to make room.
+     *
+     * They open from the control that chooses who answers, and that control says what
+     * they are — hiding the switch is fine, hiding the answer is not.
+     */
+    const compose = readFileSync(new URL("toolbar/ui/toolbar-compose.js", dir2), "utf8");
+    const html = readFileSync(new URL("toolbar/ui/toolbar.html", dir2), "utf8");
+
+    expect(compose).toContain("function drawAnswerSettings(");
+    expect(html, "inside the popover the receiver already opens").toContain('id="agent-answer"');
+    // Off the send row, both of them.
+    expect(compose).toContain("foot.append(to, modePick(), gap, inField, key, go);");
+    expect(compose, "and off the row above").not.toContain("if (effort) extras.append(effort);");
+    // Named where the choice is made.
+    expect(compose).toContain("popup-to-how");
+  });
+
   test("a receipt and a failure stop looking the same", () => {
     /*
      * Twenty-five places wrote to one strip, and it gave every one of them the same red

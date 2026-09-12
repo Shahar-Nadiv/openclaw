@@ -2681,3 +2681,45 @@ body {
   justify-content: flex-end;
   margin-top: 2px;
 }
+
+/* ── how the receiver answers ────────────────────────────────────────────────
+ *
+ * Model and effort sat on the composer's send row and on the row above it, which said
+ * they were part of the message being written. They are not: they belong to the
+ * conversation, and the toolbar has always stored them that way. They live with the
+ * choice of who is answering now, and the receiver control says what they are. */
+.agent-answer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 2px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+  margin-top: 6px;
+}
+
+.agent-answer-said {
+  flex: none;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted-dim);
+}
+
+/* The name and, under it, what will read the message. Two lines in the space the name
+   used to take alone, because the second is a caption and is set as one. */
+.popup-to-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.popup-to-how {
+  font-size: 10px;
+  color: var(--muted-dim);
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

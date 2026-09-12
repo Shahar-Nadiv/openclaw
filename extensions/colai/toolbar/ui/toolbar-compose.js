@@ -1399,11 +1399,24 @@ function drawComposer(into) {
   const named = document.createElement("span");
   named.className = "popup-to-name";
   named.textContent = state.receiving.name || "Choose who receives";
+  // What they will answer with, under their name. Moving the two controls into the
+  // popover would otherwise have hidden the answer as well as the switch — and which
+  // model is about to read this is worth knowing without opening anything.
+  const how = document.createElement("span");
+  how.className = "popup-to-how";
+  const chosen = modelNow();
+  const level = effortStops(chosen).find((stop) => stop.id === state.effort);
+  how.textContent = [chosen ? chosen.name : state.model, level && level.label]
+    .filter(Boolean)
+    .join(" · ");
+  const stack = document.createElement("span");
+  stack.className = "popup-to-stack";
+  stack.append(named, ...(how.textContent ? [how] : []));
   const mark = document.createElement("span");
   mark.className = "caret";
   mark.textContent = "▾";
-  to.append(lit, named, mark);
-  to.title = "Choose who receives this";
+  to.append(lit, stack, mark);
+  to.title = "Choose who receives this, and how they answer";
   to.addEventListener("click", () => flyout("agents"));
   // What the toolbar can see, offered rather than done.
   //
@@ -1515,11 +1528,11 @@ function drawComposer(into) {
   // room for "Schedule…" is the wrong thing to have shortened.
   const extras = document.createElement("div");
   extras.className = "compose-more";
+  // The row of small things: what else could happen to this message. Model and effort
+  // used to be here and on the row below, which said they were part of what was being
+  // written. They are conversation settings and are stored as such, so they sit with the
+  // choice of who is answering now — see `drawAnswerSettings`.
   extras.append(fileAdd(), later);
-  // The row of small things: what else could happen to this message, and how hard it
-  // should be thought about. The slider takes whatever width the two words leave.
-  const effort = effortPick();
-  if (effort) extras.append(effort);
   rows.push(extras);
 
   // Who and how on the left, what happens to it on the right. `to` takes whatever room
@@ -1528,7 +1541,7 @@ function drawComposer(into) {
   gap.className = "compose-gap";
   // Who, how it should be taken, and which model takes it — the three facts about the
   // answer, in the order they were asked for. Then what happens to it, on the right.
-  foot.append(to, modePick(), modelPick(), gap, inField, key, go);
+  foot.append(to, modePick(), gap, inField, key, go);
   rows.push(foot);
 
   into.replaceChildren(...rows);
@@ -1618,6 +1631,26 @@ function drawWho() {
     if (open.has(project.key)) rows.push(...project.threads.map(threadRow));
   }
   el.agentRows.replaceChildren(...rows);
+  drawAnswerSettings();
+}
+
+/**
+ * How the chosen receiver should answer: which model, and how hard it thinks.
+ *
+ * Here rather than in the composer because that is what they are about. Both are
+ * properties of the conversation, not of the message being written — the toolbar already
+ * stores them that way, beside the dock position rather than with the text — and putting
+ * them on the send row said the opposite twice over: that they were part of this message,
+ * and that they were worth a third of the width of the row that sends it.
+ */
+function drawAnswerSettings() {
+  if (!el.agentAnswer) return;
+  const model = modelPick();
+  const effort = effortPick();
+  const said = document.createElement("span");
+  said.className = "agent-answer-said";
+  said.textContent = "Answers with";
+  el.agentAnswer.replaceChildren(said, model, ...(effort ? [effort] : []));
 }
 
 /** A folder, as a row that opens. */

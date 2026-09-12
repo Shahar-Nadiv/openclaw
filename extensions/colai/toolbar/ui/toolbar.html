@@ -72,6 +72,13 @@
             role="menu"
             aria-labelledby="agents-title"
           ></div>
+          <!--
+            Which model answers, and how hard it thinks. They belong to the conversation
+            rather than to the message, and they are already stored that way — so they
+            sit with the choice of who is answering rather than in the composer, where
+            they cost a row of a panel that is short of rows.
+          -->
+          <div id="agent-answer" class="agent-answer"></div>
         </div>
       </div>
 
