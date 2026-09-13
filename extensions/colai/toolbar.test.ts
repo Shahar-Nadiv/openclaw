@@ -3377,6 +3377,17 @@ describe("saying what the agent is doing, not what it found", () => {
     );
     expect(doingOf(call("bash", { command: "NODE_ENV=test npx vitest run" }))).toBe("Running npx");
     expect(doingOf(call("bash", { command: "/usr/bin/python3 take.py" }))).toBe("Running python3");
+    // The one that was found by watching it: agents open nearly every shell call by
+    // changing directory, and the first take that showed this feature said "Running cd"
+    // three times in a row while it edited a stylesheet.
+    expect(doingOf(call("bash", { command: "cd ~/Desktop/market_lab && npm run typecheck" }))).toBe(
+      "Running npm",
+    );
+    expect(doingOf(call("bash", { command: "cd /tmp && grep -rn accent src | head" }))).toBe(
+      "Running grep",
+    );
+    // A line that is nothing but scaffolding still says what it can, rather than nothing.
+    expect(doingOf(call("bash", { command: "cd ~/Desktop" }))).toBe("Running cd");
   });
 
   test("a tool nothing knows about is named rather than guessed at", () => {
@@ -3463,6 +3474,49 @@ describe("saying what the agent is doing, not what it found", () => {
     expect(doingSaid({ said: "Reading a.css", sessionKey: "other", at: now }, busy, now)).toBe(
       DOING_FIRST,
     );
+  });
+
+  test("the pill lands on the screen, whichever edge the rail is against", () => {
+    // The failure this exists for was silent and total: the pill was placed eight pixels
+    // *below* a rail docked at the bottom of the screen, which is off the bottom of the
+    // screen. It rendered on every frame of a two-minute take and appeared in none of
+    // them. Nothing in the page could have caught it — the element was there, unhidden,
+    // sized and carrying the right words.
+    //
+    // So the stylesheet is read, and the rule is the one thing that cannot be got wrong:
+    // whatever edge the rail is against, the pill must be placed away from it.
+    const css = readFileSync(new URL("./toolbar/ui/toolbar.css", import.meta.url), "utf8");
+    const placing = (selector: string) => {
+      const found = css.match(
+        new RegExp(`${selector.replace(/[.[\]"=]/g, "\\$&")}\\s*\\.doing\\s*\\{([^}]*)\\}`),
+      );
+      expect(found, selector).toBeTruthy();
+      const said = found![1]!;
+      const edge = (name: string) => {
+        const at = said.match(new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]+)`));
+        return at ? at[1]!.trim() : null;
+      };
+      return { top: edge("top"), bottom: edge("bottom"), left: edge("left"), right: edge("right") };
+    };
+
+    // Flat, and against the top of the screen or floating: hangs below the rail.
+    const flat = placing('.rail-wrap[data-vertical="false"]');
+    expect(flat.top).toMatch(/^calc\(100%/);
+    expect(flat.bottom).toBeNull();
+
+    // Flat and against the bottom: above it, or it is under the desktop.
+    const bottom = placing('.rail-wrap[data-dock="bottom"]');
+    expect(bottom.top).toBe("auto");
+    expect(bottom.bottom).toMatch(/^calc\(100%/);
+
+    // Upright: out to one side, and to the other side when the rail is against the right
+    // edge — the same rule, turned ninety degrees.
+    const upright = placing('.rail-wrap[data-vertical="true"]');
+    expect(upright.left).toMatch(/^calc\(100%/);
+    expect(upright.right).toBeNull();
+    const right = placing('.rail-wrap[data-dock="right"]');
+    expect(right.left).toBe("auto");
+    expect(right.right).toMatch(/^calc\(100%/);
   });
 
   test("every tool named in the table says something", () => {

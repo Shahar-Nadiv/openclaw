@@ -1118,6 +1118,24 @@ async function start() {
    * says, and a banner announcing that everything is fine is a banner people learn to
    * ignore before the one that matters arrives.
    */
+  /*
+   * What it is doing, as it picks each tool up.
+   *
+   * A separate event from the reply, because it is separate news arriving on a separate
+   * schedule: a reply is what the agent has decided to say and lands at the end of a
+   * turn, and this lands the moment it reaches for something. Waiting for the reply
+   * would mean the pill said "Thinking" for the whole of a run and then named a tool
+   * once the run was over.
+   */
+  void listen("colai:doing", (event) => {
+    const said = event && event.payload;
+    if (!said || !said.name) return;
+    const doing = doingTool({ name: said.name, args: said.args || {} });
+    if (!doing) return;
+    state.doing = { said: doing, sessionKey: said.sessionKey || null, at: Date.now() };
+    render();
+  }).catch(() => {});
+
   void listen("colai:gateway", (event) => {
     const said = event && event.payload;
     if (!said || said.state === "up") return;

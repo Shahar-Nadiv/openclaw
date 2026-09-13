@@ -61,8 +61,16 @@ run("docker", [
 const work = mkdtempSync(join(tmpdir(), "colai-release-"));
 try {
   mkdirSync(join(work, "out"), { recursive: true });
-  cpSync(join(root, "toolbar", "src-tauri"), join(work, "src-tauri"), { recursive: true });
-  rmSync(join(work, "src-tauri", "target"), { recursive: true, force: true });
+  // `target/` is left behind rather than copied and then deleted. It used to be copied
+  // and then deleted, which is minutes of disk-to-disk for a directory the container has
+  // no use for — it builds from nothing — and on a full disk it is the thing that fails
+  // the build. A local `cargo test` puts three gigabytes of debug artifacts there, so
+  // this is the ordinary case rather than the unlucky one.
+  const notTheTarget = join(root, "toolbar", "src-tauri", "target");
+  cpSync(join(root, "toolbar", "src-tauri"), join(work, "src-tauri"), {
+    recursive: true,
+    filter: (from) => from !== notTheTarget && !from.startsWith(`${notTheTarget}/`),
+  });
   // `frontendDist` is `../ui`, so the page has to sit beside the crate exactly as it does
   // in the checkout, or the binary is built around an empty window.
   cpSync(join(root, "toolbar", "ui"), join(work, "ui"), { recursive: true });

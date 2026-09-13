@@ -1576,16 +1576,31 @@ function doingFile(args) {
   return segments[segments.length - 1] || said;
 }
 
-/** Words that stand in front of a command without being it. */
-const DOING_PASSED_THROUGH = new Set(["env", "sudo", "nice", "time", "nohup", "exec", "command"]);
+/**
+ * Words that stand in front of a command without being it, in the two ways that happens.
+ *
+ * A wrapper is followed by the program it wraps, in the same breath: `env -u FOO ffmpeg`.
+ * Moving somewhere is not — `cd` takes a directory and the actual work comes after the
+ * `&&` — so its own segment holds nothing worth naming and the next one does.
+ *
+ * `cd` earns its place by observation: agents open almost every shell call with
+ * `cd <somewhere> && <the actual thing>`, and the first take that showed this feature
+ * said "Running cd" three times in a row while it was editing a stylesheet.
+ */
+const DOING_WRAPPERS = new Set(["env", "sudo", "nice", "time", "nohup", "exec", "command"]);
+const DOING_MOVES = new Set(["cd", "pushd", "popd"]);
+
+/** Where one command in a line ends and the next begins. */
+const DOING_THEN = /\s*(?:&&|\|\||;|\|)\s*/;
 
 /**
  * The program a shell call runs.
  *
  * The first word rather than the whole line: a pipeline does not fit on a rail, and the
- * program is the part that says what is happening. What comes before it is stepped over
- * — wrappers, their options, and the variables set in front of a command — because
- * "Running env" is a sentence about nothing.
+ * program is the part that says what is happening. A line is read as the commands it is
+ * made of, and the answer is the first of them that names something somebody would
+ * recognise — past the wrappers, past their options, past the variables set in front, and
+ * past the move that opens nearly every shell call an agent makes.
  *
  * Variables are recognised by shouting, which is a convention rather than a rule. It is
  * the right way round to be wrong: a program named in capitals is rare, and losing one
@@ -1595,16 +1610,25 @@ const DOING_PASSED_THROUGH = new Set(["env", "sudo", "nice", "time", "nohup", "e
 function doingCommand(args) {
   const said = doingWords(args, ["command", "cmd", "script", "run"]);
   if (!said) return null;
-  const words = said.split(/\s+/).filter(Boolean);
-  const program = words.find(
-    (word) =>
-      !DOING_PASSED_THROUGH.has(word) &&
-      !word.startsWith("-") &&
-      !word.includes("=") &&
-      word !== word.toUpperCase(),
-  );
-  const word = program || words[0];
-  return word ? word.split("/").pop() || word : null;
+  let fallback = null;
+  for (const part of said.split(DOING_THEN)) {
+    for (const word of part.split(/\s+/).filter(Boolean)) {
+      if (word.startsWith("-") || word.includes("=") || word === word.toUpperCase()) continue;
+      const bare = word.split("/").pop() || word;
+      // Scaffolding is remembered rather than said, in case the whole line turns out to
+      // be nothing else — naming the first thing it does beats saying nothing at all.
+      if (DOING_WRAPPERS.has(bare)) {
+        if (!fallback) fallback = bare;
+        continue;
+      }
+      if (DOING_MOVES.has(bare)) {
+        if (!fallback) fallback = bare;
+        break;
+      }
+      return bare;
+    }
+  }
+  return fallback;
 }
 
 /** The host of a URL, which is the part of it worth reading at this size. */

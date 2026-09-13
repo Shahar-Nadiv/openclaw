@@ -2808,19 +2808,31 @@ body {
   }
 }
 
-/* Out of the crab, not out of the middle of the rail: the transform grows it from the
-   corner nearest the mascot, which on a horizontal rail is its own bottom right. */
+/*
+ * Out of the crab, not out of the middle of the rail: the pill is aligned to the rail's
+ * far end, which is where the mascot is, and the transform grows it from the corner
+ * nearest to it.
+ *
+ * Which side of the rail it goes on is decided by the dock, and the two cases are the
+ * way round they are because the dock names the screen edge the rail is *against*.
+ * Against the bottom edge there is no room underneath, so the pill goes above; anywhere
+ * else it hangs below, out of the way of the menus, which all open upward.
+ *
+ * Written the other way round first, which put the pill eight pixels below a rail docked
+ * at the bottom of the screen — that is off the bottom of the screen, so it rendered
+ * every time and was visible none of them.
+ */
 .rail-wrap[data-vertical="false"] .doing {
-  bottom: calc(100% + 8px);
+  top: calc(100% + 8px);
   right: 0;
-  transform-origin: 100% 100%;
+  transform-origin: 100% 0;
   animation: doing-out 220ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .rail-wrap[data-dock="bottom"] .doing {
-  bottom: auto;
-  top: calc(100% + 8px);
-  transform-origin: 100% 0;
+  top: auto;
+  bottom: calc(100% + 8px);
+  transform-origin: 100% 100%;
 }
 
 /* Upright, the crab is the bottom key and the line goes out sideways from it. */

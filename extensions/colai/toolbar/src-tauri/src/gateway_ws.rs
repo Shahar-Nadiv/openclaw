@@ -30,6 +30,8 @@ const AGENT_KIND_CLIENT_CAPABILITY: &str = "agent-kind";
 const GATEWAY_STATE_EVENT: &str = "colai:gateway";
 /// What the toolbar hears when a session it is watching says something.
 const REPLY_EVENT: &str = "colai:reply";
+/// And what it hears while that session is still working, one tool call at a time.
+const DOING_EVENT: &str = "colai:doing";
 const GATEWAY_DEVICE_IDENTITY_FILE: &str = "quickchat-gateway-device.json";
 const AGENTS_CACHE_TTL: Duration = Duration::from_secs(60);
 /// How many conversations the toolbar's picker asks for.
@@ -1554,6 +1556,7 @@ impl GatewayClient {
         let config_changed = AtomicBool::new(false);
         let dispatch = |frame: &Value| {
             dispatch_session_message(app, frame);
+            dispatch_tool_start(app, frame);
             if frame.get("type").and_then(Value::as_str) == Some("event")
                 && frame.get("event").and_then(Value::as_str) == Some("config.changed")
             {
@@ -1607,6 +1610,35 @@ impl GatewayClient {
                     held.remove(&key);
                 }
             }
+        }
+        /*
+         * And the session events, which is a second subscription and not the same one.
+         *
+         * Messages and events are two audiences on this Gateway, and tool activity is
+         * addressed to whichever of them the run thinks is watching: to message
+         * subscribers as `agent` when nothing else is looking, and to event subscribers
+         * as `session.tool` when a Control UI is. A run started from this toolbar counts
+         * as the second case — `controlUiVisible` defaults to true and nothing here says
+         * otherwise — so subscribing only to messages meant the pill beside the crab
+         * could say that work was happening and never once say what it was.
+         *
+         * Asked for once and unscoped: the audience is the connection, not a session, and
+         * the toolbar wants every conversation for the same reason the light does — the
+         * agent worth being told about is usually the one you are not looking at.
+         *
+         * A failure is not fatal. It costs the line beside the crab, not the toolbar.
+         */
+        if request_on_socket(
+            &mut socket,
+            "sessions.subscribe",
+            json!({}),
+            REQUEST_TIMEOUT,
+            &dispatch,
+        )
+        .await
+        .is_err()
+        {
+            eprintln!("[colai] the Gateway would not send session events; the toolbar can say that an agent is working but not what it is doing.");
         }
         self.set_connection_state(app, GatewayConnectionState::Up, None);
         let mut last_gateway_activity = Instant::now();
@@ -2566,10 +2598,98 @@ fn dispatch_session_message<R: tauri::Runtime>(app: &AppHandle<R>, frame: &Value
     }
 }
 
+/// A tool the agent has just picked up, sent to the overlay so it can say so.
+///
+/// Two event names for one fact, because which one arrives depends on something the
+/// toolbar has no say in. The Gateway sends tool lifecycle to session-message
+/// subscribers — which is what the toolbar is — under `agent`, but only while no Control
+/// UI is watching that session; when one is, the same payload goes to session-event
+/// subscribers under `session.tool` instead. Listening for one of them would mean a
+/// toolbar that goes quiet whenever somebody happens to have the dashboard open.
+///
+/// Only the start of a call. A result says a thing is finished, and a line that named
+/// what just stopped happening would be a status one step behind the work.
+///
+/// Sent narrow rather than raw, unlike a reply: the page needs the tool's name and the
+/// arguments it was called with, and a tool result can carry a whole file in it.
+fn worth_saying(frame: &Value) -> bool {
+    if frame.get("type").and_then(Value::as_str) != Some("event") {
+        return false;
+    }
+    if !matches!(
+        frame.get("event").and_then(Value::as_str),
+        Some("agent") | Some("session.tool")
+    ) {
+        return false;
+    }
+    let Some(payload) = frame.get("payload") else {
+        return false;
+    };
+    if payload.get("stream").and_then(Value::as_str) != Some("tool") {
+        return false;
+    }
+    let Some(data) = payload.get("data") else {
+        return false;
+    };
+    data.get("phase").and_then(Value::as_str) == Some("start")
+        && data.get("name").and_then(Value::as_str).is_some()
+}
+
+fn dispatch_tool_start<R: tauri::Runtime>(app: &AppHandle<R>, frame: &Value) {
+    if !worth_saying(frame) {
+        return;
+    }
+    let payload = frame.get("payload").expect("worth_saying checked the payload");
+    let data = payload.get("data").expect("worth_saying checked the data");
+    let name = data
+        .get("name")
+        .and_then(Value::as_str)
+        .expect("worth_saying checked the name");
+    let said = serde_json::json!({
+        "sessionKey": payload.get("sessionKey").and_then(Value::as_str),
+        "name": name,
+        "args": data.get("args").cloned().unwrap_or(Value::Null),
+    });
+    let _ = app.emit_to(crate::colai::OVERLAY_LABEL, DOING_EVENT, said);
+}
+
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What counts as news about a tool, and what does not.
+    ///
+    /// The rules rather than the emit, which needs an app handle and a window. Every one
+    /// of these was a way for the pill to be wrong: the wrong event name and it hears
+    /// nothing while a dashboard is open, the wrong phase and it names what has just
+    /// stopped happening, and a payload with no name is a line that says "Using".
+    #[test]
+    fn only_a_tool_being_picked_up_is_news() {
+        let says = |event: &str, stream: &str, phase: &str, name: Option<&str>| {
+            let frame = serde_json::json!({
+                "type": "event",
+                "event": event,
+                "payload": {
+                    "stream": stream,
+                    "sessionKey": "agent:main:main",
+                    "data": { "phase": phase, "name": name, "args": { "file_path": "a.css" } },
+                },
+            });
+            worth_saying(&frame)
+        };
+
+        // Both names, because which one arrives is the Gateway's business: tool lifecycle
+        // reaches session-message subscribers as `agent`, and session-event subscribers as
+        // `session.tool` when a Control UI is watching the same conversation.
+        assert!(says("agent", "tool", "start", Some("read")));
+        assert!(says("session.tool", "tool", "start", Some("read")));
+
+        assert!(!says("agent", "text", "start", Some("read")), "not every stream is a tool");
+        assert!(!says("agent", "tool", "result", Some("read")), "a result is a thing finished");
+        assert!(!says("agent", "tool", "start", None), "a call with no name says nothing");
+        assert!(!says("chat", "tool", "start", Some("read")), "some other event entirely");
+    }
 
     /// Two callers asking in the same breath is one question, not a cache.
     ///
