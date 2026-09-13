@@ -35,6 +35,7 @@ mod gateway;
 mod gateway_device_identity;
 mod gateway_ws;
 mod hotkey;
+mod screen;
 mod tray;
 mod whereabouts;
 
@@ -51,6 +52,31 @@ const FIRST_RETRY: Duration = Duration::from_secs(2);
 const LONGEST_RETRY: Duration = Duration::from_secs(60);
 
 fn main() {
+    /*
+     * Before anything is built, because the alternative is a toolbar that works.
+     *
+     * `src/screen.ts` asks this already and guards the two doors Node knows about — the
+     * plugin's service start and `openclaw colai show`. Running this binary directly, or
+     * from a desktop autostart entry, or from a keyboard shortcut, went past both. On
+     * Wayland what came up was not a broken toolbar but a confident one: it draws, it
+     * accepts marks, and it attributes them to whichever XWayland client it could see
+     * rather than to the window somebody pointed at.
+     *
+     * Said on stderr because that is where the plugin is listening — `toolbar-process.ts`
+     * routes it to the log and `cli.ts` prints the first breath of it — so whoever typed
+     * the command reads the sentence instead of finding it later.
+     */
+    let asked: Vec<String> = std::env::args().collect();
+    if screen::would_show(&asked) {
+        if let Some(no) = screen::trouble_here() {
+            eprintln!("[colai] the toolbar did not start: {}", no.why);
+            eprintln!("[colai] {}", no.fix);
+            std::process::exit(1);
+        }
+        // Not fatal, and not silent either. See `screen::grumble_about_tools`.
+        screen::grumble_about_tools();
+    }
+
     tauri::Builder::default()
         // One toolbar. A second copy hands its arguments to the first and exits, which is
         // also what stops a plugin that starts it twice from putting two on the screen.
