@@ -24,6 +24,8 @@
     "access": "public"
   },
   "files": [
+    "LICENSE",
+    "README.md",
     "index.ts",
     "src/",
     "dist/",
@@ -43,6 +45,7 @@
   },
   "scripts": {
     "build": "node scripts/build-runtime.mjs && node scripts/build-toolbar.mjs",
+    "ship": "node scripts/ship.mjs",
     "prepack": "node scripts/check-shippable.mjs && node scripts/build-runtime.mjs",
     "build:runtime": "node scripts/build-runtime.mjs",
     "build:toolbar": "node scripts/build-toolbar.mjs",

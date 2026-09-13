@@ -17,7 +17,8 @@
 // must not be duplicated into the package.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -66,6 +67,32 @@ if (!build) {
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
+/**
+ * The digest of the binary this runtime will be published beside.
+ *
+ * `digest.ts` prefers this over the `.sha256` sitting next to the binary, because a file
+ * next to the thing it describes can be deleted by whoever replaces the thing it
+ * describes — and an absent digest used to mean "developer build, nothing to check", so
+ * deleting it made the check disappear without a word.
+ *
+ * Empty in a checkout, and empty is correct there: `npm run build` builds this *before*
+ * `build-toolbar.mjs` produces the binary, so any digest taken here would be of the
+ * previous one. It is only filled in by `scripts/prepublish.mjs`, which runs after a
+ * release binary is staged and is the only path where a fixed digest means anything.
+ */
+function builtDigest() {
+  if (process.env.COLAI_STAMP_DIGEST !== "1") return "";
+  const binary = join(root, "bin", "colai-toolbar");
+  if (!existsSync(binary)) {
+    console.error("colai: asked to stamp the digest, but there is no binary to stamp.");
+    process.exit(1);
+  }
+  return createHash("sha256").update(readFileSync(binary)).digest("hex");
+}
+
+const stamped = builtDigest();
+if (stamped) console.log(`colai: stamping the runtime with digest ${stamped.slice(0, 12)}…`);
+
 const ran = spawnSync(
   build,
   [
@@ -74,6 +101,7 @@ const ran = spawnSync(
     `--outfile=${outFile}`,
     "--platform=node",
     "--format=esm",
+    `--define:COLAI_BUILT_DIGEST=${JSON.stringify(stamped)}`,
     // The floor the package already claims: `openclaw.install.minHostVersion` is
     // >=2026.9.1, whose Node is 22. Targeting lower would be a promise nothing keeps.
     "--target=node22",
