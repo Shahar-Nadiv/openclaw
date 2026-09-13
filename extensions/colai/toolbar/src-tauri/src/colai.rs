@@ -403,9 +403,33 @@ pub(crate) async fn colai_frontmost() -> Option<Front> {
 
 #[cfg(target_os = "linux")]
 fn frontmost_x11() -> Option<Front> {
-    use std::process::Command;
+    let id = active_window_id()?;
+    if let Some(front) = describe_window(&id) {
+        return Some(front);
+    }
+    /*
+     * The active window is ours, which it is whenever a menu or a popup is open —
+     * including the popup a mark has just opened. What somebody means by "in front" is
+     * the application they were working in when they reached for the toolbar.
+     *
+     * That is the window the watcher last saw that was not ours, described *now* rather
+     * than remembered from whenever somebody last happened to ask. The difference is the
+     * whole bug: this used to hand back a `Front` cached inside this function, and this
+     * function only runs when the page asks — so bringing an application forward and then
+     * marking something in it addressed the mark to whatever had been in front before it,
+     * which after a "show desktop" is the desktop itself. Marks arrived at the agent
+     * saying "on the desktop", with no path and no application.
+     */
+    crate::colai_attach::last_window_not_ours()
+        .filter(|last| last != &id)
+        .and_then(|last| describe_window(&last))
+        .or_else(remembered_front)
+}
 
-    let root = Command::new("xprop")
+/// The window X currently calls active, whoever it belongs to.
+#[cfg(target_os = "linux")]
+fn active_window_id() -> Option<String> {
+    let root = std::process::Command::new("xprop")
         .args(["-root", "_NET_ACTIVE_WINDOW"])
         .output()
         .ok()?;
@@ -421,23 +445,23 @@ fn frontmost_x11() -> Option<Front> {
     if id.is_empty() || id == "0x0" {
         return None;
     }
+    Some(id.to_string())
+}
 
-    let about = Command::new("xprop")
+/// Everything worth knowing about one window, or nothing if it is ours or gone.
+///
+/// The expensive half — two `xprop` runs and a walk of `/proc` — kept here so it can be
+/// pointed at a window that is not the active one.
+#[cfg(target_os = "linux")]
+fn describe_window(id: &str) -> Option<Front> {
+    let about = std::process::Command::new("xprop")
         .args(["-id", id, "WM_CLASS", "_NET_WM_NAME", "_NET_WM_PID"])
         .output()
         .ok()?;
     let about = String::from_utf8_lossy(&about.stdout);
-
-    // Our own window is not "what is in front".
-    //
-    // The overlay takes the keyboard when a popup opens, which makes it the active
-    // window — so asking X what is in front, at the exact moment somebody is marking
-    // something, answers "colai". What they mean is the application they were in when
-    // they reached for the toolbar, and that is the last one this saw that was not us.
     if ours(&about) {
-        return remembered_front();
+        return None;
     }
-
     let pid = pid_of(&about);
     let front = Front {
         app: app_name(&about),
@@ -463,7 +487,10 @@ fn ours(said: &str) -> bool {
         .is_some_and(|pid| pid == std::process::id())
 }
 
-/// The last window seen in front that was not one of ours.
+/// The last window described here that was not one of ours.
+///
+/// A second line of defence behind the watcher's own memory, for the moment before the
+/// watcher has looked even once and for a remembered window that has since closed.
 #[cfg(target_os = "linux")]
 static LAST_FRONT: Mutex<Option<Front>> = Mutex::new(None);
 

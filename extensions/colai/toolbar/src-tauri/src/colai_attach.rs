@@ -75,6 +75,27 @@ pub(crate) struct InFront {
     pub ours: bool,
 }
 
+/// Whether this look is worth remembering as "the application somebody is working in".
+///
+/// Ours is not an answer to that question — the overlay takes the keyboard every time a
+/// menu or a popup opens — and neither is an empty id, which is what X says when nothing
+/// has focus at all.
+pub(crate) fn worth_remembering(seen: &InFront) -> bool {
+    !seen.ours && !seen.id.is_empty()
+}
+
+/// The last window this watcher saw that was not ours.
+///
+/// Kept as an id rather than as a description, deliberately. A window's title, working
+/// directory and rectangle all move while it sits there, so what is worth remembering is
+/// *which* window it was; whoever needs the details looks them up when they need them.
+static LAST_NOT_OURS: Mutex<Option<String>> = Mutex::new(None);
+
+/// Which window somebody was last working in, if this has seen one.
+pub(crate) fn last_window_not_ours() -> Option<String> {
+    LAST_NOT_OURS.lock().ok()?.clone()
+}
+
 /// The last look, kept so it can be asked for.
 ///
 /// The watcher only speaks when the answer changes, which means the first thing it says
@@ -111,6 +132,16 @@ pub(crate) fn watch_the_front<R: Runtime>(app: &AppHandle<R>) {
                 let now = eyes.in_front();
                 if let Ok(mut held) = LAST_LOOK.lock() {
                     held.clone_from(&now);
+                }
+                // The one place that keeps track of which application somebody is in.
+                // It is kept here rather than where it is consumed because this is the
+                // only thing that is always looking: a memory that advanced only when
+                // the page asked would still be pointing at whatever was in front before
+                // somebody brought their application forward.
+                if let Some(seen) = now.as_ref().filter(|seen| worth_remembering(seen)) {
+                    if let Ok(mut held) = LAST_NOT_OURS.lock() {
+                        *held = Some(seen.id.clone());
+                    }
                 }
                 if changed(said.as_ref(), now.as_ref()) {
                     // Only a window that actually moved earns the fast rate. A title
@@ -435,6 +466,34 @@ mod tests {
             }),
             ours: false,
         }
+    }
+
+    /// What the watcher writes down as "the application somebody is working in".
+    ///
+    /// This is the whole of a bug that reached the agent. A mark carries the address of
+    /// the window it was drawn on, and the overlay holds the keyboard at that exact
+    /// moment — every mark opens a popup — so the address comes from the last window seen
+    /// that was not ours. That memory used only to advance when the page asked for it,
+    /// and nothing asks between bringing an application forward and marking something in
+    /// it. After a "show desktop" the remembered window was the desktop, so marks arrived
+    /// saying "on the desktop", with no path and no application behind them.
+    #[test]
+    fn the_overlay_is_never_the_application_somebody_is_working_in() {
+        let app = front("0x2a", "MarketLab");
+        assert!(worth_remembering(&app));
+
+        // Ours. The overlay takes the keyboard whenever a menu or a popup opens, which
+        // is the one moment this question is ever asked.
+        let mine = InFront {
+            ours: true,
+            ..front("0x2b", "colai")
+        };
+        assert!(!worth_remembering(&mine));
+
+        // Nothing has focus: a locked screen, or the moment between one window closing
+        // and the next taking over. Not an application either.
+        let nobody = InFront::default();
+        assert!(!worth_remembering(&nobody));
     }
 
     #[test]
