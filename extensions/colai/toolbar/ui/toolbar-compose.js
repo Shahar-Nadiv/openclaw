@@ -491,15 +491,48 @@ function modelPick() {
    * destroyed within a frame of being opened. It looked exactly like a button that did
    * nothing. Same fault the `/` list had, and the same cure.
    */
+  /*
+   * Placed against the window, not against its ancestors.
+   *
+   * The menu used to be an absolutely-positioned child sitting `bottom: 100%` above the
+   * chip, which is fine in the composer and does not survive the move into the receiver
+   * popover: that popover is `overflow: hidden`, and where exactly the menu lands depends
+   * on a chain of positioned ancestors that Chrome and WebKitGTK do not lay out the same
+   * way. It measured correctly in Chrome and appeared nowhere in the real toolbar.
+   *
+   * Fixed coordinates, worked out from the chip's own box, depend on nothing above them
+   * and cannot be clipped by anything. Same approach `placePopup` already uses for the
+   * mark popup, and for the same reason.
+   */
+  const place = () => {
+    const chip = open.getBoundingClientRect();
+    menu.style.position = "fixed";
+    menu.style.left = "auto";
+    menu.style.right = "auto";
+    menu.style.bottom = "auto";
+    menu.style.width = "260px";
+    // Above the chip, or below it when there is no room above.
+    const tall = Math.min(menu.scrollHeight || 190, 190);
+    const above = chip.top - 6 - tall;
+    const top = above >= 8 ? above : Math.min(chip.bottom + 6, window.innerHeight - tall - 8);
+    menu.style.top = `${Math.round(Math.max(8, top))}px`;
+    menu.style.left = `${Math.round(Math.min(Math.max(8, chip.left), window.innerWidth - 268))}px`;
+  };
+
   const show = (open_) => {
     state.picking = open_ ? "model" : null;
     menu.hidden = !open_;
     open.setAttribute("aria-expanded", String(open_));
     if (!open_) return;
     fill();
+    place();
     // Asked when it opens, not kept warm: a catalogue held in the background is one
-    // that is quietly wrong the moment somebody signs into a provider.
-    void loadModels().then(fill);
+    // that is quietly wrong the moment somebody signs into a provider. Re-placed when it
+    // lands, because the list is a different height once it has something in it.
+    void loadModels().then(() => {
+      fill();
+      place();
+    });
   };
 
   open.addEventListener("click", () => show(menu.hidden));
@@ -509,6 +542,8 @@ function modelPick() {
     menu.hidden = false;
     open.setAttribute("aria-expanded", "true");
     fill();
+    // After the chip has been laid out, or its box is still the old one's.
+    requestAnimationFrame(place);
   }
   menu.addEventListener("focusout", (event) => {
     if (!row.contains(event.relatedTarget)) shut();

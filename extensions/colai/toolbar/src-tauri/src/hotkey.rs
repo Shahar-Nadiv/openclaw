@@ -9,6 +9,8 @@
 // This is the binding that fixes that: it brings the toolbar up and hands it the
 // keyboard, so the letters mean what the keys say they mean.
 
+use std::time::Duration;
+
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
@@ -46,7 +48,7 @@ fn summoned(app: &AppHandle) {
             eprintln!("[colai] hotkey could not open the toolbar: {trouble}");
             return;
         }
-        let _ = crate::colai::colai_take_keyboard(app.clone());
+        keep_asking_for_the_keyboard(app);
         return;
     }
 
@@ -58,8 +60,59 @@ fn summoned(app: &AppHandle) {
     if listening {
         let _ = crate::colai::colai_release(app.clone());
     } else {
-        let _ = crate::colai::colai_take_keyboard(app.clone());
+        keep_asking_for_the_keyboard(app);
     }
+}
+
+/// How long to go on asking for the keyboard after showing the window.
+const UNTIL_IT_LISTENS: Duration = Duration::from_millis(700);
+
+/// How often to ask again while waiting.
+const ASK_AGAIN: Duration = Duration::from_millis(50);
+
+/// Ask for the keyboard until the window actually has it.
+///
+/// One ask was not enough, and the reason is a race rather than a refusal. Putting the
+/// toolbar away turns off the hint that lets it be focused at all and unmaps the window;
+/// summoning it asks X to map it again. Focusing a window that X has not finished mapping
+/// does nothing and reports nothing, so pressing the binding straight after Escape opened
+/// the toolbar without the keyboard — and then every single-letter shortcut went to
+/// whatever was underneath. That is how a take came to type into somebody's editor.
+///
+/// Each attempt hops to the main thread, because taking the keyboard sets a GTK hint and
+/// GTK may only be touched from the thread that started it — the same rule the contact
+/// sheet broke. Stops the moment the window says it is focused, so the common case costs
+/// one attempt.
+fn keep_asking_for_the_keyboard(app: &AppHandle) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let began = std::time::Instant::now();
+        while began.elapsed() < UNTIL_IT_LISTENS {
+            let (done, wait) = std::sync::mpsc::channel();
+            let asking = handle.clone();
+            if handle
+                .run_on_main_thread(move || {
+                    let _ = crate::colai::colai_take_keyboard(asking.clone());
+                    let listening = asking
+                        .get_webview_window(crate::colai::OVERLAY_LABEL)
+                        .and_then(|window| window.is_focused().ok())
+                        .unwrap_or(false);
+                    let _ = done.send(listening);
+                })
+                .is_err()
+            {
+                return;
+            }
+            if wait
+                .recv_timeout(Duration::from_millis(400))
+                .unwrap_or(false)
+            {
+                return;
+            }
+            tokio::time::sleep(ASK_AGAIN).await;
+        }
+        eprintln!("[colai] the toolbar is open but the desktop would not give it the keyboard.");
+    });
 }
 
 /// Register the binding, and say plainly if the desktop already has it.
