@@ -423,6 +423,7 @@ function modelPick() {
   menu.hidden = true;
 
   const shut = () => {
+    state.picking = null;
     menu.hidden = true;
     open.setAttribute("aria-expanded", "false");
   };
@@ -482,15 +483,33 @@ function modelPick() {
     }
   };
 
-  open.addEventListener("click", () => {
-    menu.hidden = !menu.hidden;
-    open.setAttribute("aria-expanded", String(!menu.hidden));
-    if (menu.hidden) return;
+  /*
+   * Open-ness lives in `state`, not in this closure.
+   *
+   * The control that holds this is rebuilt by every render, and while an agent is working
+   * the rail pulses — so renders arrive two or three times a second and the menu was being
+   * destroyed within a frame of being opened. It looked exactly like a button that did
+   * nothing. Same fault the `/` list had, and the same cure.
+   */
+  const show = (open_) => {
+    state.picking = open_ ? "model" : null;
+    menu.hidden = !open_;
+    open.setAttribute("aria-expanded", String(open_));
+    if (!open_) return;
     fill();
     // Asked when it opens, not kept warm: a catalogue held in the background is one
     // that is quietly wrong the moment somebody signs into a provider.
     void loadModels().then(fill);
-  });
+  };
+
+  open.addEventListener("click", () => show(menu.hidden));
+
+  // Put back the way it was found, after the rebuild that threw it away.
+  if (state.picking === "model") {
+    menu.hidden = false;
+    open.setAttribute("aria-expanded", "true");
+    fill();
+  }
   menu.addEventListener("focusout", (event) => {
     if (!row.contains(event.relatedTarget)) shut();
   });

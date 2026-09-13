@@ -187,6 +187,9 @@ const state = {
    * the same bug the caret in that field already had.
    */
   ask: { mark: null, showing: [], picked: 0 },
+  // Which of the composer's small menus is open, if either. Here for the same reason
+  // `ask` is: the controls that hold them are rebuilt by every render.
+  picking: null,
   // Whether the first-run card is up. Set on a first run, and again from the tray.
   tips: false,
   trouble: null,
