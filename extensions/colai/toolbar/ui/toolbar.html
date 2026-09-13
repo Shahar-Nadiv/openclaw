@@ -60,6 +60,15 @@
         -->
         <div id="work" class="work" role="dialog" aria-label="Work" hidden></div>
         <!--
+          An agent that has asked something and stopped.
+
+          A dialog rather than a menu, and it is not toggled by a key: it is here because
+          something is waiting, and it goes when that has been answered or dismissed.
+          Hung off the agents key, which is the one that says who is talking — the same
+          place the question came from.
+        -->
+        <div id="fly-ask" class="ask" role="dialog" aria-label="Answer the agent" hidden></div>
+        <!--
           The heading is outside the menu and names it, rather than sitting inside as an
           item that cannot be chosen. A paragraph among the options is counted as one by
           anything reading the list, so the menu announced one more choice than it had.
@@ -98,13 +107,7 @@
         looking at it. Shown once, and again from the tray for anybody who dismissed it
         before reading it.
       -->
-      <div
-        id="tips"
-        class="tips"
-        role="dialog"
-        aria-label="Four things worth knowing"
-        hidden
-      ></div>
+      <div id="tips" class="tips" role="dialog" aria-label="Four things worth knowing" hidden></div>
 
       <p id="trouble" class="trouble" role="status" hidden></p>
     </div>
@@ -140,7 +143,7 @@
       </div>
     </div>
 
-<div id="capture" class="capture" hidden></div>
+    <div id="capture" class="capture" hidden></div>
 
     <!--
       What to do with the mark just made.
@@ -149,13 +152,7 @@
       somebody marked and not to the toolbar; it opens where they were looking. The
       shape measurement takes the union of the two, so the pointer can reach both.
     -->
-    <div
-      id="popup"
-      class="popup"
-      role="dialog"
-      aria-label="What to do with this mark"
-      hidden
-    ></div>
+    <div id="popup" class="popup" role="dialog" aria-label="What to do with this mark" hidden></div>
 
     <!--
       The library, which is a window rather than a menu because what it offers is
@@ -172,13 +169,7 @@
     <!-- Marks on their way to the window. Inert, and gone a third of a second later. -->
     <div id="flights" class="flights" aria-hidden="true"></div>
 
-    <div
-      id="library"
-      class="library"
-      role="dialog"
-      aria-label="Choose from a library"
-      hidden
-    ></div>
+    <div id="library" class="library" role="dialog" aria-label="Choose from a library" hidden></div>
 
     <!--
       Classic scripts sharing one global scope. Every one of them is declarations and

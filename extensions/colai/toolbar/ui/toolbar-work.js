@@ -605,12 +605,26 @@ function answerBox(answer, acts) {
   // The row's own actions, with the quick replies put in front of them.
   const foot = acts;
   const first = [];
-  // Still here, because "yes, go on" is the commonest answer in the world — but they
-  // fill the box rather than being the only two things sayable.
-  for (const [label, words, why] of [
-    ["No", "Declined — that is not what I meant.", "Tell them this is not it"],
-    ["Yes", "Accepted — go ahead.", "Tell them to go ahead"],
-  ]) {
+  /*
+   * The agent's own options, where it wrote any, and yes-or-no where it did not.
+   *
+   * This used to be a fixed *Yes* and *No* whatever had been asked, which answers a
+   * question the agent mostly was not asking — most of what comes back is *which of
+   * these three*, and neither button is one of the three. `choicesIn` reads them out of
+   * what it wrote, and is the same decision the popup off the agents key makes, so the
+   * two surfaces never offer different answers to the same question.
+   */
+  const quicks = choicesIn(lastTurn(answer) || "").map((choice) => [
+    choice.label,
+    choice.reply,
+    choice.reply,
+  ]);
+  for (const [label, words, why] of quicks.length
+    ? quicks
+    : [
+        ["No", "Declined — that is not what I meant.", "Tell them this is not it"],
+        ["Yes", "Accepted — go ahead.", "Tell them to go ahead"],
+      ]) {
     const quick = document.createElement("button");
     quick.type = "button";
     quick.className = "work-act";

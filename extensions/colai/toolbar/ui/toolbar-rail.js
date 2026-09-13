@@ -176,8 +176,23 @@ function buildRail() {
   agents.className = "key agents-key";
   agents.title = "Agents";
   agents.innerHTML =
-    '<span class="running-dots"></span><span class="agents-name"><span class="agents-who"></span><span class="agents-running"></span></span><span class="caret">▾</span>';
-  agents.addEventListener("click", () => flyout("agents"));
+    '<span class="running-dots"></span><span class="agents-name"><span class="agents-who"></span><span class="agents-running"></span></span><span class="ask-badge" aria-hidden="true">?</span><span class="caret">▾</span>';
+  /*
+   * Two things on one key.
+   *
+   * The badge only exists while an agent is waiting on an answer, and pressing it brings
+   * the question back rather than opening the receiver list — which is the thing somebody
+   * pressing a question mark means. Read off the event rather than given its own button:
+   * a button inside a button is not markup a browser will keep, and the badge has to sit
+   * inside this one to come out of it.
+   */
+  agents.addEventListener("click", (event) => {
+    if (event.target.closest(".ask-badge")) {
+      showAsked();
+      return;
+    }
+    flyout("agents");
+  });
   buttons.agents = agents;
 
   const send = document.createElement("button");

@@ -1310,6 +1310,147 @@ function asksSomething(said) {
 }
 
 /**
+ * The answers to a question, as things somebody can click instead of type.
+ *
+ * The gap this closes: an agent that asks something stops, and the only way to unstick
+ * it from here was to open the Work window and type a reply — while Claude Code and
+ * Cursor put the choices under the question as buttons. Most of the time the agent has
+ * already written the options out; they are just written as prose.
+ *
+ * So they are read back out of the prose, and conservatively, for the same reason
+ * `asksSomething` is conservative: a button that sends the wrong sentence to an agent is
+ * worse than no button, because the mistake is invisible until the agent acts on it. Two
+ * shapes are trusted and no others.
+ *
+ * The first is a list — numbered, lettered or bulleted — of at least two and at most six
+ * items, contiguous, and the last such run in the message. Agents explain, then list,
+ * then ask; the run nearest the question is the one the question is about. A run longer
+ * than six is a plan or a summary rather than a menu, and offering it as one would turn
+ * "here is everything I am about to do" into six buttons that each say yes to one line
+ * of it.
+ *
+ * The second is a plain polar question — *should I…?*, *do you want…?* — which gets Yes
+ * and No.
+ *
+ * Anything else gets nothing, and the popup falls back to what it always has: a box to
+ * write in. Guessing is the failure mode worth avoiding here, not silence.
+ */
+const CHOICE_LINE = /^\s*(?:[-*•]\s+|\(?\d{1,2}[.)]\s+|\(?[a-z][.)]\s+)(.+?)\s*$/i;
+const CHOICE_LEAST = 2;
+const CHOICE_MOST = 6;
+/** Where a label stops being a label. The whole line is still what gets sent. */
+const CHOICE_LABEL = 44;
+/**
+ * The aside after a dash — *Use the wall colour — safest, one constant*. Dropped from the
+ * button and kept in the reply: the button is read in a glance and the agent is not.
+ * Spaces both sides, so a hyphenated word is not an aside.
+ */
+const CHOICE_ASIDE = /\s+[—–-]\s+.*$/;
+const POLAR =
+  /^(?:do|does|did|is|are|was|were|can|could|should|shall|will|would|have|has|may|must)\b.*\?$/i;
+
+/** Markdown, as far as a button is concerned. */
+function plainly(said) {
+  return said
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/(?<!\w)[*_]([^*_]+)[*_](?!\w)/g, "$1")
+    .trim();
+}
+
+function asChoice(line) {
+  const bits = CHOICE_LINE.exec(line);
+  if (!bits) return null;
+  const reply = plainly(bits[1]);
+  if (!reply) return null;
+  const short = reply.replace(CHOICE_ASIDE, "").trim() || reply;
+  const label =
+    short.length > CHOICE_LABEL ? `${short.slice(0, CHOICE_LABEL - 1).trimEnd()}…` : short;
+  return { label, reply };
+}
+
+function choicesIn(said) {
+  if (!asksSomething(said)) return [];
+  const lines = (said || "").split("\n");
+  let end = -1;
+  for (let at = lines.length - 1; at >= 0; at -= 1) {
+    if (CHOICE_LINE.test(lines[at])) {
+      end = at;
+      break;
+    }
+  }
+  if (end >= 0) {
+    let from = end;
+    while (from > 0 && CHOICE_LINE.test(lines[from - 1])) from -= 1;
+    const run = lines
+      .slice(from, end + 1)
+      .map(asChoice)
+      .filter(Boolean);
+    if (run.length >= CHOICE_LEAST && run.length <= CHOICE_MOST) return run;
+  }
+  const last =
+    lines
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .pop() || "";
+  if (POLAR.test(last)) {
+    return [
+      { label: "Yes", reply: "Yes" },
+      { label: "No", reply: "No" },
+    ];
+  }
+  return [];
+}
+
+/**
+ * The question itself, without the options underneath it.
+ *
+ * The popup shows one line above the buttons, and repeating the list there in grey and
+ * again beside it in accent would be the same six things said twice in a panel that has
+ * room for neither. So the options are taken out and what is left of the last paragraph
+ * is what is shown.
+ */
+function questionIn(said) {
+  const lines = (said || "").split("\n").map((line) => line.trim());
+  let end = lines.length - 1;
+  while (end >= 0 && (!lines[end] || CHOICE_LINE.test(lines[end]))) end -= 1;
+  const kept = end >= 0 ? lines[end] : "";
+  // Everything was a list. Then the question is the line above it, or there is none and
+  // the buttons speak for themselves.
+  return plainly(kept);
+}
+
+/**
+ * Which conversation, if any, is waiting on somebody to answer it.
+ *
+ * Derived rather than remembered, and this is the whole reason it is a function. The
+ * first version of the popup kept a copy of the question in state, set when a reply
+ * arrived — which meant a question asked before the toolbar was looking, or one read out
+ * of a transcript the Work window loaded, lit nothing at all, and a question already
+ * answered from the Work window's own box left a badge saying an agent was still stopped.
+ * Two places to keep in step, and they were not.
+ *
+ * The *last* turn, not the last one the agent said. A reply is appended to the same list,
+ * so a conversation whose newest turn is ours is the agent's move again whatever it asked
+ * before it.
+ *
+ * The most recently heard wins where two are waiting: the older has already been read,
+ * and the one that has just stopped is the one worth interrupting somebody for.
+ */
+function askedOf(answers) {
+  let asked = null;
+  for (const answer of answers || []) {
+    const turns = answer.turns || [];
+    const last = turns[turns.length - 1];
+    if (!last || last.mine || !asksSomething(last.said)) continue;
+    if (!asked || (answer.heard || 0) >= (asked.answer.heard || 0)) {
+      asked = { answer, said: last.said };
+    }
+  }
+  return asked;
+}
+
+/**
  * How long a run may go quiet before the toolbar stops claiming it is working.
  *
  * The net beneath `session.ended`. A terminal frame that never arrives — a gateway that

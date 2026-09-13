@@ -29,6 +29,7 @@ const el = {
   flyHow: document.getElementById("fly-how"),
   flyAutomate: document.getElementById("fly-automate"),
   flyAgents: document.getElementById("fly-agents"),
+  flyAsk: document.getElementById("fly-ask"),
   agentAnswer: document.getElementById("agent-answer"),
   agentRows: document.getElementById("agent-rows"),
   trouble: document.getElementById("trouble"),
@@ -117,6 +118,18 @@ const state = {
   history: [],
   // What is on screen saying an answer arrived. Empty nearly always.
   toasts: [],
+  /*
+   * A question somebody has waved away, as the session it was on and the words it was.
+   *
+   * Only this. *Which* question is waiting is read off the conversations themselves by
+   * `askedOf`, because it is a fact about them and not about the toolbar — what belongs
+   * here is the one thing that is not derivable, which is that a person has already
+   * looked at this one and does not want the panel over their screen.
+   *
+   * The words as well as the session, so a second question on the same conversation
+   * opens again rather than inheriting the first one's dismissal.
+   */
+  pushedAside: null,
   // The window somebody is looking at, as the watcher last reported it. Null until it
   // has spoken, which is a reason to leave every mark alone rather than to hide them —
   // a window with an empty id is the other thing, and means nothing is in front.
@@ -414,6 +427,13 @@ function render() {
   if (doing !== null && el.doing.textContent !== doing) el.doing.textContent = doing;
 
   const who = receiver();
+  /*
+   * Whether anything is waiting on an answer, which is the loudest thing this key can
+   * say. It is on the key rather than only in the popup so that waving the popup away
+   * does not wave away the fact: the agent is still stopped, and the badge is the way
+   * back to it.
+   */
+  buttons.agents.dataset.asking = String(Boolean(askedOf(state.answers)));
   const mark = buttons.agents.querySelector(".running-dots");
   // An initial when there is no emoji, because upright the name beside this is hidden
   // and an empty mark leaves the control saying nothing at all.
@@ -502,6 +522,10 @@ function render() {
   // the same code, run again a moment later, put it back.
 
   if (state.open === "agents") drawWho();
+  // Filled before it is placed, for the same reason: it is measured to decide whether it
+  // fits on the screen, and a question with four options on it is not the height of one
+  // with none.
+  drawAsk();
   // The Work panel is a menu like the others and obeys the same rule. It did not: it was
   // placed here and filled below, so `within` measured whatever it held last time. A
   // panel opened with six exchanges in it was fitted to the screen as though it still
@@ -523,6 +547,8 @@ function render() {
     [el.flyAutomate, buttons.send],
 
     [el.flyAgents, buttons.agents],
+    // Out of the key that says who is talking, which is where the question came from.
+    [el.flyAsk, buttons.agents],
     // The work panel hangs off send, the key that opens it.
     [el.work, buttons.send],
   ]) {
@@ -1103,7 +1129,14 @@ async function start() {
     // is one thing that happened.
     const spoken = turns.some((turn) => !turn.mine);
     waiting.turns = [...turns, { said, mine: false }];
+    // When this conversation last said anything, which is how `askedOf` decides between
+    // two that are both waiting. Kept on the answer rather than on the turn: what is
+    // being ordered is conversations, and a turn list is not sorted.
+    waiting.heard = Date.now();
     if (!spoken) raiseToast(waiting, said);
+    // Nothing here about the question popup: whether this turn is one is read off the
+    // turns themselves in `render`, so an agent that asks, is ignored, and then carries on
+    // talking puts the panel away by saying something that is not a question.
     render();
   }).catch(() => {});
 

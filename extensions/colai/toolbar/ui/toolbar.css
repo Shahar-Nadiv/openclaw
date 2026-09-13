@@ -781,7 +781,6 @@ body {
   display: none;
 }
 
-
 .flyout-send {
   width: 320px;
   padding: 0 0 6px;
@@ -2355,7 +2354,6 @@ body {
   padding-right: 10px;
 }
 
-
 /* A measurement's number, sitting on the line it belongs to. */
 .span-label {
   position: absolute;
@@ -2859,6 +2857,190 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .doing,
   .doing::before {
+    animation: none;
+  }
+}
+
+/*
+ * ── an agent that has asked something ────────────────────────────────────────
+ *
+ * The one panel on this rail that is not opened by pressing anything. It is here because
+ * something has stopped and is waiting, which is the only state the toolbar has where
+ * doing nothing costs something — so it arrives on its own, out of the key that says who
+ * is talking.
+ *
+ * Shaped like the other flyouts and coloured like them, with one difference: the accent
+ * border. On this rail the accent means "this is the thing in your hand", and a question
+ * waiting on an answer is exactly that, whether or not anybody has picked it up yet.
+ */
+.ask {
+  position: absolute;
+  z-index: 6;
+  box-sizing: border-box;
+  width: 288px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--chrome-strong);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 30%),
+    0 24px 60px rgb(0 0 0 / 60%);
+}
+
+.ask-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ask-who {
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+.ask-shut {
+  all: unset;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+}
+.ask-shut:hover {
+  background: rgb(255 255 255 / 8%);
+  color: var(--text-strong);
+}
+.ask-shut:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+/* The question, at most four lines of it. Anything longer is an agent explaining itself,
+   and the explanation is in the Work window where there is room to read it. */
+.ask-said {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-strong);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+
+/* One per line rather than a row that wraps: these are sentences, not verbs, and a
+   sentence cut in half by a column of buttons is unreadable at this width. */
+.ask-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ask-choice {
+  all: unset;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  font-size: 12px;
+  color: var(--text-strong);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ask-choice:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-elevated));
+}
+.ask-choice:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ask-choice:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.ask-own {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.ask-write {
+  flex: 1;
+  min-width: 0;
+}
+.ask-send {
+  all: unset;
+  flex-shrink: 0;
+  padding: 7px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--accent);
+  background: var(--accent-fill);
+  color: var(--accent-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.ask-send:hover:not(:disabled) {
+  background: var(--accent);
+}
+.ask-send:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ask-send:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+/*
+ * The badge, and the way back to a question that has been pushed aside.
+ *
+ * Not shown at all when nothing is asking — a permanent question mark on the key would
+ * read as help, which is the one thing it is not. `display` rather than opacity, so it
+ * takes no width on a rail where every pixel is somebody's pointer target.
+ */
+.ask-badge {
+  display: none;
+}
+.agents-key[data-asking="true"] .ask-badge {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+/* Same shape of claim as the working ring, in the colour that means "you". A question is
+   the one thing on this rail that nothing else will resolve. */
+.agents-key[data-asking="true"] {
+  box-shadow:
+    0 0 0 1.5px color-mix(in srgb, var(--accent) 65%, transparent),
+    0 0 14px color-mix(in srgb, var(--accent) 35%, transparent);
+  animation: asking 2.2s ease-in-out infinite;
+}
+@keyframes asking {
+  50% {
+    box-shadow:
+      0 0 0 1.5px var(--accent),
+      0 0 22px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agents-key[data-asking="true"] {
     animation: none;
   }
 }

@@ -180,6 +180,12 @@ type ToolbarHelpers = {
   RUN_QUIET: number;
   sheeted: (mark: { tool: string; frames?: number }) => boolean;
   asksSomething: (said: string) => boolean;
+  choicesIn: (said: string) => { label: string; reply: string }[];
+  questionIn: (said: string) => string;
+  askedOf: (
+    answers: { heard?: number; turns?: { said: string; mine?: boolean }[] }[],
+  ) => { answer: { heard?: number }; said: string } | null;
+  CHOICE_MOST: number;
   rewindRefused: (said: unknown, sessionKey?: string) => string;
   canGoBack: (
     row: { kind: string; id?: string; sessionKey?: string } | null,
@@ -385,7 +391,7 @@ function glyphsInTheRail(): Record<string, unknown> {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, GITS, GIT_FIRST, gitKindOf, repoFor, isCommitting, MODE_FIRST, CLICK_MEANS, effortStops, effortAt, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid, doingOf, doingSaid, DOING_FIRST, DOING_MOST, DOING_QUIET, DOING_TOOLS };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, GITS, GIT_FIRST, gitKindOf, repoFor, isCommitting, MODE_FIRST, CLICK_MEANS, effortStops, effortAt, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, choicesIn, questionIn, askedOf, CHOICE_MOST, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid, doingOf, doingSaid, DOING_FIRST, DOING_MOST, DOING_QUIET, DOING_TOOLS };`,
   context,
 );
 const {
@@ -451,6 +457,10 @@ const {
   RUN_QUIET,
   sheeted,
   asksSomething,
+  choicesIn,
+  questionIn,
+  askedOf,
+  CHOICE_MOST,
   canGoBack,
   rewindRefused,
   pointSaid,
@@ -2258,6 +2268,165 @@ describe("when an agent is asking rather than telling", () => {
     // Anchored to the start of the last line, so prose about a decision is not mistaken
     // for a request to make one.
     expect(asksSomething("I could not tell which of them you meant so I did neither.")).toBe(false);
+  });
+});
+
+describe("the answers to a question, as buttons", () => {
+  const listed = [
+    "The wall is drawn three times over and a new lane has to agree with all of them.",
+    "",
+    "1. Move the fruit to where you pointed",
+    "2. Make the pellet under it a power pellet",
+    "3. Both",
+    "",
+    "Which would you like?",
+  ].join("\n");
+
+  test("a numbered list under the question becomes that many buttons", () => {
+    expect(choicesIn(listed).map((one) => one.label)).toEqual([
+      "Move the fruit to where you pointed",
+      "Make the pellet under it a power pellet",
+      "Both",
+    ]);
+  });
+
+  test("bullets and letters are read the same way", () => {
+    expect(choicesIn("- Keep it\n- Replace it\nWhich?").map((one) => one.reply)).toEqual([
+      "Keep it",
+      "Replace it",
+    ]);
+    expect(choicesIn("a) Keep it\nb) Replace it\nWhich?").map((one) => one.reply)).toEqual([
+      "Keep it",
+      "Replace it",
+    ]);
+  });
+
+  test("the button is short and what gets sent is the whole line", () => {
+    // The aside after a dash is the agent explaining its own option. It belongs in the
+    // reply, because the agent wrote it, and not on a button read in a glance.
+    const [one] = choicesIn(
+      "1. Use the wall colour — one constant, and nothing else moves\n" +
+        "2. Add a lane\nWhich would you rather?",
+    );
+    expect(one.label).toBe("Use the wall colour");
+    expect(one.reply).toBe("Use the wall colour — one constant, and nothing else moves");
+  });
+
+  test("markdown is not sent to the screen as markdown", () => {
+    expect(choicesIn("- **Keep** `data.ts`\n- Drop it\nWhich?")[0].label).toBe("Keep data.ts");
+  });
+
+  test("a polar question gets yes and no", () => {
+    expect(choicesIn("Should I commit this?").map((one) => one.label)).toEqual(["Yes", "No"]);
+    expect(choicesIn("Do you want me to push it as well?").map((one) => one.label)).toEqual([
+      "Yes",
+      "No",
+    ]);
+  });
+
+  test("a turn that is not asking anything offers nothing", () => {
+    // The whole point of the popup is that it appears when something has stopped. A list
+    // in a report is a report.
+    expect(choicesIn("Done. I changed:\n1. data.ts\n2. Table.tsx")).toEqual([]);
+    expect(choicesIn("")).toEqual([]);
+  });
+
+  test("a list too long to be a menu is a plan, and offers nothing", () => {
+    const plan = [
+      ...Array.from({ length: CHOICE_MOST + 1 }, (_, at) => `${at + 1}. Step ${at + 1}`),
+      "Shall I start?",
+    ].join("\n");
+    // Not zero buttons and a plan on them: seven buttons that each say yes to one line
+    // of a plan is the worst thing this could do.
+    expect(choicesIn(plan).map((one) => one.label)).toEqual(["Yes", "No"]);
+  });
+
+  test("a single item is not a choice", () => {
+    expect(choicesIn("- Keep it\nWhich?")).toEqual([]);
+  });
+
+  test("the run nearest the question wins", () => {
+    // Agents list what they did, then list what they could do, then ask.
+    const twice = [
+      "I changed:",
+      "- data.ts",
+      "- Table.tsx",
+      "",
+      "Two ways to sort them:",
+      "1. Favourites first",
+      "2. Alphabetically",
+      "Which?",
+    ].join("\n");
+    expect(choicesIn(twice).map((one) => one.reply)).toEqual([
+      "Favourites first",
+      "Alphabetically",
+    ]);
+  });
+});
+
+describe("the question, without the options under it", () => {
+  test("the list is taken out and the line above it is left", () => {
+    expect(questionIn("Which would you rather?\n1. This\n2. That")).toBe("Which would you rather?");
+    expect(questionIn("Two ways.\n1. This\n2. That\n\nWhich?")).toBe("Which?");
+  });
+
+  test("a question with no list is itself", () => {
+    expect(questionIn("Should I commit this?")).toBe("Should I commit this?");
+  });
+
+  test("nothing but a list leaves nothing to say, and the buttons speak", () => {
+    expect(questionIn("1. This\n2. That")).toBe("");
+  });
+});
+
+describe("which conversation is waiting on an answer", () => {
+  const asking = (heard: number, said: string) => ({
+    heard,
+    turns: [
+      { said: "Working on it", mine: false },
+      { said, mine: false },
+    ],
+  });
+
+  test("the one that asked most recently, not the one that asked first", () => {
+    const answers = [asking(10, "Should I commit this?"), asking(20, "Which file?")];
+    expect(askedOf(answers)?.said).toBe("Which file?");
+  });
+
+  test("a conversation that is only reporting is not waiting", () => {
+    expect(askedOf([{ heard: 1, turns: [{ said: "Done.", mine: false }] }])).toBe(null);
+    expect(askedOf([])).toBe(null);
+  });
+
+  test("a question that has been answered is not still asking", () => {
+    // The reply is appended to the same list with `mine`. Read off the last turn rather
+    // than the last one the agent said, so answering it anywhere puts the badge out —
+    // including from the Work window's own box, which does not know the popup exists.
+    expect(
+      askedOf([
+        {
+          heard: 1,
+          turns: [
+            { said: "Which file?", mine: false },
+            { said: "data.ts", mine: true },
+          ],
+        },
+      ]),
+    ).toBe(null);
+  });
+
+  test("an agent that asks and then carries on is no longer waiting", () => {
+    expect(
+      askedOf([
+        {
+          heard: 1,
+          turns: [
+            { said: "Shall I commit?", mine: false },
+            { said: "Never mind, I have committed it.", mine: false },
+          ],
+        },
+      ]),
+    ).toBe(null);
   });
 });
 
