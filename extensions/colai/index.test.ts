@@ -356,3 +356,60 @@ describe("whether this machine has a screen the toolbar can work on", () => {
     expect(screenTrouble({}, "darwin" as NodeJS.Platform)).toBeNull();
   });
 });
+
+describe("what the published package promises", () => {
+  /*
+   * Read off the manifest rather than imported from core.
+   *
+   * These are the things nothing else checks and every one of them has a user-visible
+   * failure: a spec that will not parse offers a person "skip for now" and nothing else, a
+   * `files` list missing a directory installs a plugin with a blank window, and a scoped
+   * package with no `publishConfig` publishes private or not at all. None of them break a
+   * test, a build or a lint — they break somebody else's install, once, silently.
+   */
+  const manifest = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as {
+    name: string;
+    license?: string;
+    files: string[];
+    publishConfig?: { access?: string };
+    os?: string[];
+    openclaw: { install: { clawhubSpec?: string }; extensions: string[] };
+  };
+
+  test("the install spec is one ClawHub will parse", () => {
+    /*
+     * `parseClawHubPluginSpec` in core refuses anything without this prefix and returns
+     * null, and `resolveInstallDefaultChoice` then falls through every branch to "skip".
+     * The rule is restated here rather than imported because a plugin test reaching into
+     * core `src/**` is the boundary this package is careful about everywhere else.
+     */
+    const spec = manifest.openclaw.install.clawhubSpec ?? "";
+    expect(spec.startsWith("clawhub:")).toBe(true);
+    expect(spec.slice("clawhub:".length)).toBe(manifest.name);
+  });
+
+  test("everything the toolbar needs at runtime is in the tarball", () => {
+    // `files` is an allowlist. Dropping one of these produces a plugin that installs
+    // cleanly and then does nothing, which no other test would notice.
+    for (const needed of ["bin/", "dist/", "toolbar/ui/", "openclaw.plugin.json"]) {
+      expect(manifest.files, `${needed} must ship`).toContain(needed);
+    }
+  });
+
+  test("the entry the manifest names is one the host can resolve", () => {
+    expect(manifest.openclaw.extensions).toContain("./index.ts");
+    // The host prefers the built runtime and only falls back to the source entry, so the
+    // directory holding it has to ship whether or not anybody remembers why.
+    expect(manifest.files).toContain("dist/");
+  });
+
+  test("a scoped package says it is public, and says what it is licensed as", () => {
+    expect(manifest.name.startsWith("@")).toBe(true);
+    expect(manifest.publishConfig?.access).toBe("public");
+    expect(manifest.license).toBeTruthy();
+  });
+
+  test("npm refuses it where it cannot run, rather than installing a useless binary", () => {
+    expect(manifest.os).toEqual(["linux"]);
+  });
+});

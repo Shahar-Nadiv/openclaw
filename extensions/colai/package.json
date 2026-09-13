@@ -2,6 +2,7 @@
   "name": "@colai/toolbar",
   "version": "0.1.0",
   "description": "Point at anything on screen and hand it to an agent",
+  "license": "MIT",
   "type": "module",
   "keywords": [
     "openclaw-plugin",
@@ -13,6 +14,15 @@
   "os": [
     "linux"
   ],
+  "cpu": [
+    "x64"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "index.ts",
     "src/",
@@ -26,8 +36,7 @@
     "toolbar/src-tauri/Cargo.toml",
     "toolbar/src-tauri/Cargo.lock",
     "toolbar/src-tauri/build.rs",
-    "toolbar/src-tauri/tauri.conf.json",
-    "scripts/"
+    "toolbar/src-tauri/tauri.conf.json"
   ],
   "dependencies": {
     "zod": "4.4.3"
@@ -48,15 +57,12 @@
       "./index.ts"
     ],
     "install": {
-      "clawhubSpec": "colai/toolbar",
+      "clawhubSpec": "clawhub:@colai/toolbar",
       "defaultChoice": "clawhub",
       "minHostVersion": ">=2026.9.1"
     },
     "compat": {
       "pluginApi": ">=2026.9.1"
     }
-  },
-  "cpu": [
-    "x64"
-  ]
+  }
 }

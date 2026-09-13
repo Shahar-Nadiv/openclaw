@@ -18,6 +18,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { notWhatWasBuilt } from "./digest.js";
 import { toolbarOnScreen, whereabouts } from "./running.js";
 import { screenTrouble } from "./screen.js";
 
@@ -112,6 +113,20 @@ export function registerColaiCli(program: CliProgram, toolbarBinary: () => strin
   const theToolbar = (): string | null => {
     const binary = toolbarBinary();
     if (binary && existsSync(binary)) {
+      /*
+       * The same gate the service start uses.
+       *
+       * It was only on the service path, so `openclaw colai show` spawned the binary
+       * without ever asking whether it was the one that was built — which made the check
+       * something to step around by using the documented command instead of the automatic
+       * one. One gate, both doors.
+       */
+      const wrong = notWhatWasBuilt(binary);
+      if (wrong) {
+        console.error(`The colai toolbar ${wrong}`);
+        process.exitCode = 1;
+        return null;
+      }
       return binary;
     }
     console.error("The colai toolbar is not installed.");

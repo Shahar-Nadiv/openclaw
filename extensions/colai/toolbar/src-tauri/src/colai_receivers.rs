@@ -268,6 +268,9 @@ pub(crate) async fn work_roots(
                     continue;
                 };
                 let root = std::path::PathBuf::from(root);
+                if !worth_reading(&root) {
+                    continue;
+                }
                 if !roots.contains(&root) {
                     roots.push(root);
                 }
@@ -275,6 +278,33 @@ pub(crate) async fn work_roots(
         }
     }
     roots
+}
+
+/// Whether a directory is narrow enough to be a root at all.
+///
+/// The comment above says a page that could name its own roots could name `/`. Everything
+/// in that sentence is also true of the Gateway, which is where these come from — a
+/// conversation reported with `cwd: "/"` would hand the file gate a root that contains
+/// every other root, and the gate in front of the file system would be answering a
+/// question that had already been decided.
+///
+/// The test is depth rather than a list of forbidden places, because a list is a thing to
+/// keep up to date and depth is a property. Two named components is the shallowest a
+/// working directory is ever legitimately at — `/home/someone`, `/opt/thing`, `/srv/app` —
+/// and everything this rules out (`/`, `/home`, `/usr`, `/etc`, `/var`, `/mnt`) is a place
+/// nobody runs an agent from.
+///
+/// Deliberately not "inside `$HOME`". `carry` gates dragged and dialog-picked files
+/// against these same roots, so a home-only rule would refuse a file somebody chose
+/// themselves out of `/mnt/work` — a real loss, to close a hole that depth closes anyway.
+fn worth_reading(root: &std::path::Path) -> bool {
+    if !root.is_absolute() {
+        return false;
+    }
+    root.components()
+        .filter(|part| matches!(part, std::path::Component::Normal(_)))
+        .count()
+        >= 2
 }
 
 /// The conversations already under way, so a mark can join one instead of starting over.
@@ -440,6 +470,37 @@ fn named(value: Option<&str>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::worth_reading;
+    use std::path::Path;
+
+    #[test]
+    fn a_root_that_contains_every_other_root_is_not_a_root() {
+        // What a hostile or broken Gateway would have to say to defeat the file gate.
+        assert!(!worth_reading(Path::new("/")));
+        assert!(!worth_reading(Path::new("/home")));
+        assert!(!worth_reading(Path::new("/usr")));
+        assert!(!worth_reading(Path::new("/etc")));
+        assert!(!worth_reading(Path::new("/var")));
+    }
+
+    #[test]
+    fn somewhere_somebody_actually_works_is() {
+        assert!(worth_reading(Path::new("/home/someone")));
+        assert!(worth_reading(Path::new("/home/someone/Desktop/colai")));
+        // Not everybody keeps their work under their home, and `carry` gates dragged
+        // files against these roots — so outside home stays readable.
+        assert!(worth_reading(Path::new("/opt/thing")));
+        assert!(worth_reading(Path::new("/mnt/work/app")));
+    }
+
+    #[test]
+    fn a_relative_path_is_not_a_root() {
+        // Nothing downstream resolves these, so a relative root would mean whatever the
+        // process happened to be standing in.
+        assert!(!worth_reading(Path::new("work")));
+        assert!(!worth_reading(Path::new("../work")));
+    }
+
     use super::*;
     use crate::gateway_ws::GatewaySessionSummary;
 
