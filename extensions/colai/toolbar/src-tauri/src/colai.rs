@@ -67,7 +67,7 @@ pub(crate) struct Front {
     /// Where that process is working.
     ///
     /// The most useful thing on this struct and the cheapest to get. Probed on this
-    /// machine: a window whose `WM_CLASS` was `steam_app_2642680` — a number, useless —
+    /// machine: a window whose `WM_CLASS` was `steam_app_<number>` — a number, useless —
     /// sat in a directory that named the application exactly. For an editor or a
     /// terminal it names the repository somebody is asking about.
     ///
@@ -624,8 +624,8 @@ fn descendants(pid: u32) -> Vec<u32> {
 ///
 /// `/proc/<pid>/cmdline` carries the arguments a program was started with, and a
 /// document-shaped program is usually started with its document: measured on this
-/// desktop, KiCad's window names `…/quad-stepper-f7.kicad_pro` exactly, where its title
-/// says only `quad-stepper-f7`. That is the difference between an agent opening a file
+/// desktop, KiCad's window names `…/board-name.kicad_pro` exactly, where its title
+/// says only `board-name`. That is the difference between an agent opening a file
 /// and an agent looking for one.
 ///
 /// Only arguments that exist on disk right now. A flag, a socket name or a stale path is
@@ -1194,7 +1194,7 @@ mod tests {
         assert!(tells_us_nothing("/proc/1234/fd"));
 
         // A real place of work is not refused.
-        assert!(!tells_us_nothing("/home/someone/Documents/kicad/quad-stepper-f7"));
+        assert!(!tells_us_nothing("/home/someone/Documents/kicad/board-name"));
         assert!(!tells_us_nothing("/srv/build"));
 
         // The home directory itself, whatever it is called on this machine.
@@ -1211,7 +1211,7 @@ mod tests {
     fn the_document_a_window_was_opened_with_is_read_off_its_command_line() {
         /*
          * Measured on this desktop: KiCad's window names its `.kicad_pro` exactly on the
-         * command line, where the window title says only `quad-stepper-f7`. That is the
+         * command line, where the window title says only `board-name`. That is the
          * difference between an agent opening a file and an agent looking for one.
          *
          * Read against this test process, which is the one process whose command line is
