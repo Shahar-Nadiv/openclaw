@@ -1503,6 +1503,306 @@ function runningSaid(runs) {
   return runs.length === 1 ? "working" : `${runs.length} working`;
 }
 
+/*
+ * ── what it is doing, in a few words ─────────────────────────────────────────
+ *
+ * The crab says *that* an agent is working. This says what it is working on, in the
+ * register OpenClaw's own chat uses while a run is underway: "Reading toolbar.css",
+ * "Running the tests". A line, not an answer — the answer arrives later and belongs in
+ * the pin, where there is room to read it.
+ *
+ * Read off messages the toolbar is already sent, for the sessions it already subscribed
+ * to. Nothing extra is asked for and nothing is polled: a status line costing a round
+ * trip a second is a status line somebody turns off.
+ *
+ * Three vocabularies arrive here and none of them is this toolbar's to choose. An
+ * embedded agent's calls are named `read`, `web_search`, `apply_patch`; a CLI agent's are
+ * `Read`, `WebSearch`, `MultiEdit`; an MCP server prefixes its own with `server__`. They
+ * differ in case, in separators and in prefix, and hardly at all in the words themselves
+ * — so the name is reduced to its letters and one table covers all three.
+ */
+
+/** Longer than this is prose rather than a status, and is cut to fit. */
+const DOING_MOST = 46;
+
+/**
+ * How long a line stands before the pill falls back to saying only that work is happening.
+ *
+ * Generous, because an agent can sit inside one tool call for a while and a pill that
+ * blanks every few seconds is a pill that flickers. Not unlimited, because "Reading a
+ * file" three minutes after the file was read is a worse thing to say than "Thinking".
+ */
+const DOING_QUIET = 90 * 1000;
+
+/** What it says while something is running and nothing has been heard about it yet. */
+const DOING_FIRST = "Thinking…";
+
+/** The arguments a call arrived with, whatever the sender happened to call them. */
+function doingArgs(part) {
+  for (const key of ["arguments", "input", "args", "params"]) {
+    const args = part[key];
+    if (args && typeof args === "object" && !Array.isArray(args)) return args;
+  }
+  return {};
+}
+
+/** The first of these arguments that carries words. */
+function doingWords(args, keys) {
+  for (const key of keys) {
+    const said = args[key];
+    if (typeof said === "string" && said.trim()) return said.trim();
+  }
+  return null;
+}
+
+/**
+ * The file a call is about, named the way somebody would say it out loud.
+ *
+ * Its last segment only. A pill is one line on a rail and an absolute path is four times
+ * wider than it — and the segment is the half anybody recognises anyway.
+ */
+function doingFile(args) {
+  const said = doingWords(args, [
+    "file_path",
+    "filePath",
+    "notebook_path",
+    "notebookPath",
+    "path",
+    "file",
+    "filename",
+  ]);
+  if (!said) return null;
+  const segments = said.replace(/\/+$/, "").split("/");
+  return segments[segments.length - 1] || said;
+}
+
+/** Words that stand in front of a command without being it. */
+const DOING_PASSED_THROUGH = new Set(["env", "sudo", "nice", "time", "nohup", "exec", "command"]);
+
+/**
+ * The program a shell call runs.
+ *
+ * The first word rather than the whole line: a pipeline does not fit on a rail, and the
+ * program is the part that says what is happening. What comes before it is stepped over
+ * — wrappers, their options, and the variables set in front of a command — because
+ * "Running env" is a sentence about nothing.
+ *
+ * Variables are recognised by shouting, which is a convention rather than a rule. It is
+ * the right way round to be wrong: a program named in capitals is rare, and losing one
+ * costs a slightly vaguer line, where reading `LD_LIBRARY_PATH` as a program is the
+ * toolbar confidently saying something false.
+ */
+function doingCommand(args) {
+  const said = doingWords(args, ["command", "cmd", "script", "run"]);
+  if (!said) return null;
+  const words = said.split(/\s+/).filter(Boolean);
+  const program = words.find(
+    (word) =>
+      !DOING_PASSED_THROUGH.has(word) &&
+      !word.startsWith("-") &&
+      !word.includes("=") &&
+      word !== word.toUpperCase(),
+  );
+  const word = program || words[0];
+  return word ? word.split("/").pop() || word : null;
+}
+
+/** The host of a URL, which is the part of it worth reading at this size. */
+function doingHost(args) {
+  const said = doingWords(args, ["url", "uri", "link"]);
+  if (!said) return null;
+  const host = said.replace(/^[a-z]+:\/\//i, "").split(/[/?#]/)[0];
+  return host ? host.replace(/^www\./, "") : null;
+}
+
+/**
+ * A phrase, using what the call named if it named anything.
+ *
+ * The fallback is a whole sentence rather than a stand-in noun, because the two are not
+ * always the same shape: a read with no path is "Reading a file", but a search with no
+ * pattern is not "Searching for something" — it is "Searching the project".
+ */
+function doingAbout(verb, named, otherwise) {
+  return named ? `${verb} ${named}` : otherwise || null;
+}
+
+/**
+ * The verb for each tool, and which of its arguments is worth naming.
+ *
+ * Only the tools whose work is legible from the outside. A call whose name means nothing
+ * to somebody watching their own screen falls through to `doingOther`, which says the
+ * name and no more — better than inventing a sentence about it.
+ */
+const DOING_TOOLS = {
+  read: (args) => doingAbout("Reading", doingFile(args), "Reading a file"),
+  viewimage: () => "Looking at an image",
+  readpage: (args) => doingAbout("Reading", doingHost(args), "Reading a page"),
+  write: (args) => doingAbout("Writing", doingFile(args), "Writing a file"),
+  edit: (args) => doingAbout("Editing", doingFile(args), "Editing a file"),
+  multiedit: (args) => doingAbout("Editing", doingFile(args), "Editing a file"),
+  applypatch: (args) => doingAbout("Editing", doingFile(args), "Editing a file"),
+  notebookedit: (args) => doingAbout("Editing", doingFile(args), "Editing a notebook"),
+  bash: (args) => doingAbout("Running", doingCommand(args), "Running a command"),
+  exec: (args) => doingAbout("Running", doingCommand(args), "Running a command"),
+  shell: (args) => doingAbout("Running", doingCommand(args), "Running a command"),
+  terminal: (args) => doingAbout("Running", doingCommand(args), "Running a command"),
+  process: (args) => doingAbout("Running", doingCommand(args), "Running a command"),
+  grep: (args) =>
+    doingAbout(
+      "Searching for",
+      doingWords(args, ["pattern", "query", "q"]),
+      "Searching the project",
+    ),
+  search: (args) =>
+    doingAbout(
+      "Searching for",
+      doingWords(args, ["pattern", "query", "q"]),
+      "Searching the project",
+    ),
+  glob: (args) =>
+    doingAbout("Looking for", doingWords(args, ["pattern", "glob"]), "Looking for files"),
+  find: (args) =>
+    doingAbout("Looking for", doingWords(args, ["pattern", "name", "query"]), "Looking for files"),
+  ls: (args) => doingAbout("Looking through", doingFile(args), "Looking through the project"),
+  websearch: (args) =>
+    doingAbout("Searching the web for", doingWords(args, ["query", "q"]), "Searching the web"),
+  webfetch: (args) => doingAbout("Reading", doingHost(args), "Reading a page"),
+  computer: () => "Looking at the screen",
+  screen: () => "Looking at the screen",
+  imagegenerate: () => "Drawing an image",
+  todowrite: () => "Planning",
+  updateplan: () => "Planning",
+  sessionsspawn: () => "Starting another agent",
+  subagents: () => "Starting another agent",
+  task: () => "Starting another agent",
+  agentswait: () => "Waiting for another agent",
+  message: () => "Writing a message",
+  askuser: () => "Asking you something",
+};
+
+/**
+ * A tool nothing above knows about, said plainly.
+ *
+ * Its own name, with the separators a person does not read taken out. Guessing a verb
+ * for a tool this table has never seen would be the toolbar making something up about
+ * work it cannot see.
+ */
+function doingOther(name) {
+  const words = name.replace(/[_-]+/g, " ").trim();
+  return words ? `Using ${words}` : null;
+}
+
+/**
+ * What a call is named, both ways it is needed.
+ *
+ * `key` is the name reduced to its letters, which is what makes `web_search` and
+ * `WebSearch` the same row of the table. `said` keeps the separators, because a tool the
+ * table has never seen is shown by name and `webfetch` reads worse than `web fetch`.
+ */
+function doingName(part) {
+  const said = part.name || part.toolName || part.tool_name || part.tool;
+  if (typeof said !== "string" || !said.trim()) return null;
+  // `server__tool` is one tool on an MCP server; the tool is the half worth saying.
+  const bare = said.trim().split("__").pop() || said.trim();
+  return { key: bare.toLowerCase().replace(/[_-]+/g, ""), said: bare };
+}
+
+/** What one call to one tool is doing, or nothing if it cannot be said. */
+function doingTool(part) {
+  const name = doingName(part);
+  if (!name) return null;
+  const says = DOING_TOOLS[name.key];
+  return says ? says(doingArgs(part)) : doingOther(name.said);
+}
+
+/**
+ * The first thing a longer answer says, short enough to read at a glance.
+ *
+ * An agent narrates before it works — "I'll check the stylesheet first" — and that
+ * opening sentence is exactly a status line. What follows it is the answer, which is the
+ * pin's business rather than the rail's.
+ */
+function firstBreath(said) {
+  const words = String(said || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!words) return null;
+  // Anything that opens with formatting is a written answer rather than a remark: a
+  // heading, a list, a quote, a block of code.
+  if (/^([#>*`|[\-]|\d+[.)]\s)/.test(words)) return null;
+  const stop = words.search(/[.!?](\s|$)/);
+  const first = stop === -1 ? words : words.slice(0, stop);
+  if (first.length <= DOING_MOST) return first;
+  const cut = first.slice(0, DOING_MOST);
+  const space = cut.lastIndexOf(" ");
+  // On a word, unless the first word is longer than the whole pill — in which case
+  // there is no word boundary to cut on and the character count is all there is.
+  return `${(space > 12 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
+/**
+ * What one pushed message says the agent is doing.
+ *
+ * The last call in it, not the first: a message carrying three of them is an agent that
+ * did three things, and the one it is inside now is the last one. Text is the fallback
+ * rather than the preference, because a tool call is a fact about the work and a
+ * sentence is the agent's account of it.
+ */
+function doingOf(message) {
+  if (!message || typeof message !== "object") return null;
+  if (message.role !== "assistant") return null;
+  const content = message.content;
+  if (typeof content === "string") return firstBreath(content);
+  if (!Array.isArray(content)) return null;
+  let said = null;
+  let called = false;
+  for (const part of content) {
+    if (!part || typeof part !== "object") continue;
+    const kind = String(part.type || "")
+      .toLowerCase()
+      .replace(/_/g, "");
+    if (
+      kind === "toolcall" ||
+      kind === "tooluse" ||
+      kind === "servertooluse" ||
+      kind === "mcptooluse"
+    ) {
+      const from = doingTool(part);
+      if (from) {
+        said = from;
+        called = true;
+      }
+    } else if (kind === "text" && !called && !said && typeof part.text === "string") {
+      said = firstBreath(part.text);
+    }
+  }
+  return said;
+}
+
+/**
+ * What the pill says, given the last line heard, what the Gateway reports, and the clock.
+ *
+ * Null while nothing is working, which is most of the time — the pill is about a run in
+ * progress and a strip of furniture saying "Thinking" over an idle desktop is the toolbar
+ * talking about itself.
+ *
+ * A line is only shown for a session the Gateway still calls working. The mood is
+ * gateway-wide on purpose, so the run that lit the crab is often not the run the last
+ * line came from, and holding up a finished session's last words under somebody else's
+ * green light would be the toolbar reporting the wrong agent.
+ */
+function doingSaid(doing, work, now) {
+  const mood = moodOf(work);
+  if (!mood || mood.mood !== "working") return null;
+  if (!doing || !doing.said) return DOING_FIRST;
+  if (now - doing.at > DOING_QUIET) return DOING_FIRST;
+  const working = (work && work.working) || [];
+  if (doing.sessionKey && working.length > 0 && !working.includes(doing.sessionKey)) {
+    return DOING_FIRST;
+  }
+  return doing.said;
+}
+
 /** Whole seconds left of a recording, never past its ends. */
 function secondsLeft(until, now) {
   return Math.max(0, Math.ceil((until - now) / 1000));

@@ -2745,3 +2745,108 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── what the agent is doing ──────────────────────────────────────────────────
+ *
+ * A line beside the crab, up only while something is running. The mascot already says
+ * that an agent is working; this is the other half of the sentence, in the register
+ * OpenClaw's own chat uses while a run is underway — "Reading toolbar.css" rather than
+ * the answer, which arrives later and goes in the pin where there is room to read it.
+ *
+ * Hung off the end of the rail rather than placed in it. The crab is the last key, so
+ * the end is where the crab is; and a line inside the rail would make the rail wider
+ * every time an agent opened a file with a longer name, moving every key out from under
+ * somebody's pointer.
+ *
+ * It takes no pointer events, and so is not part of the clickable region — see
+ * `boxAround`. It is a sentence, not a control, and an agent can run for minutes.
+ */
+.doing {
+  position: absolute;
+  z-index: 5;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 260px;
+  padding: 5px 11px 5px 9px;
+  border-radius: 999px;
+  background: var(--chrome-strong);
+  border: 1px solid rgb(255 255 255 / 12%);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 6%) inset,
+    0 10px 24px rgb(0 0 0 / 45%);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+  /* One line. A status that wraps to three is an answer, and the shortening that keeps
+     it to one is decided in the page — this is the guard for the cases it cannot know
+     about, like a font that fell back wider than the one shipped beside it. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* The same green the crab wears while it works, breathing on the same clock. Two marks
+   for one fact, which is what ties the line to the mascot it comes out of rather than
+   leaving it a floating caption. */
+.doing::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgb(52 199 89);
+  box-shadow: 0 0 8px rgb(52 199 89 / 55%);
+  animation: minding-dot 2.6s ease-in-out infinite;
+}
+
+@keyframes minding-dot {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Out of the crab, not out of the middle of the rail: the transform grows it from the
+   corner nearest the mascot, which on a horizontal rail is its own bottom right. */
+.rail-wrap[data-vertical="false"] .doing {
+  bottom: calc(100% + 8px);
+  right: 0;
+  transform-origin: 100% 100%;
+  animation: doing-out 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.rail-wrap[data-dock="bottom"] .doing {
+  bottom: auto;
+  top: calc(100% + 8px);
+  transform-origin: 100% 0;
+}
+
+/* Upright, the crab is the bottom key and the line goes out sideways from it. */
+.rail-wrap[data-vertical="true"] .doing {
+  bottom: 0;
+  left: calc(100% + 10px);
+  transform-origin: 0 100%;
+  animation: doing-out 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.rail-wrap[data-dock="right"] .doing {
+  left: auto;
+  right: calc(100% + 10px);
+  transform-origin: 100% 100%;
+}
+
+@keyframes doing-out {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doing,
+  .doing::before {
+    animation: none;
+  }
+}

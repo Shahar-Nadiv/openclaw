@@ -612,6 +612,13 @@ async function watchEverything() {
       same(before.working, work.working) &&
       same(before.troubled, work.troubled)
     ) {
+      // Nothing about who is working has moved — but the line beside the crab can go
+      // stale on its own clock. An agent silent inside one long tool call is the same
+      // news five seconds later, and the sentence about it stops being true without
+      // anything here changing. Redrawn only when what it would say has actually
+      // changed, so this stays a comparison rather than a five-second repaint.
+      const shown = el.doing.hidden ? null : el.doing.textContent;
+      if (doingSaid(state.doing, work, Date.now()) !== shown) render();
       return;
     }
     state.atWork = work;

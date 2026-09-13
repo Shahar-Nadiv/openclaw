@@ -194,6 +194,16 @@ type ToolbarHelpers = {
   REWIND_SAYS: string;
   KEEPS_MARKING: string[];
   MOODS: Record<string, { colour: string; says: (many: number) => string }>;
+  doingOf: (message: unknown) => string | null;
+  doingSaid: (
+    doing: { said: string; sessionKey?: string; at: number } | null,
+    work: Work | null,
+    now: number,
+  ) => string | null;
+  DOING_FIRST: string;
+  DOING_MOST: number;
+  DOING_QUIET: number;
+  DOING_TOOLS: Record<string, (args: Record<string, unknown>) => string | null>;
   moodOf: (work: Work | null) => { mood: string; many: number } | null;
   moodSaid: (work: Work | null) => string;
   moodMark: (work: Work | null) => string | null;
@@ -375,7 +385,7 @@ function glyphsInTheRail(): Record<string, unknown> {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, GITS, GIT_FIRST, gitKindOf, repoFor, isCommitting, MODE_FIRST, CLICK_MEANS, effortStops, effortAt, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, GITS, GIT_FIRST, gitKindOf, repoFor, isCommitting, MODE_FIRST, CLICK_MEANS, effortStops, effortAt, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid, doingOf, doingSaid, DOING_FIRST, DOING_MOST, DOING_QUIET, DOING_TOOLS };`,
   context,
 );
 const {
@@ -474,6 +484,12 @@ const {
   showingNow,
   asDrawn,
   entrySaid,
+  doingOf,
+  doingSaid,
+  DOING_FIRST,
+  DOING_MOST,
+  DOING_QUIET,
+  DOING_TOOLS,
 } = context.helpers as ToolbarHelpers;
 
 /*
@@ -3313,6 +3329,147 @@ describe("copying what is here, or bringing something in", () => {
       ["page", library],
     ] as const) {
       expect(source, what).not.toContain("get_component");
+    }
+  });
+});
+
+describe("saying what the agent is doing, not what it found", () => {
+  const call = (name: string, args: Record<string, unknown> = {}, type = "toolCall") => ({
+    role: "assistant",
+    content: [{ type, name, arguments: args }],
+  });
+
+  test("a tool call becomes a sentence about the work", () => {
+    expect(doingOf(call("read", { file_path: "/home/me/app/toolbar.css" }))).toBe(
+      "Reading toolbar.css",
+    );
+    expect(doingOf(call("edit", { file_path: "src/theme.ts" }))).toBe("Editing theme.ts");
+    expect(doingOf(call("bash", { command: "npm run build" }))).toBe("Running npm");
+    expect(doingOf(call("grep", { pattern: "--accent" }))).toBe("Searching for --accent");
+  });
+
+  test("the same tool under either vocabulary is the same sentence", () => {
+    // An embedded agent calls it `web_search`; a CLI agent calls it `WebSearch`; an MCP
+    // server would call it `server__web_search`. None of that is the user's business, and
+    // three spellings producing three different lines would make it theirs.
+    const said = "Searching the web for crab";
+    expect(doingOf(call("web_search", { query: "crab" }))).toBe(said);
+    expect(doingOf(call("WebSearch", { query: "crab" }))).toBe(said);
+    expect(doingOf(call("tavily__web_search", { query: "crab" }))).toBe(said);
+  });
+
+  test("both shapes a call arrives in are read", () => {
+    // `toolCall` is what the Gateway's display projection emits and `tool_use` is what
+    // the model produced before it; which of the two reaches the page depends on the
+    // agent, and neither is worth a blank pill.
+    expect(doingOf(call("read", { file_path: "a.css" }, "tool_use"))).toBe("Reading a.css");
+    expect(
+      doingOf({
+        role: "assistant",
+        content: [{ type: "tool_use", name: "read", input: { file_path: "a.css" } }],
+      }),
+    ).toBe("Reading a.css");
+  });
+
+  test("a command is named by its program, past whatever wraps it", () => {
+    expect(doingOf(call("bash", { command: "env -u LD_LIBRARY_PATH ffmpeg -i in.mp4" }))).toBe(
+      "Running ffmpeg",
+    );
+    expect(doingOf(call("bash", { command: "NODE_ENV=test npx vitest run" }))).toBe("Running npx");
+    expect(doingOf(call("bash", { command: "/usr/bin/python3 take.py" }))).toBe("Running python3");
+  });
+
+  test("a tool nothing knows about is named rather than guessed at", () => {
+    // Inventing a verb for a tool this table has never seen would be the toolbar making
+    // something up about work it cannot see. Its own name is the honest answer.
+    expect(doingOf(call("kicad__place_footprint"))).toBe("Using place footprint");
+  });
+
+  test("what the agent says is its first breath, not its answer", () => {
+    expect(
+      doingOf({
+        role: "assistant",
+        content: [{ type: "text", text: "Adjusting the theme colour. It is set in two places." }],
+      }),
+    ).toBe("Adjusting the theme colour");
+    const whole = "Now I am going to look very carefully at the stylesheet";
+    const long = doingOf({ role: "assistant", content: [{ type: "text", text: whole }] })!;
+    expect(long.length).toBeLessThanOrEqual(DOING_MOST + 1);
+    expect(long.endsWith("…")).toBe(true);
+    // Cut on a word, which is what makes it a shortened sentence rather than a rendering
+    // fault: what is left has to be a whole-word prefix of what was said.
+    const kept = long.slice(0, -1);
+    expect(whole.startsWith(kept)).toBe(true);
+    expect(whole[kept.length]).toBe(" ");
+  });
+
+  test("a written answer is not a status line", () => {
+    // Headings, lists and code are what an agent produces when it has finished. Putting
+    // the first line of one on the rail would be showing the answer in the worst place
+    // for reading it, and the pin already has it.
+    for (const text of ["## What I found", "- one thing", "1. First", "> quoted", "`code`"]) {
+      expect(doingOf({ role: "assistant", content: [{ type: "text", text }] })).toBeNull();
+    }
+  });
+
+  test("a call outranks the sentence beside it, and the last call wins", () => {
+    // An agent narrates and then acts in one message. What it did is a fact; what it said
+    // it would do is a plan, and the fact is the better line.
+    expect(
+      doingOf({
+        role: "assistant",
+        content: [
+          { type: "text", text: "Let me look at the stylesheet." },
+          { type: "toolCall", name: "read", arguments: { file_path: "toolbar.css" } },
+          { type: "toolCall", name: "edit", arguments: { file_path: "theme.css" } },
+        ],
+      }),
+    ).toBe("Editing theme.css");
+  });
+
+  test("nothing anybody typed becomes a status line", () => {
+    expect(doingOf({ role: "user", content: "make this panel blue" })).toBeNull();
+    expect(doingOf({ role: "toolResult", toolName: "read", details: {} })).toBeNull();
+    expect(doingOf(null)).toBeNull();
+  });
+
+  test("the pill is only up while something is working", () => {
+    const now = 1_000_000;
+    const doing = { said: "Editing theme.css", sessionKey: "s1", at: now };
+    expect(doingSaid(doing, { running: 1, waiting: 0, trouble: 0, working: ["s1"] }, now)).toBe(
+      "Editing theme.css",
+    );
+    // An idle desktop, a run that failed, an approval nobody answered: none of them is an
+    // agent doing something, and a strip of furniture narrating over them would be the
+    // toolbar talking about itself.
+    expect(doingSaid(doing, null, now)).toBeNull();
+    expect(doingSaid(doing, { running: 0, waiting: 0, trouble: 0 }, now)).toBeNull();
+    expect(
+      doingSaid(doing, { running: 1, waiting: 0, trouble: 1, working: ["s1"] }, now),
+    ).toBeNull();
+  });
+
+  test("working with nothing heard says so rather than nothing", () => {
+    const now = 1_000_000;
+    const busy = { running: 1, waiting: 0, trouble: 0, working: ["s1"] };
+    expect(doingSaid(null, busy, now)).toBe(DOING_FIRST);
+    // A line that has stood for minutes has stopped being true. "Reading a file" long
+    // after the file was read is a worse thing to say than admitting to not knowing.
+    expect(
+      doingSaid({ said: "Reading a.css", sessionKey: "s1", at: now }, busy, now + DOING_QUIET + 1),
+    ).toBe(DOING_FIRST);
+    // And a line from a conversation that has since stopped belongs to nobody: the light
+    // is gateway-wide, so the run that lit it is often not the one that last spoke.
+    expect(doingSaid({ said: "Reading a.css", sessionKey: "other", at: now }, busy, now)).toBe(
+      DOING_FIRST,
+    );
+  });
+
+  test("every tool named in the table says something", () => {
+    // A row that returns nothing is a tool the pill goes quiet on, which is the one
+    // behaviour this feature exists to prevent.
+    for (const [name, says] of Object.entries(DOING_TOOLS)) {
+      expect(says({}), name).toBeTruthy();
     }
   });
 });

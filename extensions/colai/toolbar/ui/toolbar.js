@@ -32,6 +32,7 @@ const el = {
   agentAnswer: document.getElementById("agent-answer"),
   agentRows: document.getElementById("agent-rows"),
   trouble: document.getElementById("trouble"),
+  doing: document.getElementById("doing"),
   tips: document.getElementById("tips"),
   marks: document.getElementById("marks"),
   pins: document.getElementById("pins"),
@@ -126,6 +127,11 @@ const state = {
   // this toolbar started. Null until the Gateway has answered once: no light is the
   // honest state before anything is known, and a green one would be a claim.
   atWork: null,
+  // The last thing heard about work in progress — a line, which conversation it came
+  // from and when. What the pill beside the crab shows. Null until an agent says
+  // something, which is not the same as nothing running: `doingSaid` decides between
+  // those two, because only it can see what the Gateway reports.
+  doing: null,
   // Windows that were asked what they are showing and had nothing to say. Asking again
   // is a quarter of a second spent learning what the last answer already said.
   mute: new Set(),
@@ -396,6 +402,16 @@ function render() {
   buttons.settings.dataset.walking = String(mood === "working");
   buttons.settings.title = moodSaid(state.atWork);
   buttons.settings.setAttribute("aria-label", buttons.settings.title);
+
+  // And what it is doing, beside the crab that says it is doing something.
+  //
+  // The text is only written when it changes. This runs on every render — a keypress, a
+  // pointer move over a menu — and rewriting the node each time restarts the CSS
+  // transition that carries the line in, which reads as a pill flickering at whatever
+  // rate the pointer happens to be moving.
+  const doing = doingSaid(state.doing, state.atWork, Date.now());
+  el.doing.hidden = doing === null;
+  if (doing !== null && el.doing.textContent !== doing) el.doing.textContent = doing;
 
   const who = receiver();
   const mark = buttons.agents.querySelector(".running-dots");
@@ -714,6 +730,13 @@ function boxAround(node) {
       pending.push(...child.children);
     }
     if (!box.width || !box.height) continue;
+    // Something that does not take the pointer claims none of the desktop. The line
+    // beside the crab is the case this exists for: a sentence about work in progress,
+    // hung over whatever somebody is working on, for as long as the agent runs — and
+    // counting it would lay a dead strip of glass across exactly that. Its children are
+    // still walked above, because `pointer-events` is inherited and a child may take it
+    // back.
+    if (style.pointerEvents === "none") continue;
     left = Math.min(left, box.left);
     top = Math.min(top, box.top);
     right = Math.max(right, box.right);
@@ -1056,6 +1079,14 @@ async function start() {
     // an agent that is working but slow.
     const run = state.runs.find((one) => one.sessionKey === payload.sessionKey);
     if (run) run.heard = Date.now();
+    // What it is doing, for the pill on the rail. Before everything below, and outside
+    // it: the rest of this listener is about the pin that is waiting for an answer, and
+    // most working sessions have no pin — an agent picked up from the Work panel, a
+    // second turn on a conversation whose pin was closed. Those are exactly the runs the
+    // pill is worth having for, and reading the line after the early return below would
+    // have left it silent for all of them.
+    const doingNow = doingOf(payload.message);
+    if (doingNow) state.doing = { said: doingNow, sessionKey: payload.sessionKey, at: Date.now() };
     // The pin for that session, whether or not it has heard something already. It used
     // to stop looking once anything had arrived, which threw away everything after the
     // first turn — and an agent says what it is doing before it says what it found.
