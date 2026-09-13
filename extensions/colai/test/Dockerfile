@@ -5,19 +5,26 @@
 # the fork this plugin was cut from, because the toolbar carries a copied Gateway client
 # and testing it only against its own source is exactly the blind spot that copy has.
 #
-# There is no display in here. This proves packaging, the pre-flight checks, the build,
-# and install and uninstall — not that the overlay draws. `fresh-install.sh --display`
-# passes this desktop's X socket through for that last mile.
-FROM debian:trixie-slim
+# There is no display in here. This proves packaging, the pre-flight checks, install and
+# uninstall, and — since the binary now refuses a machine with no screen rather than
+# crashing on one — that the shipped binary actually loads and runs here.
+# `fresh-install.sh --display` passes this desktop's X socket through for the last mile.
+#
+# The base is an argument, and that is the whole reason this file changed. It was pinned to
+# Debian 13, whose glibc is 2.41 — so the test could not fail on a binary built against a
+# newer glibc than it promises, which is precisely the bug that shipped. The floor the
+# package claims is 2.35, so the matrix has to include a machine that old.
+ARG BASE=debian:trixie-slim
+FROM ${BASE}
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
-    ca-certificates curl xz-utils git python3 build-essential pkg-config \
+    ca-certificates curl xz-utils git python3 \
   && rm -rf /var/lib/apt/lists/*
 
 # Node from nodejs.org rather than apt, so the version is the one OpenClaw asks for and
-# not whatever Debian happens to carry.
+# not whatever the distribution happens to carry.
 ARG NODE_VERSION=22.23.2
 RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
     | tar -xJ -C /usr/local --strip-components=1 \
@@ -27,21 +34,29 @@ RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-l
 ARG OPENCLAW_VERSION=2026.9.1
 RUN npm install -g "openclaw@${OPENCLAW_VERSION}" && openclaw --version
 
-# Everything the toolbar needs to compile, installed here so a variant can take it away
-# again rather than having to add it. `--variant no-headers` uninstalls these; `--variant
-# no-rust` skips rustup below.
-ARG WITH_HEADERS=1
-RUN if [ "$WITH_HEADERS" = "1" ]; then \
+# What the shipped binary needs at *run* time — not the `-dev` packages, which are what it
+# would need to be compiled. This is the set the README tells people to install, so getting
+# it wrong here is getting the README wrong.
+#
+# `WITH_RUNTIME=0` is a variant of its own: a machine that has none of this must produce a
+# loader error somebody can act on, rather than a window that never appears.
+ARG WITH_RUNTIME=1
+RUN if [ "$WITH_RUNTIME" = "1" ]; then \
       apt-get update \
       && apt-get install -y --no-install-recommends \
-        libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libayatana-appindicator3-dev librsvg2-dev \
+        libwebkit2gtk-4.1-0 libgtk-3-0 libsoup-3.0-0 libayatana-appindicator3-1 x11-utils \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 
-ARG WITH_RUST=1
+# Kept so a variant can prove a toolchain it does not need changes nothing. Off by default
+# now: the question "does this need Rust on the installing machine" is settled — it ships a
+# binary — and the question that replaced it is "how old a Linux does that binary reach".
+ARG WITH_RUST=0
 ARG RUST_VERSION=1.97.1
 RUN if [ "$WITH_RUST" = "1" ]; then \
-      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config \
+      && rm -rf /var/lib/apt/lists/* \
+      && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
         | sh -s -- -y --profile minimal --default-toolchain "$RUST_VERSION"; \
     fi
 ENV PATH="/root/.cargo/bin:${PATH}"
