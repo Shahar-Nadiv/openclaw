@@ -136,6 +136,7 @@ type ToolbarHelpers = {
   GIT_FIRST: string;
   MODE_FIRST: string;
   CLICK_MEANS: Record<string, string>;
+  wholeDisplay: (mark: { tool: string; region?: unknown; points?: unknown[] }) => boolean;
   effortStops: (model: Model | null) => { id: string; label: string }[];
   effortAt: (model: Model | null, chosen: string | null) => number;
   gitKindOf: (mark: { git?: string } | null) => string;
@@ -391,7 +392,7 @@ function glyphsInTheRail(): Record<string, unknown> {
 
 const context: { helpers?: ToolbarHelpers } & Record<string, unknown> = {};
 vm.runInNewContext(
-  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, GITS, GIT_FIRST, gitKindOf, repoFor, isCommitting, MODE_FIRST, CLICK_MEANS, effortStops, effortAt, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, choicesIn, questionIn, askedOf, CHOICE_MOST, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid, doingOf, doingSaid, DOING_FIRST, DOING_MOST, DOING_QUIET, DOING_TOOLS };`,
+  `${toolbarSource}\nthis.helpers = { TOOLS, DRAWS, dockFor, usable, boxOf, pathFor, gateFor, counted, MODES, summaryFor, screenAt, spanOf, detailOf, projectInFront, RECORD_LENGTHS, carrying, sizeOf, secondsLeft, recordFrame, RECORD_CLEAR, DESIGNS, DESIGN_FIRST, GITS, GIT_FIRST, gitKindOf, repoFor, isCommitting, MODE_FIRST, CLICK_MEANS, wholeDisplay, effortStops, effortAt, labelOf, homeOf, WHOLE_DISPLAY, scheduleOf, scheduleSays, nameFor, automationFor, AUTOMATION_FIRST, UNITS, REPEATS, FOLD_TIME, PENS, PEN_FIRST, PATHS, kindFor, ARROW_HEAD, ARROW_WIDE, ARROW_LEAST, ARROW_MOST, HIGHLIGHT_WIDE, placeOf, whereSaid, spotIn, spotSaid, samePlace, stillRunning, runsNow, runningSaid, RUN_QUIET, sheeted, asksSomething, choicesIn, questionIn, askedOf, CHOICE_MOST, canGoBack, rewindRefused, pointSaid, agoSaid, briefly, REWIND_SAYS, KEEPS_MARKING, numberOf, MOODS, moodOf, moodSaid, moodMark, STATES, stateOf, needingYou, workCountSaid, handHue, tokenAt, modesMatching, withoutToken, SOURCES, TAKES_SOURCE, sourceOf, broughtIn, unchosen, centredIn, FOLLOWS_WINDOW, anchorOf, intoWindow, ontoScreen, showingNow, asDrawn, entrySaid, doingOf, doingSaid, DOING_FIRST, DOING_MOST, DOING_QUIET, DOING_TOOLS };`,
   context,
 );
 const {
@@ -424,6 +425,7 @@ const {
   isCommitting,
   MODE_FIRST,
   CLICK_MEANS,
+  wholeDisplay,
   effortStops,
   effortAt,
   labelOf,
@@ -1680,7 +1682,7 @@ describe("the address that travels with a mark", () => {
     // directory that named the application exactly. The title is a convention; this is
     // the kernel.
     const said = whereSaid(code).join("\n");
-    expect(said).toContain("In Code — /home/someone/Desktop/colai");
+    expect(said).toContain("In Code — ~/Desktop/colai");
     expect(said).toContain("window 1920×1080");
   });
 
@@ -1711,9 +1713,7 @@ describe("the address that travels with a mark", () => {
     };
     const said = whereSaid(kicad);
     const whole = said.join("\n");
-    expect(whole).toContain(
-      "document /home/someone/Documents/kicad/quad-stepper-f7/quad-stepper-f7.kicad_pro",
-    );
+    expect(whole).toContain("document ~/Documents/kicad/quad-stepper-f7/quad-stepper-f7.kicad_pro");
     expect(
       said.findIndex((line) => line.includes("document ")),
       "the exact path comes before the window it was read from",
@@ -1758,8 +1758,55 @@ describe("the address that travels with a mark", () => {
 
   test("a real URL replaces the page title rather than sitting beside it", () => {
     const said = whereSaid(browser).join("\n");
-    expect(said).toContain("https://app.example.com/settings#billing");
+    // The fragment goes with the query — see the redaction tests below.
+    expect(said).toContain("https://app.example.com/settings#…");
     expect(said).not.toContain("(read from the title)");
+  });
+
+  test("a session token in the address never leaves the machine", () => {
+    // The single worst thing this surface can do. A person marks something in a tool they
+    // are logged into, and the tab's address carries the thing that logged them in.
+    const signed: Front = {
+      ...browser,
+      url: "https://files.example.com/report.pdf?X-Amz-Signature=deadbeefcafe&expires=99",
+    };
+    const said = whereSaid(signed).join("\n");
+    expect(said).not.toContain("deadbeefcafe");
+    expect(said).not.toContain("X-Amz-Signature");
+    // Cut, not dropped: an agent that can see a query existed can ask for it.
+    expect(said).toContain("https://files.example.com/report.pdf?…");
+  });
+
+  test("a question mark in a title is not a query string", () => {
+    // The reason the cut is applied to the address and not inside `observed`. Titles are
+    // prose, and cutting them at the first question mark throws away half of most of them.
+    const asking: Front = {
+      ...code,
+      url: undefined,
+      title: "How do I center a div? — Stack Overflow",
+    };
+    expect(whereSaid(asking).join("\n")).toContain("How do I center a div? — Stack Overflow");
+  });
+
+  test("nobody's account name travels with a mark", () => {
+    const said = whereSaid({
+      ...code,
+      cwd: "/home/someone/work",
+      opened: "/home/otherperson/shared/notes.md",
+    }).join("\n");
+    expect(said).not.toContain("/home/someone");
+    // Any home, not only this user's — a path under somebody else's is a leak about them.
+    expect(said).not.toContain("/home/otherperson");
+    expect(said).toContain("~/work");
+    expect(said).toContain("~/shared/notes.md");
+  });
+
+  test("what was read off the desktop is fenced, top and bottom", () => {
+    // A heading is a suggestion. The injected line that survives `observed` is one
+    // sentence long, and one sentence under a heading still reads as part of the document.
+    const said = whereSaid(code);
+    expect(said[0]).toContain("<observed>");
+    expect(said[said.length - 1]).toBe("</observed>");
   });
 
   test("a page with no address says the address was missing", () => {
@@ -1971,7 +2018,7 @@ describe("the message an agent actually reads", () => {
       "watch this",
       null,
     );
-    expect(said).toContain("In Code — /home/someone/colai");
+    expect(said).toContain("In Code — ~/colai");
     expect(said).not.toContain("340,128");
     expect(said).not.toContain("window 1920");
   });
@@ -5872,5 +5919,42 @@ describe("stopping an agent from the rail", () => {
     expect(rail, "and folded from the start, since nothing clears `hidden` now").toContain(
       'stop.dataset.folded = "true"',
     );
+  });
+});
+
+describe("a mark that means the whole desk says so before it is sent", () => {
+  test("a screenshot released without moving is the whole desktop", () => {
+    expect(detailOf({ tool: "screenshot" })).toBe(
+      "the whole desktop — every window on every screen",
+    );
+    expect(detailOf({ tool: "design" })).toBe("the whole desktop — every window on every screen");
+  });
+
+  test("the same tool with something marked is not", () => {
+    expect(detailOf({ tool: "screenshot", region: { frame: { x: 0, y: 0, w: 1, h: 1 } } })).toBe(
+      null,
+    );
+    expect(detailOf({ tool: "screenshot", points: [{ x: 0.1, y: 0.1 }] })).toBe(null);
+  });
+
+  test("a tool that never means the whole desk never says it does", () => {
+    // A click with the git tool means "this spot", and a desktop is not a repository.
+    expect(detailOf({ tool: "git" })).toBe(null);
+    expect(detailOf({ tool: "pointAt" })).toBe(null);
+  });
+
+  test("the page's rule is the rule Rust actually crops by", () => {
+    /*
+     * `wholeDisplay` restates `edges_of` in `colai_marks.rs`, because the composer has to
+     * know before the picture is taken. Two statements of one rule drift, so this reads
+     * the Rust and fails if its shape changes: the whole frame is returned exactly when
+     * there is no region and no first point.
+     */
+    const edges = marksSource.slice(
+      marksSource.indexOf("fn edges_of"),
+      marksSource.indexOf("fn edges_of") + 600,
+    );
+    expect(edges).toContain("if let Some(region) = &mark.region");
+    expect(edges).toContain("let first = mark.points.first()?;");
   });
 });
