@@ -270,6 +270,12 @@ function placeLibrary() {
  * `https:` only. `file:` would read the user's own disk into the page, and plain `http:`
  * announces every keystroke of a library search to anybody on the network between here
  * and the catalogue.
+ *
+ * *Which host* is no longer decided here. It is decided twice, above and below this: Rust
+ * drops any preview that is not on the host its catalogue keeps pictures on
+ * (`from_the_catalogue`), and the page's content policy names the same host, so the
+ * browser refuses one that somehow arrives anyway. This is left as the scheme check it
+ * always was — the third of three, and the cheapest.
  */
 function httpsOnly(address) {
   if (typeof address !== "string" || !address) return null;
@@ -295,8 +301,15 @@ function cardIn(card) {
    *
    * Loading it is an outbound request from the toolbar to a third party, and it hands
    * attacker-chosen bytes to whatever image decoder the user's WebKitGTK happens to be.
-   * `https:` only — `file:` would read the user's disk into the page, and plain `http:`
-   * announces every keystroke of a library search to anybody on the network.
+   * The address used to be taken as given apart from its scheme, which meant a catalogue
+   * that had been compromised could name any host at all and have every toolbar that
+   * opened this panel go and fetch from it — a beacon, carrying each user's address and
+   * browser fingerprint, chosen by somebody else.
+   *
+   * It cannot now: the host is pinned to the one its catalogue keeps pictures on, in Rust
+   * where the card is parsed and again in the content policy the page is served under.
+   * What is left is the request to that host, which is the cost of showing its pictures
+   * at all.
    */
   const preview = httpsOnly(card.preview);
   if (preview) {

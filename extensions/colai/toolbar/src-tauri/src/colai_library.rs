@@ -42,6 +42,19 @@ struct Library {
     /// What the search calls a component, and what it calls a design system.
     component: &'static str,
     theme: &'static str,
+    /// The only host this catalogue's pictures may be fetched from.
+    ///
+    /// A preview is an address chosen by a server, and the window puts it straight into
+    /// an `<img>` — so whatever host it names is a host the user's browser contacts, with
+    /// their address and their fingerprint, every time the panel opens. A catalogue that
+    /// was compromised, or simply mischievous, could name anything at all and use the
+    /// toolbar as a beacon.
+    ///
+    /// Pinned per catalogue rather than globally, so adding a second one means writing
+    /// down where its pictures live in the same breath as its name. The page's own
+    /// content policy lists the same hosts; this is the half that can say *why* a picture
+    /// was dropped instead of leaving a silent hole in the grid.
+    previews: &'static str,
 }
 
 /*
@@ -64,6 +77,10 @@ const LIBRARIES: &[Library] = &[Library {
     ],
     component: "component",
     theme: "theme",
+    // Measured against the live catalogue rather than guessed: every `previewUrl` it
+    // returns is on this host. The other hosts in its answers — Clerk, Supabase, a Google
+    // favicon service — belong to `authorImage`, which this toolbar has never read.
+    previews: "cdn.21st.dev",
 }];
 
 /// One thing somebody can choose, as the window needs to draw it.
@@ -138,7 +155,7 @@ pub(crate) async fn colai_library_search(
             }
             return Ok(Found {
                 library: Some(library.label.to_string()),
-                cards: cards_in(&answer.output),
+                cards: cards_in(&answer.output, library.previews),
                 connect: false,
                 trouble: answer.trouble,
             });
@@ -195,11 +212,38 @@ fn asked_for(kind: &str, query: &str, mine: bool) -> Value {
 /// panel on a conversation full of prompts. So: find the rows wherever they are, take a
 /// row only when it has the two things a card cannot be drawn without — something to call
 /// it and something to name it by — and drop the rest without inventing anything.
-fn cards_in(output: &Value) -> Vec<Card> {
+fn cards_in(output: &Value, previews: &str) -> Vec<Card> {
     let Some(rows) = rows_in(output) else {
         return Vec::new();
     };
-    rows.iter().filter_map(card_in).collect()
+    rows.iter()
+        .filter_map(|row| card_in(row, previews))
+        .collect()
+}
+
+/// Whether a picture may be fetched, given where the catalogue it came from keeps them.
+///
+/// `https:` and one host. The scheme was already checked in the page — `file:` would read
+/// the user's own disk into it, plain `http:` announces a library search to the network —
+/// and the host is the half that was missing: a catalogue naming `https://anywhere.example`
+/// got that address put into an `<img>`, and the browser went and fetched it.
+///
+/// Exact match, not a suffix. `cdn.21st.dev.evil.example` ends with the host and is not
+/// the host, and suffix matching is how that gets missed.
+fn from_the_catalogue(address: &str, host: &str) -> bool {
+    let Some(rest) = address.strip_prefix("https://") else {
+        return false;
+    };
+    // Everything up to the first `/`, `?` or `#` is the authority. A userinfo section
+    // before an `@` can spell one host and connect to another, so an address carrying one
+    // is refused rather than parsed.
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    if authority.contains('@') {
+        return false;
+    }
+    // A port is allowed to be absent and nothing else about it matters here.
+    let named = authority.split(':').next().unwrap_or_default();
+    named.eq_ignore_ascii_case(host)
 }
 
 /// Where the list is, in a reply that may be the list, may wrap it, and may have been
@@ -241,7 +285,7 @@ fn rows_in(output: &Value) -> Option<Vec<Value>> {
     None
 }
 
-fn card_in(row: &Value) -> Option<Card> {
+fn card_in(row: &Value, previews: &str) -> Option<Card> {
     let id = ["id", "demoId", "componentId"]
         .iter()
         .find_map(|key| row.get(key))
@@ -259,7 +303,8 @@ fn card_in(row: &Value) -> Option<Card> {
         preview: text_in(
             row,
             &["preview", "previewUrl", "image", "imageUrl", "thumbnail"],
-        ),
+        )
+        .filter(|address| from_the_catalogue(address, previews)),
         author: text_in(row, &["author", "username", "owner"]),
         url: text_in(row, &["url", "link", "pageUrl"]),
         install: text_in(row, &["install", "installCommand", "command"]),
@@ -288,6 +333,65 @@ fn text_in(row: &Value, keys: &[&str]) -> Option<String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_picture_from_the_catalogue_is_allowed() {
+        assert!(from_the_catalogue(
+            "https://cdn.21st.dev/user_x/pricing/default/preview.webp",
+            "cdn.21st.dev",
+        ));
+        // A port changes nothing about who is being contacted.
+        assert!(from_the_catalogue(
+            "https://cdn.21st.dev:443/a.png",
+            "cdn.21st.dev"
+        ));
+        assert!(from_the_catalogue(
+            "https://CDN.21ST.DEV/a.png",
+            "cdn.21st.dev"
+        ));
+    }
+
+    #[test]
+    fn a_picture_from_anywhere_else_is_not() {
+        // The whole point: a catalogue that was compromised could otherwise name any host
+        // it liked and have the toolbar fetch from it on every panel open.
+        assert!(!from_the_catalogue(
+            "https://evil.example/beacon.png",
+            "cdn.21st.dev"
+        ));
+        // Ends with the host and is not the host. Suffix matching is how this gets missed.
+        assert!(!from_the_catalogue(
+            "https://cdn.21st.dev.evil.example/a.png",
+            "cdn.21st.dev"
+        ));
+        // Userinfo can spell one host and connect to another.
+        assert!(!from_the_catalogue(
+            "https://cdn.21st.dev@evil.example/a.png",
+            "cdn.21st.dev"
+        ));
+        // The scheme still matters: `file:` would read the user's own disk into the page.
+        assert!(!from_the_catalogue(
+            "http://cdn.21st.dev/a.png",
+            "cdn.21st.dev"
+        ));
+        assert!(!from_the_catalogue("file:///etc/passwd", "cdn.21st.dev"));
+        assert!(!from_the_catalogue("", "cdn.21st.dev"));
+    }
+
+    #[test]
+    fn a_card_keeps_its_name_when_its_picture_is_refused() {
+        // Dropped, not the whole card: a component with no preview is still a component
+        // somebody can choose, and refusing the row would make a hostile preview into a
+        // way of hiding entries from the list.
+        let row = serde_json::json!({
+            "id": 1,
+            "name": "Pricing table",
+            "previewUrl": "https://evil.example/beacon.png",
+        });
+        let card = card_in(&row, "cdn.21st.dev").expect("the card survives");
+        assert_eq!(card.name, "Pricing table");
+        assert_eq!(card.preview, None);
+    }
+
     /// One search result in the shape the catalogue documents: lightweight metadata, a
     /// preview picture, and a numeric id that is a demo rather than a component.
     fn a_result() -> Value {
@@ -304,7 +408,7 @@ mod tests {
 
     #[test]
     fn a_search_result_becomes_a_card_without_its_code() {
-        let cards = cards_in(&json!([a_result()]));
+        let cards = cards_in(&json!([a_result()]), "example.test");
         assert_eq!(cards.len(), 1);
         assert_eq!(cards[0].id, "4821", "a numeric id is still an id");
         assert_eq!(cards[0].name, "Pricing table");
@@ -332,7 +436,7 @@ mod tests {
                 json!({ "content": [{ "type": "text", "text": "[{\"id\":4821,\"name\":\"Pricing table\"}]" }] }),
             ),
         ] {
-            assert_eq!(cards_in(&output).len(), 1, "{what}");
+            assert_eq!(cards_in(&output, "example.test").len(), 1, "{what}");
         }
     }
 
@@ -340,11 +444,11 @@ mod tests {
     fn a_row_that_cannot_be_drawn_is_dropped_rather_than_invented() {
         // Two things a card cannot exist without: something to ask for it by, and
         // something to call it. Anything else missing is a quieter card, not a wrong one.
-        assert!(cards_in(&json!([{ "name": "No id here" }])).is_empty());
-        assert!(cards_in(&json!([{ "id": 1 }])).is_empty());
-        assert!(cards_in(&json!([{ "id": 1, "name": "   " }])).is_empty());
-        assert!(cards_in(&json!({ "nothing": "recognisable" })).is_empty());
-        let sparse = cards_in(&json!([{ "id": "t1", "name": "Bare" }]));
+        assert!(cards_in(&json!([{ "name": "No id here" }]), "example.test").is_empty());
+        assert!(cards_in(&json!([{ "id": 1 }]), "example.test").is_empty());
+        assert!(cards_in(&json!([{ "id": 1, "name": "   " }]), "example.test").is_empty());
+        assert!(cards_in(&json!({ "nothing": "recognisable" }), "example.test").is_empty());
+        let sparse = cards_in(&json!([{ "id": "t1", "name": "Bare" }]), "example.test");
         assert_eq!(sparse.len(), 1);
         assert_eq!(sparse[0].preview, None);
     }
