@@ -56,7 +56,21 @@ function tracked() {
   return listed.stdout.split("\n").filter(Boolean);
 }
 
-rmSync(out, { recursive: true, force: true });
+/*
+ * Synced into place rather than recreated.
+ *
+ * This used to `rm -rf` the target first, which is fine the first time and wrong every
+ * time after: the export directory is a checkout of the published repository, and it holds
+ * `bin/`, `dist/`, `node_modules/` and a git history that wiping it destroys. Re-exporting
+ * before a publish then meant a four-minute release build and a reinstall, which is a good
+ * way to make somebody skip the re-export and publish a tree that has quietly drifted from
+ * the source people reviewed. That drift is the exact thing this script exists to prevent,
+ * so the script must be cheap to re-run.
+ *
+ * Tracked files are overwritten; anything else in the target is left alone. A tracked file
+ * that has disappeared from the source is reported rather than deleted — deleting inside
+ * somebody's checkout on the strength of a glob is not this script's call to make.
+ */
 mkdirSync(out, { recursive: true });
 
 // This script is the monorepo's tool for producing the export; it has no meaning inside
@@ -139,5 +153,19 @@ export default defineConfig({
 `,
 );
 
-console.log(`colai: exported ${files.length} tracked files to ${out}`);
+// What is in the export and no longer in the source. Named, not removed.
+const already = spawnSync("git", ["-C", out, "ls-files"], { encoding: "utf8" });
+if (already.status === 0) {
+  const keep = new Set([...files, ".gitignore", "vitest.config.ts", "package-lock.json"]);
+  const stale = already.stdout.split("\n").filter((file) => file && !keep.has(file));
+  if (stale.length > 0) {
+    console.warn(
+      `colai: ${stale.length} file(s) are tracked in the export and gone from the source:`,
+    );
+    for (const file of stale) console.warn(`         ${file}`);
+    console.warn("colai: remove them there if that is what you meant.");
+  }
+}
+
+console.log(`colai: synced ${files.length} tracked files into ${out}`);
 console.log("colai: next — npm install --legacy-peer-deps && npx vitest run");
